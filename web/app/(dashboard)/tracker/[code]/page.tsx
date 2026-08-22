@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -24,30 +24,64 @@ import { DayPicker, gulfToday } from "@/components/tracker/DayPicker";
 import { TargetProgress } from "@/components/tracker/TargetProgress";
 import type { MetricDef, OrgTracker, TrackerRow } from "@/lib/types";
 
+// Standard notation throughout: compact with maximumFractionDigits:0 renders
+// 1,490,000 as "AED 1M", a 33% understatement, and switching notation partway
+// down a column defeats tabular-nums alignment.
 const money = (n: number, currency: string) =>
   new Intl.NumberFormat("en-AE", {
     style: "currency",
     currency,
     maximumFractionDigits: 0,
-    notation: n >= 100_000 ? "compact" : "standard",
   }).format(n);
 
 const num = (n: number) => new Intl.NumberFormat("en-AE").format(n);
+
+/** "Fri 22 Aug" reads at a glance; "2026-08-22" wraps and doesn't. */
+const dayLabel = (iso: string) =>
+  new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
+
+// replace("Asia/","") is a no-op on Europe/London and leaves underscores in
+// Asia/Kuala_Lumpur; take the last segment instead.
+const tzLabel = (tz: string) => tz.split("/").pop()!.replace(/_/g, " ");
 
 const scoreTone = (s: number) => {
   if (s >= 75) return "text-emerald-500";
   if (s >= 40) return "text-amber-500";
   if (s > 0) return "text-rose-500";
-  return "text-muted-foreground/40";
+  return "text-muted-foreground";
 };
 
 type Filter = "all" | "working" | "dormant";
 
-function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) {
+function Stat({
+  label,
+  value,
+  suffix,
+  sub,
+  tone,
+}: {
+  label: string;
+  value: string;
+  /** The group page shows org score as "12.9 / 100"; the drill-down has to
+   *  agree on the denominator or the click loses its thread. */
+  suffix?: string;
+  sub?: string;
+  tone?: string;
+}) {
   return (
     <div className="rounded-lg border border-border/50 bg-card p-4">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={cn("mt-1 text-2xl font-bold tabular-nums", tone)}>{value}</p>
+      <p className={cn("mt-1 text-2xl font-bold tabular-nums", tone)}>
+        {value}
+        {suffix && (
+          <span className="ml-1 text-sm font-normal text-muted-foreground">{suffix}</span>
+        )}
+      </p>
       {sub && <p className="mt-0.5 text-[11px] text-muted-foreground">{sub}</p>}
     </div>
   );
@@ -99,7 +133,7 @@ function EntryEditor({
           <p className="text-sm font-medium">
             {row.name}
             <span className="ml-2 text-xs font-normal text-muted-foreground">
-              entered figures for {tracker.date}
+              entered figures for {dayLabel(tracker.date)}
             </span>
           </p>
           <button
@@ -177,7 +211,8 @@ export default function OrgTrackerPage() {
   const [showAll, setShowAll] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
 
-  useEffect(() => setEditing(null), [date]);
+  // filter too: a hidden row's editor would keep unsaved state alive offscreen
+  useEffect(() => setEditing(null), [date, filter]);
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["tracker-org", code, date],
@@ -190,29 +225,37 @@ export default function OrgTrackerPage() {
    * most of them are zero because nobody entered the manual half. Only columns
    * with something in them are shown; the rest stay one click away.
    */
-  const { columns, hiddenCount } = useMemo(() => {
-    if (!data) return { columns: [] as MetricDef[], hiddenCount: 0 };
+  const { columns, scorable, hiddenCount } = useMemo(() => {
+    if (!data) return { columns: [] as MetricDef[], scorable: [] as MetricDef[], hiddenCount: 0 };
+
     const relevant = data.metrics.filter(
       (m) => !m.reliableIn || m.reliableIn.includes(data.org.code)
     );
-    if (showAll) return { columns: relevant, hiddenCount: 0 };
-    const used = relevant.filter((m) => (data.totals[m.key] ?? 0) > 0);
-    return { columns: used, hiddenCount: relevant.length - used.length };
+    if (showAll) return { columns: relevant, scorable: relevant, hiddenCount: 0 };
+
+    const shown = relevant.filter(
+      (m) => m.source === "auto" || (data.totals[m.key] ?? 0) > 0
+    );
+    return { columns: shown, scorable: relevant, hiddenCount: relevant.length - shown.length };
   }, [data, showAll]);
 
   const rows = useMemo(() => {
     if (!data) return [];
+    const isWorking = (r: TrackerRow) => !r.dormant && r.accountStatus === "active";
     const filtered = data.rows.filter((r) =>
-      filter === "working" ? !r.dormant : filter === "dormant" ? r.dormant : true
+      filter === "working" ? isWorking(r) : filter === "dormant" ? r.dormant : true
     );
     // Highest score first: alphabetical buries both the top and the bottom of
     // the team, which are the two groups a manager is looking for.
     return [...filtered].sort(
-      (a, b) => b.score - a.score || a.name.localeCompare(b.name)
+      (a, b) =>
+        Number(a.dormant) - Number(b.dormant) ||
+        b.score - a.score ||
+        a.name.localeCompare(b.name)
     );
   }, [data, filter]);
 
-  const currency = data?.org.currency ?? "AED";
+  const currency = data?.org.currency || "AED";
   // name + score + metric columns + edit
   const colSpan = columns.length + 3;
 
@@ -233,18 +276,18 @@ export default function OrgTrackerPage() {
             All organisations
           </Link>
           <h2 className="text-2xl font-bold text-foreground">
-            {data?.org.name ?? code} — Daily Tracker
+            {data?.org.name ?? <Skeleton className="inline-block h-7 w-44 align-middle" />} — Daily Tracker
           </h2>
           {data && (
             <p className="mt-1 text-sm text-muted-foreground">
               {data.counts.working} working · {data.counts.dormant} dormant
               {data.counts.deactivated > 0 && ` · ${data.counts.deactivated} deactivated`}
-              {" · days cut in "}
-              {data.org.timezone.replace("Asia/", "")} time
+              {" · "}
+              {dayLabel(date)} in {tzLabel(data.org.timezone)} time
             </p>
           )}
         </div>
-        <DayPicker value={date} onChange={setDate} />
+        <DayPicker value={date} timezone={data?.org.timezone} onChange={setDate} />
       </motion.div>
 
       {isLoading && (
@@ -278,7 +321,8 @@ export default function OrgTrackerPage() {
             <Stat
               label="Team score"
               value={`${data.teamScore}`}
-              sub={`mean achievement across targets`}
+              suffix="/100"
+              sub={`${data.counts.reported} of ${data.counts.total} reps filed figures`}
               tone={scoreTone(data.teamScore)}
             />
             <Stat
@@ -315,8 +359,11 @@ export default function OrgTrackerPage() {
                 </p>
               </CardHeader>
               <CardContent className="pt-0">
+                {/* scorable, not columns: columns drops anything with a zero
+                    total, which would delete every 100%-missed target from the
+                    card whose whole job is showing misses. */}
                 <TargetProgress
-                  metrics={columns.length ? columns : data.metrics}
+                  metrics={scorable}
                   totals={data.totals}
                   targets={data.targets}
                   achieved={data.achieved}
@@ -405,7 +452,15 @@ export default function OrgTrackerPage() {
                     No reps match this filter.
                   </p>
                 ) : (
-                  <div className="overflow-x-auto">
+                  <div
+                    // Firefox and Safari cannot scroll an overflow container by
+                    // keyboard unless it is focusable, and with every column
+                    // shown the middle ones hold nothing focusable at all.
+                    tabIndex={0}
+                    role="region"
+                    aria-label="Rep breakdown, scrolls horizontally"
+                    className="overflow-x-auto overscroll-x-contain focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  >
                     <table className="w-full border-separate border-spacing-0 text-sm">
                       <thead>
                         <tr>
@@ -414,7 +469,7 @@ export default function OrgTrackerPage() {
                               the right edge where it was never seen. */}
                           <th
                             scope="col"
-                            className="sticky left-0 z-20 w-44 border-b border-border/40 bg-card pb-2 pr-3 text-left font-medium text-muted-foreground"
+                            className="sticky left-0 z-20 w-44 max-w-44 border-b border-border/40 bg-card pb-2 pr-3 text-left font-medium text-muted-foreground"
                           >
                             Sales Rep
                           </th>
@@ -450,15 +505,28 @@ export default function OrgTrackerPage() {
                       </thead>
 
                       <tbody>
-                        {rows.map((r) => [
-                          <tr
-                            key={r.userId}
+                        {rows.map((r) => (
+                          <Fragment key={r.userId}>
+                            <tr
                             className={cn(
                               "group transition-colors hover:bg-muted/30",
-                              r.dormant && "opacity-60"
+                              // No opacity here: it multiplies with every
+                              // per-cell alpha, so the reps most worth noticing
+                              // become the least legible. The amber rule on the
+                              // name cell carries the signal instead.
+                              r.dormant && "bg-amber-500/[0.03]"
                             )}
                           >
-                            <td className="sticky left-0 z-10 w-44 border-b border-border/20 bg-card py-2 pr-3">
+                            <th
+                              scope="row"
+                              className={cn(
+                                // max-w matters: the table is auto-layout, so a
+                                // long name's min-content would push this cell
+                                // past 176px and slide under the pinned Score.
+                                "sticky left-0 z-10 w-44 max-w-44 border-b border-border/20 bg-card py-2 pr-3 text-left font-normal transition-colors group-hover:bg-muted/30",
+                                r.dormant && "border-l-2 border-l-amber-500/40"
+                              )}
+                            >
                               <Link
                                 href={`/tracker/${code}/${r.userId}`}
                                 className="block truncate font-medium transition-colors hover:text-primary hover:underline"
@@ -466,30 +534,48 @@ export default function OrgTrackerPage() {
                               >
                                 {r.name}
                               </Link>
-                              {r.dormant ? (
+                              {r.dormant && (
                                 <span
-                                  className="mt-0.5 inline-flex items-center gap-1 text-[10px] text-amber-500"
+                                  className="mt-0.5 flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-500"
                                   title={
                                     r.lastActiveOn
                                       ? `Last lead activity ${r.lastActiveOn}`
                                       : "No lead activity in the last 90 days"
                                   }
                                 >
-                                  <MoonStar className="h-2.5 w-2.5" />
+                                  <MoonStar className="h-2.5 w-2.5 shrink-0" />
                                   {r.daysSinceActive === null
                                     ? "inactive 90+d"
                                     : `inactive ${r.daysSinceActive}d`}
                                 </span>
-                              ) : (
-                                r.remarks && (
-                                  <span className="block truncate text-[10px] text-muted-foreground">
-                                    {r.remarks}
-                                  </span>
-                                )
                               )}
-                            </td>
 
-                            <td className="sticky left-44 z-10 w-20 border-b border-r border-border/20 bg-card py-2 pl-3 pr-3 text-right">
+                              {r.accountStatus !== "active" && (
+                                <span className="mt-0.5 block text-[10px] text-muted-foreground">
+                                  deactivated
+                                </span>
+                              )}
+
+                              {/* Shown for dormant reps too — a rep who went
+                                  quiet is exactly who has a note worth reading,
+                                  and actionRequired was being captured at 500
+                                  characters and rendered nowhere at all. */}
+                              {r.remarks && (
+                                <span className="mt-0.5 block truncate text-[10px] text-muted-foreground" title={r.remarks}>
+                                  {r.remarks}
+                                </span>
+                              )}
+                              {r.actionRequired && (
+                                <span
+                                  className="mt-0.5 block truncate text-[10px] text-amber-600 dark:text-amber-500"
+                                  title={r.actionRequired}
+                                >
+                                  ⚑ {r.actionRequired}
+                                </span>
+                              )}
+                            </th>
+
+                            <td className="sticky left-44 z-10 w-20 border-b border-r border-border/20 bg-card py-2 pl-3 pr-3 text-right transition-colors group-hover:bg-muted/30">
                               <span
                                 className={cn(
                                   "font-semibold tabular-nums",
@@ -507,7 +593,7 @@ export default function OrgTrackerPage() {
                                   key={m.key}
                                   className={cn(
                                     "whitespace-nowrap border-b border-border/20 py-2 pl-4 text-right tabular-nums",
-                                    !v && "text-muted-foreground/30"
+                                    !v && "text-muted-foreground/70"
                                   )}
                                 >
                                   {m.key === "convRate"
@@ -526,22 +612,22 @@ export default function OrgTrackerPage() {
                                 }
                                 aria-label={`Enter manual figures for ${r.name}`}
                                 aria-expanded={editing === r.userId}
-                                className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus:opacity-100 group-hover:opacity-100"
+                                className="rounded p-1 text-muted-foreground transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 md:opacity-0 md:group-hover:opacity-100"
                               >
                                 <Pencil className="h-3.5 w-3.5" />
                               </button>
                             </td>
-                          </tr>,
-                          editing === r.userId ? (
-                            <EntryEditor
-                              key={`${r.userId}-edit`}
-                              row={r}
-                              tracker={data}
-                              colSpan={colSpan}
-                              onClose={() => setEditing(null)}
-                            />
-                          ) : null,
-                        ])}
+                          </tr>
+                            {editing === r.userId && (
+                              <EntryEditor
+                                row={r}
+                                tracker={data}
+                                colSpan={colSpan}
+                                onClose={() => setEditing(null)}
+                              />
+                            )}
+                          </Fragment>
+                        ))}
                       </tbody>
                     </table>
                   </div>

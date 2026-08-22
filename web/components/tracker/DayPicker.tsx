@@ -3,9 +3,20 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-/** Gulf-time today, matching the boundary the backend and report picker use. */
-export const gulfToday = () =>
-  new Date(Date.now() + 4 * 60 * 60_000).toISOString().slice(0, 10);
+/**
+ * Today in a given org's timezone.
+ *
+ * en-CA is the shortest route to a real YYYY-MM-DD from Intl. This has to be
+ * per-org: Dubai and Kolkata are 90 minutes apart, so between 20:00 and 21:30
+ * UTC it is already tomorrow in Bangalore. Hardcoding Gulf time meant the
+ * Banglore page opened on the wrong day during that window — and, worse, the
+ * max bound below then disabled the arrow that would have reached the right one.
+ */
+export const todayIn = (timezone = "Asia/Dubai") =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date());
+
+/** Gulf-time today, for views that span all three orgs. */
+export const gulfToday = () => todayIn("Asia/Dubai");
 
 const shiftDay = (date: string, days: number) =>
   new Date(new Date(`${date}T12:00:00Z`).getTime() + days * 86_400_000)
@@ -14,12 +25,15 @@ const shiftDay = (date: string, days: number) =>
 
 export function DayPicker({
   value,
+  timezone,
   onChange,
 }: {
   value: string;
+  /** The org's zone, so "today" and the max bound match what the org sees. */
+  timezone?: string;
   onChange: (date: string) => void;
 }) {
-  const today = gulfToday();
+  const today = todayIn(timezone);
   const isToday = value === today;
 
   return (

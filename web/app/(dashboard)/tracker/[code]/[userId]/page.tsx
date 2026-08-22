@@ -52,7 +52,7 @@ const scoreTone = (s: number) => {
   if (s >= 75) return "text-emerald-500";
   if (s >= 40) return "text-amber-500";
   if (s > 0) return "text-rose-500";
-  return "text-muted-foreground/40";
+  return "text-muted-foreground";
 };
 
 function Stat({
@@ -93,7 +93,7 @@ export default function UserTrackerPage() {
   /**
    * Which columns to show.
    *
-   * The catalogue has nineteen metrics and most reps only ever move four or
+   * The catalogue has seventeen metrics and most reps only ever move four or
    * five of them, so rendering all of them produces a wall of zeros that hides
    * the numbers that did move. Only columns with something in them are shown,
    * with the rest one click away.
@@ -381,13 +381,13 @@ export default function UserTrackerPage() {
                           <tr
                             key={r.date}
                             className={cn(
-                              "border-b border-border/20 transition-colors hover:bg-muted/30",
+                              "group border-b border-border/20 transition-colors hover:bg-muted/30",
                               // Weekends explain most zero rows, so dim them
                               // rather than leaving them looking like misses.
                               isWeekend(r.date) && "bg-muted/20"
                             )}
                           >
-                            <td className="sticky left-0 z-10 whitespace-nowrap bg-card py-2 pr-4">
+                            <td className="sticky left-0 z-10 whitespace-nowrap bg-card py-2 pr-4 transition-colors group-hover:bg-muted/30">
                               <span className="font-medium">{dayLabel(r.date)}</span>
                               {r.remarks && (
                                 <span className="ml-2 text-[10px] text-muted-foreground">
@@ -402,7 +402,7 @@ export default function UserTrackerPage() {
                                   key={m.key}
                                   className={cn(
                                     "py-2 pl-4 text-right tabular-nums",
-                                    !v && "text-muted-foreground/30"
+                                    !v && "text-muted-foreground/70"
                                   )}
                                 >
                                   {m.key === "convRate"

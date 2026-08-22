@@ -3,18 +3,29 @@
 import { cn } from "@/lib/utils";
 import type { MetricDef } from "@/lib/types";
 
+// Standard notation: compact with maximumFractionDigits:0 renders 1,490,000 as
+// "1M", and the 100k threshold fell between a typical total and its target, so
+// a single row read "AED 120K / AED 90,000".
 const money = (n: number, currency: string) =>
   new Intl.NumberFormat("en-AE", {
     style: "currency",
     currency,
     maximumFractionDigits: 0,
-    notation: n >= 100_000 ? "compact" : "standard",
   }).format(n);
 
 const num = (n: number) => new Intl.NumberFormat("en-AE").format(n);
 
 const tone = (pct: number) =>
   pct >= 100 ? "bg-emerald-500" : pct >= 50 ? "bg-amber-500" : "bg-rose-500";
+
+// Text sits at 11px, so it is held to 4.5:1 — the 500 weights miss that on a
+// light card (emerald 2.54:1, amber 2.15:1). The 600/700 ramp passes.
+const textTone = (pct: number) =>
+  pct >= 100
+    ? "text-emerald-700 dark:text-emerald-400"
+    : pct >= 50
+      ? "text-amber-700 dark:text-amber-400"
+      : "text-rose-700 dark:text-rose-400";
 
 /**
  * Team total against target, per metric.
@@ -87,11 +98,7 @@ export function TargetProgress({
               <span
                 className={cn(
                   "w-12 shrink-0 text-right text-[11px] font-medium tabular-nums",
-                  pct >= 100
-                    ? "text-emerald-500"
-                    : pct >= 50
-                      ? "text-amber-500"
-                      : "text-rose-500"
+                  textTone(pct)
                 )}
               >
                 {pct}%
