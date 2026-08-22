@@ -1,0 +1,39 @@
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import morgan from "morgan";
+import { env } from "./config/env.js";
+import { connectDB } from "./config/db.js";
+import routes from "./routes/index.js";
+import { errorHandler, notFound } from "./middleware/errorHandler.js";
+
+const app = express();
+
+app.set("trust proxy", 1); // behind nginx — needed for real client IPs in the audit log
+
+app.use(helmet());
+app.use(
+  cors({
+    origin: env.CLIENT_URL.split(",").map((s) => s.trim()),
+    credentials: true,
+  })
+);
+app.use(express.json({ limit: "1mb" }));
+app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
+
+// Same prefix as the three CRMs, so nginx config and client code stay uniform.
+app.use("/api/v1", routes);
+
+app.use(notFound);
+app.use(errorHandler);
+
+const start = async () => {
+  await connectDB();
+  app.listen(Number(env.PORT), () => {
+    console.log(`Root CRM API listening on :${env.PORT} (${env.NODE_ENV})`);
+  });
+};
+
+start();
+
+export default app;
