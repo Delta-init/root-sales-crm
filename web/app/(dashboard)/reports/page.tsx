@@ -9,7 +9,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
-import { RangePicker, rangeFrom, type RangeKey } from "@/components/reports/RangePicker";
+import {
+  RangePicker,
+  resolveRange,
+  granularityFor,
+  REPORT_TZ_LABEL,
+  type Range,
+  type RangeKey,
+} from "@/components/reports/RangePicker";
 import { LeadsTimeline } from "@/components/reports/LeadsTimeline";
 import type { GroupOverview, GroupSources, GroupTimeline, ReportFailure } from "@/lib/types";
 
@@ -58,27 +65,45 @@ export default function ReportsPage() {
   // a 12-month default would render both as flat lines next to Delta's 13
   // months and read as underperformance rather than a shorter history.
   const [range, setRange] = useState<RangeKey>("90d");
-  const from = rangeFrom(range);
-  const qs = from ? `?from=${from}` : "";
+  const [custom, setCustom] = useState<Range>({});
+
+  const resolved = resolveRange(range, custom);
+  const from = resolved.from;
+  const granularity = granularityFor(range, resolved);
+
+  const qs = (() => {
+    const p = new URLSearchParams();
+    if (resolved.from) p.set("from", resolved.from);
+    if (resolved.to) p.set("to", resolved.to);
+    return p.toString();
+  })();
+
+  // Both range and custom sit in the key: two custom ranges are the same
+  // RangeKey, so keying on `range` alone would serve stale data on the second.
+  const key = [range, resolved.from ?? "", resolved.to ?? ""];
+
+  const withQs = (path: string, extra?: string) => {
+    const all = [qs, extra].filter(Boolean).join("&");
+    return all ? `${path}?${all}` : path;
+  };
 
   const overview = useQuery({
-    queryKey: ["report-overview", range],
-    queryFn: async () => (await api.get(`/reports/overview${qs}`)).data.data as GroupOverview,
+    queryKey: ["report-overview", ...key],
+    queryFn: async () =>
+      (await api.get(withQs("/reports/overview"))).data.data as GroupOverview,
   });
 
   const timeline = useQuery({
-    queryKey: ["report-timeline", range],
+    queryKey: ["report-timeline", ...key, granularity],
     queryFn: async () =>
-      (
-        await api.get(
-          `/reports/timeline${qs}${qs ? "&" : "?"}granularity=${range === "30d" ? "day" : "month"}`
-        )
-      ).data.data as GroupTimeline,
+      (await api.get(withQs("/reports/timeline", `granularity=${granularity}`)))
+        .data.data as GroupTimeline,
   });
 
   const sources = useQuery({
-    queryKey: ["report-sources", range],
-    queryFn: async () => (await api.get(`/reports/sources${qs}`)).data.data as GroupSources,
+    queryKey: ["report-sources", ...key],
+    queryFn: async () =>
+      (await api.get(withQs("/reports/sources"))).data.data as GroupSources,
   });
 
   const d = overview.data;
@@ -102,10 +127,18 @@ export default function ReportsPage() {
           <h2 className="text-2xl font-bold text-foreground">Group Report</h2>
           <p className="mt-1 text-muted-foreground">
             Delta, Banglore and Draw together
-            {d ? ` — money shown in ${d.baseCurrency}` : ""}.
+            {d ? ` — money shown in ${d.baseCurrency}` : ""}. Days are cut in{" "}
+            {REPORT_TZ_LABEL}.
           </p>
         </div>
-        <RangePicker value={range} onChange={setRange} />
+        <RangePicker
+          value={range}
+          custom={custom}
+          onChange={(k, c) => {
+            setRange(k);
+            if (c) setCustom(c);
+          }}
+        />
       </motion.div>
 
       {d && <Failures failures={d.failures} />}
