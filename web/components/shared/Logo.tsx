@@ -27,7 +27,7 @@ export function Logo({ width = 150, className }: { width?: number; className?: s
         width={width}
         height={height}
         priority
-        className={cn(shared, "block dark:hidden")}
+        className={cn(shared, "block scale-[.6] dark:hidden")}
       />
       <Image
         src="/logo-dark.png"
@@ -36,7 +36,7 @@ export function Logo({ width = 150, className }: { width?: number; className?: s
         width={width}
         height={height}
         priority
-        className={cn(shared, "hidden dark:block")}
+        className={cn(shared, "hidden  scale-[.6]  dark:block")}
       />
     </span>
   );
