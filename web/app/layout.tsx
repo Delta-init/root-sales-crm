@@ -15,7 +15,9 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#3b82f6",
+  // Matches the dark --background, so mobile browser chrome blends with the
+  // app rather than framing it in brand blue.
+  themeColor: "#020817",
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
@@ -27,7 +29,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={inter.className}>
         <ThemeProvider
           attribute="class"
-          defaultTheme="light"
+          // Dark on first visit regardless of the visitor's OS setting.
+          // enableSystem stays on so the toggle's System option still resolves;
+          // it only decides whether "system" is *available*, not whether it is
+          // the default.
+          defaultTheme="dark"
           enableSystem
           disableTransitionOnChange
         >
