@@ -100,7 +100,7 @@ export function LoginForm() {
                 <Input
                   id="email"
                   type="email"
-                  placeholder="root@deltainstitutions.com"
+                  placeholder="email"
                   autoComplete="email"
                   autoFocus
                   {...register("email")}
