@@ -82,6 +82,24 @@ export interface ISsoToken extends Document {
   issuedToIp: string;
 }
 
+// ─── Daily tracker ────────────────────────────────────────────────────────────
+export interface ITrackerTarget extends Document {
+  org: OrgCode;
+  metrics: Map<string, number>;
+  updatedBy: Types.ObjectId | null;
+}
+
+export interface IDailyEntry extends Document {
+  org: OrgCode;
+  userId: string;
+  userName: string;
+  date: string;
+  metrics: Map<string, number>;
+  remarks: string;
+  actionRequired: string;
+  updatedBy: Types.ObjectId | null;
+}
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export interface JwtPayload {
   adminId: string;

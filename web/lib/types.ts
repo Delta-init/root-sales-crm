@@ -75,3 +75,74 @@ export interface GroupSources {
   }[];
   failures: ReportFailure[];
 }
+
+// ─── Daily tracker ────────────────────────────────────────────────────────────
+export interface MetricDef {
+  key: string;
+  label: string;
+  group: string;
+  source: "auto" | "manual";
+  money?: boolean;
+  computed?: boolean;
+  snapshot?: boolean;
+  reliableIn?: string[];
+  note?: string;
+}
+
+export interface TrackerRow {
+  userId: string;
+  name: string;
+  email: string;
+  values: Record<string, number>;
+  remarks: string;
+  actionRequired: string;
+  score: number;
+}
+
+export interface OrgTracker {
+  org: { code: OrgCode; name: string; accent: string; currency: string; timezone: string };
+  date: string;
+  metrics: MetricDef[];
+  targets: Record<string, number>;
+  rows: TrackerRow[];
+  totals: Record<string, number>;
+  achieved: Record<string, number | null>;
+  teamScore: number;
+  callsUnattributed: number;
+}
+
+export interface GroupTracker {
+  date: string;
+  metrics: MetricDef[];
+  orgs: {
+    org: { code: OrgCode; name: string; accent: string; currency: string; timezone: string };
+    targets: Record<string, number>;
+    totals: Record<string, number>;
+    achieved: Record<string, number | null>;
+    teamScore: number;
+    repCount: number;
+    callsUnattributed: number;
+  }[];
+  failures: ReportFailure[];
+}
+
+export interface UserTrackerDay {
+  date: string;
+  values: Record<string, number>;
+  remarks: string;
+  actionRequired: string;
+  score: number;
+}
+
+export interface UserTracker {
+  org: { code: OrgCode; name: string; accent: string; currency: string; timezone: string };
+  user: { userId: string; name: string; email: string; status: string };
+  from: string;
+  to: string;
+  metrics: MetricDef[];
+  targets: Record<string, number>;
+  rows: UserTrackerDay[];
+  totals: Record<string, number>;
+  averageScore: number;
+  activeDays: number;
+}

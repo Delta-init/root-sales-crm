@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, LayoutGrid, LogOut, User } from "lucide-react";
+import { BarChart3, ClipboardList, LayoutGrid, LogOut, User } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -20,6 +20,7 @@ import { cn, getInitials } from "@/lib/utils";
 const NAV = [
   { href: "/dashboard", label: "Organisations", icon: LayoutGrid },
   { href: "/reports", label: "Group report", icon: BarChart3 },
+  { href: "/tracker", label: "Daily tracker", icon: ClipboardList },
 ];
 
 export function Header() {
