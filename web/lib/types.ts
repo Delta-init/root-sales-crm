@@ -93,10 +93,21 @@ export interface TrackerRow {
   userId: string;
   name: string;
   email: string;
+  accountStatus: string;
   values: Record<string, number>;
   remarks: string;
   actionRequired: string;
   score: number;
+  lastActiveOn: string | null;
+  daysSinceActive: number | null;
+  dormant: boolean;
+}
+
+export interface TrackerCounts {
+  total: number;
+  working: number;
+  dormant: number;
+  deactivated: number;
 }
 
 export interface OrgTracker {
@@ -109,6 +120,8 @@ export interface OrgTracker {
   achieved: Record<string, number | null>;
   teamScore: number;
   callsUnattributed: number;
+  dormantAfterDays: number;
+  counts: TrackerCounts;
 }
 
 export interface GroupTracker {
@@ -122,6 +135,7 @@ export interface GroupTracker {
     teamScore: number;
     repCount: number;
     callsUnattributed: number;
+    counts: TrackerCounts;
   }[];
   failures: ReportFailure[];
 }

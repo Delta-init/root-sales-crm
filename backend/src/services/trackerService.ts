@@ -37,10 +37,15 @@ interface RepRow {
   userId: string;
   name: string;
   email: string;
+  /** The account's own state in the CRM, distinct from being merely quiet. */
+  accountStatus: string;
   values: Record<string, number>;
   remarks: string;
   actionRequired: string;
   score: number;
+  lastActiveOn: string | null;
+  daysSinceActive: number | null;
+  dormant: boolean;
 }
 
 /** Per-rep auto metrics for one org on one day, in that org's timezone. */
@@ -199,18 +204,63 @@ const autoMetricsFor = async (src: CrmSource, date: string) => {
   return { perUser: out, callsUnattributed };
 };
 
-/** All active users in an org — the tracker lists everyone, not just closers. */
-const activeUsers = async (src: CrmSource) => {
+/**
+ * Everyone in the org, not only the people who did something today.
+ *
+ * Deactivated accounts are kept rather than filtered out: a rep who stopped
+ * appearing is exactly what a manager needs to see, and silently dropping them
+ * makes the team look smaller and healthier than it is.
+ */
+const allUsers = async (src: CrmSource) => {
   const users = await src.conn
     .collection("users")
-    .find({ status: "active" }, { projection: { name: 1, email: 1 } })
+    .find({}, { projection: { name: 1, email: 1, status: 1 } })
     .sort({ name: 1 })
     .toArray();
   return users.map((u) => ({
     userId: String(u._id),
     name: (u.name as string) ?? "(unnamed)",
     email: (u.email as string) ?? "",
+    accountStatus: (u.status as string) ?? "active",
   }));
+};
+
+/** A rep with no lead activity for this many days is treated as dormant. */
+export const DORMANT_AFTER_DAYS = 7;
+
+/**
+ * When each rep last touched a lead, as of the day being viewed.
+ *
+ * Bounded to a 90-day lookback: the question is "are they still working", and
+ * unwinding every activity log ever written to answer it would scan the whole
+ * collection. Anyone quiet for longer than the window is simply reported as
+ * beyond it, which is the same conclusion.
+ */
+const LOOKBACK_DAYS = 90;
+
+const lastActivityByUser = async (src: CrmSource, asOf: Date) => {
+  const since = new Date(asOf.getTime() - LOOKBACK_DAYS * 86_400_000);
+
+  const rows = await src.conn
+    .collection("leads")
+    .aggregate([
+      { $unwind: "$activityLogs" },
+      {
+        $match: {
+          "activityLogs.performedBy": { $ne: null },
+          "activityLogs.createdAt": { $gte: since, $lt: asOf },
+        },
+      },
+      {
+        $group: {
+          _id: "$activityLogs.performedBy",
+          last: { $max: "$activityLogs.createdAt" },
+        },
+      },
+    ])
+    .toArray();
+
+  return new Map(rows.map((r) => [String(r._id), r.last as Date]));
 };
 
 export const getTargets = async (org: OrgCode): Promise<Record<string, number>> => {
@@ -245,11 +295,16 @@ export const orgTracker = async (code: string, date: string) => {
     );
   }
 
-  const [autoResult, users, targets, entries] = await Promise.all([
+  // Dormancy is judged as of the day being viewed, not today: opening the
+  // 10th of last month should show who was quiet then, not who is quiet now.
+  const asOf = dayWindow(date, src.org.timezone).end;
+
+  const [autoResult, users, targets, entries, lastActive] = await Promise.all([
     autoMetricsFor(src, date),
-    activeUsers(src),
+    allUsers(src),
     getTargets(code as OrgCode),
     DailyEntry.find({ org: code, date }),
+    lastActivityByUser(src, asOf),
   ]);
 
   const entryBy = new Map(entries.map((e) => [e.userId, e]));
@@ -268,12 +323,22 @@ export const orgTracker = async (code: string, date: string) => {
       ? Math.round((values.closings / values.leadsContacted) * 1000) / 10
       : 0;
 
+    const last = lastActive.get(u.userId) ?? null;
+    const daysSinceActive = last
+      ? Math.floor((asOf.getTime() - last.getTime()) / 86_400_000)
+      : null;
+
     return {
       ...u,
       values,
       remarks: entry?.remarks ?? "",
       actionRequired: entry?.actionRequired ?? "",
       score: dailyScore(values, targets),
+      lastActiveOn: last ? last.toISOString().slice(0, 10) : null,
+      daysSinceActive,
+      // null means nothing in the whole 90-day lookback, which is dormant by
+      // any reading — not "unknown".
+      dormant: daysSinceActive === null || daysSinceActive >= DORMANT_AFTER_DAYS,
     };
   });
 
@@ -306,6 +371,13 @@ export const orgTracker = async (code: string, date: string) => {
     achieved,
     teamScore: dailyScore(totals, targets),
     callsUnattributed: autoResult.callsUnattributed,
+    dormantAfterDays: DORMANT_AFTER_DAYS,
+    counts: {
+      total: rows.length,
+      working: rows.filter((r) => !r.dormant && r.accountStatus === "active").length,
+      dormant: rows.filter((r) => r.dormant && r.accountStatus === "active").length,
+      deactivated: rows.filter((r) => r.accountStatus !== "active").length,
+    },
   };
 };
 
@@ -325,6 +397,7 @@ export const groupTracker = async (date: string) => {
           teamScore: t.teamScore,
           repCount: t.rows.length,
           callsUnattributed: t.callsUnattributed,
+          counts: t.counts,
         };
       } catch (error) {
         failures.push({

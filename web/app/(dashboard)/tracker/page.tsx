@@ -132,7 +132,10 @@ export default function TrackerPage() {
                       </span>
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Daily score · {o.repCount} active reps
+                      {o.counts.working} of {o.counts.total} reps working
+                      {o.counts.dormant > 0 && (
+                        <span className="text-amber-500"> · {o.counts.dormant} dormant</span>
+                      )}
                     </p>
 
                     <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-muted">
