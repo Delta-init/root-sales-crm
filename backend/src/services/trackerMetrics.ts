@@ -124,22 +124,47 @@ export const DEFAULT_TARGETS: Record<string, number> = {
 /**
  * Daily score: the mean of achieved percentages.
  *
- * Only metrics with a target above zero count. A metric with no target has no
- * notion of achievement, and including it as 0% would punish a team for a
- * target nobody set. Each metric is capped at 100 before averaging so one
- * enormous day on a single line cannot mask everything else being missed.
+ * `keys` decides WHAT is averaged, and getting it wrong is what made this
+ * meaningless before. Averaging over every target meant the ten manual metrics
+ * nobody had entered counted as 0%, capping any rep at 37.5 — below the 40
+ * threshold the UI paints amber at, so every rep rendered red every day
+ * regardless of how they worked.
+ *
+ * A metric is only averaged when there is something to average: an auto metric
+ * always counts, because a zero there is a real result; a manual metric counts
+ * only once someone has filed a figure for that day, because a zero there is
+ * absent data, not a bad day.
  */
 export const dailyScore = (
   values: Record<string, number>,
-  targets: Record<string, number>
+  targets: Record<string, number>,
+  keys?: string[]
 ): number => {
-  const pcts = Object.entries(targets)
-    .filter(([, t]) => t > 0)
-    .map(([k, t]) => Math.min(100, ((values[k] ?? 0) / t) * 100));
+  const scored = (keys ?? Object.keys(targets)).filter((k) => (targets[k] ?? 0) > 0);
+
+  const pcts = scored.map((k) =>
+    // Capped so one enormous line cannot mask everything else being missed.
+    Math.min(100, ((values[k] ?? 0) / targets[k]) * 100)
+  );
 
   if (!pcts.length) return 0;
   return Math.round((pcts.reduce((a, b) => a + b, 0) / pcts.length) * 10) / 10;
 };
+
+/**
+ * Which metrics a given org can be scored on at all.
+ *
+ * Excludes metrics this org does not capture — scoring Delta on calls it never
+ * logs would hold a permanent zero against it.
+ */
+export const scorableKeys = (orgCode: string): string[] =>
+  METRICS.filter(
+    (m) => m.source === "auto" && (!m.reliableIn || m.reliableIn.includes(orgCode))
+  ).map((m) => m.key);
+
+/** Manual keys a rep actually filed a figure for on the day. */
+export const reportedManualKeys = (values: Record<string, number>): string[] =>
+  MANUAL_KEYS.filter((k) => (values[k] ?? 0) > 0);
 
 export const achievedPct = (value: number, target: number): number | null => {
   if (!target || target <= 0) return null;

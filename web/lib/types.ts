@@ -98,6 +98,7 @@ export interface TrackerRow {
   remarks: string;
   actionRequired: string;
   score: number;
+  reportedManual: boolean;
   lastActiveOn: string | null;
   daysSinceActive: number | null;
   dormant: boolean;
@@ -107,6 +108,7 @@ export interface TrackerCounts {
   total: number;
   working: number;
   dormant: number;
+  reported: number;
   deactivated: number;
 }
 
@@ -121,6 +123,7 @@ export interface OrgTracker {
   teamScore: number;
   callsUnattributed: number;
   dormantAfterDays: number;
+  repTargets: Record<string, number>;
   counts: TrackerCounts;
 }
 

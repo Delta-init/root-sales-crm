@@ -8,6 +8,8 @@ import {
   DEFAULT_TARGETS,
   dailyScore,
   achievedPct,
+  scorableKeys,
+  reportedManualKeys,
 } from "./trackerMetrics.js";
 import type { OrgCode } from "../types/index.js";
 
@@ -43,6 +45,8 @@ interface RepRow {
   remarks: string;
   actionRequired: string;
   score: number;
+  /** Whether anyone filed the manual half for this rep today. */
+  reportedManual: boolean;
   lastActiveOn: string | null;
   daysSinceActive: number | null;
   dormant: boolean;
@@ -263,6 +267,23 @@ const lastActivityByUser = async (src: CrmSource, asOf: Date) => {
   return new Map(rows.map((r) => [String(r._id), r.last as Date]));
 };
 
+/**
+ * A rep's share of the desk's daily target.
+ *
+ * Ratios are passed through untouched: dividing a conversion rate by headcount
+ * would ask each rep to convert at a twenty-fifth of the team's rate.
+ */
+const repTargetsFor = (
+  targets: Record<string, number>,
+  working: number
+): Record<string, number> =>
+  Object.fromEntries(
+    Object.entries(targets).map(([k, v]) => [
+      k,
+      k === "convRate" ? v : v / Math.max(1, working),
+    ])
+  );
+
 export const getTargets = async (org: OrgCode): Promise<Record<string, number>> => {
   const doc = await TrackerTarget.findOne({ org });
   if (!doc) return { ...DEFAULT_TARGETS };
@@ -309,7 +330,7 @@ export const orgTracker = async (code: string, date: string) => {
 
   const entryBy = new Map(entries.map((e) => [e.userId, e]));
 
-  const rows: RepRow[] = users.map((u) => {
+  const base = users.map((u) => {
     const entry = entryBy.get(u.userId);
     const manual = entry ? Object.fromEntries(entry.metrics) : {};
 
@@ -331,14 +352,35 @@ export const orgTracker = async (code: string, date: string) => {
     return {
       ...u,
       values,
-      remarks: entry?.remarks ?? "",
-      actionRequired: entry?.actionRequired ?? "",
-      score: dailyScore(values, targets),
+      entry,
       lastActiveOn: last ? last.toISOString().slice(0, 10) : null,
       daysSinceActive,
       // null means nothing in the whole 90-day lookback, which is dormant by
       // any reading — not "unknown".
       dormant: daysSinceActive === null || daysSinceActive >= DORMANT_AFTER_DAYS,
+    };
+  });
+
+  const working = base.filter((r) => !r.dormant && r.accountStatus === "active").length;
+  const orgScorable = scorableKeys(code);
+
+  const repTargets = repTargetsFor(targets, working);
+
+  const rows: RepRow[] = base.map((r) => {
+    const keys = [...orgScorable, ...reportedManualKeys(r.values)];
+    return {
+      userId: r.userId,
+      name: r.name,
+      email: r.email,
+      accountStatus: r.accountStatus,
+      values: r.values,
+      remarks: r.entry?.remarks ?? "",
+      actionRequired: r.entry?.actionRequired ?? "",
+      score: dailyScore(r.values, repTargets, keys),
+      reportedManual: reportedManualKeys(r.values).length > 0 || Boolean(r.entry),
+      lastActiveOn: r.lastActiveOn,
+      daysSinceActive: r.daysSinceActive,
+      dormant: r.dormant,
     };
   });
 
@@ -369,13 +411,15 @@ export const orgTracker = async (code: string, date: string) => {
     rows,
     totals,
     achieved,
-    teamScore: dailyScore(totals, targets),
+    teamScore: dailyScore(totals, targets, orgScorable),
+    repTargets,
     callsUnattributed: autoResult.callsUnattributed,
     dormantAfterDays: DORMANT_AFTER_DAYS,
     counts: {
       total: rows.length,
-      working: rows.filter((r) => !r.dormant && r.accountStatus === "active").length,
+      working,
       dormant: rows.filter((r) => r.dormant && r.accountStatus === "active").length,
+      reported: rows.filter((r) => r.reportedManual).length,
       deactivated: rows.filter((r) => r.accountStatus !== "active").length,
     },
   };
@@ -510,11 +554,25 @@ export const userTracker = async (
     .toArray();
   for (const p of payments) bump(String(p._id), "revenueCollected", p.total);
 
-  const [targets, entries, user] = await Promise.all([
+  const orgScorable = scorableKeys(code);
+
+  const [targets, entries, user, roster, lastActive] = await Promise.all([
     getTargets(code as OrgCode),
     DailyEntry.find({ org: code, userId, date: { $gte: from, $lte: to } }),
     src.conn.collection("users").findOne({ _id: oid }, { projection: { name: 1, email: 1, status: 1 } }),
+    allUsers(src),
+    lastActivityByUser(src, end),
   ]);
+
+  // Same denominator the org grid uses, so one rep's score means the same
+  // number on both pages.
+  const workingCount = roster.filter((u) => {
+    const la = lastActive.get(u.userId);
+    if (!la || u.accountStatus !== "active") return false;
+    return (end.getTime() - la.getTime()) / 86_400_000 < DORMANT_AFTER_DAYS;
+  }).length;
+
+  const repTargets = repTargetsFor(targets, workingCount);
 
   const entryBy = new Map(entries.map((e) => [e.date, e]));
 
@@ -541,7 +599,13 @@ export const userTracker = async (
       values,
       remarks: entry?.remarks ?? "",
       actionRequired: entry?.actionRequired ?? "",
-      score: dailyScore(values, targets),
+      // Same basis as the org grid: this rep's share of the desk's target,
+      // over the metrics that actually apply to them. Scored against the raw
+      // team target the two pages would disagree about the same person.
+      score: dailyScore(values, repTargets, [
+        ...orgScorable,
+        ...reportedManualKeys(values),
+      ]),
     };
   });
 
