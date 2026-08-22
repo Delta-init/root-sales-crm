@@ -1,21 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { toast } from "sonner";
 import {
   ArrowUpRight,
   BarChart3,
   Building2,
   Clock,
   Coins,
-  Loader2,
   Globe2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, apiErrorMessage } from "@/lib/axios";
+import { api } from "@/lib/axios";
 import { cn, timeIn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
 import type { Organization, OrgCode } from "@/lib/types";
@@ -44,34 +43,14 @@ const ORG_STYLES: Record<OrgCode, { color: string; bg: string }> = {
 export default function DashboardPage() {
   const { admin } = useAuth();
   const canLaunch = admin?.role === "root_admin";
-  const [launching, setLaunching] = useState<string | null>(null);
+  const router = useRouter();
 
   /**
-   * Ask the portal for a one-time handoff URL, then send the browser there.
-   *
-   * The tab is opened synchronously, before the await, because a popup opened
-   * from inside a promise callback is no longer attributable to the click and
-   * gets blocked. It is pointed at the real URL once the token arrives, and
-   * closed if the launch fails.
+   * The CRM opens inside the portal at /org/[code], which keeps the org
+   * switcher and a way home above it. That page mints its own SSO token, so
+   * nothing is handed off through the URL here.
    */
-  const launch = async (org: Organization) => {
-    if (launching) return;
-    setLaunching(org.code);
-
-    const tab = window.open("", "_blank", "noopener,noreferrer");
-
-    try {
-      const { data } = await api.post("/sso/launch", { org: org.code });
-      const url = data.data.url as string;
-      if (tab) tab.location.href = url;
-      else window.location.href = url; // popup blocked — fall back to this tab
-    } catch (error) {
-      tab?.close();
-      toast.error(apiErrorMessage(error, `Could not open ${org.name}`));
-    } finally {
-      setLaunching(null);
-    }
-  };
+  const open = (org: Organization) => router.push(`/org/${org.code}`);
 
   const { data: orgs, isLoading, isError } = useQuery({
     queryKey: ["orgs"],
@@ -154,21 +133,11 @@ export default function DashboardPage() {
 
                     {canLaunch ? (
                       <button
-                        onClick={() => launch(org)}
-                        disabled={launching !== null}
-                        className="mt-4 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-primary disabled:opacity-50"
+                        onClick={() => open(org)}
+                        className="mt-4 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-primary"
                       >
-                        {launching === org.code ? (
-                          <>
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                            Signing in…
-                          </>
-                        ) : (
-                          <>
-                            Open CRM
-                            <ArrowUpRight className="h-3 w-3" />
-                          </>
-                        )}
+                        Open CRM
+                        <ArrowUpRight className="h-3 w-3" />
                       </button>
                     ) : (
                       <p className="mt-4 text-xs text-muted-foreground/60">
@@ -195,17 +164,22 @@ export default function DashboardPage() {
               <BarChart3 className="h-4 w-4 text-amber-400" />
               Group Report
             </CardTitle>
-            <span className="text-xs text-muted-foreground">Phase 3</span>
+            <Link
+              href="/reports"
+              className="text-xs text-muted-foreground transition-colors hover:text-primary"
+            >
+              Open report →
+            </Link>
           </CardHeader>
           <CardContent className="pt-0">
             <div className="flex items-center gap-3 rounded-lg border border-border/40 p-3">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted/60">
                 <Globe2 className="h-4 w-4 text-muted-foreground" />
               </div>
-              <p className="text-sm text-muted-foreground">
+              <Link href="/reports" className="text-sm text-muted-foreground hover:text-foreground">
                 Leads, conversion and revenue across all three organisations —
                 normalised to AED and each org&apos;s own timezone.
-              </p>
+              </Link>
             </div>
           </CardContent>
         </Card>

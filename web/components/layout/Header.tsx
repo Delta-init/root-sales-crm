@@ -1,6 +1,8 @@
 "use client";
 
-import { LogOut, User } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { BarChart3, LayoutGrid, LogOut, User } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -13,10 +15,16 @@ import {
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { Logo } from "@/components/shared/Logo";
 import { useAuth } from "@/providers/AuthProvider";
-import { getInitials } from "@/lib/utils";
+import { cn, getInitials } from "@/lib/utils";
+
+const NAV = [
+  { href: "/dashboard", label: "Organisations", icon: LayoutGrid },
+  { href: "/reports", label: "Group report", icon: BarChart3 },
+];
 
 export function Header() {
   const { admin, logout } = useAuth();
+  const pathname = usePathname();
   if (!admin) return null;
 
   return (
@@ -24,10 +32,35 @@ export function Header() {
       <div className="flex items-center gap-3">
         <Logo width={132} />
         <div className="hidden h-8 w-px bg-border sm:block" />
-        <div className="hidden leading-tight sm:block">
+        <div className="hidden leading-tight lg:block">
           <div className="text-sm font-semibold">Root Sales CRM</div>
           <div className="text-xs text-muted-foreground">Delta · Banglore · Draw</div>
         </div>
+
+        <div className="hidden h-8 w-px bg-border sm:block" />
+
+        <nav className="flex items-center gap-1">
+          {NAV.map((item) => {
+            // startsWith so a drill-down like /reports/sources keeps the tab lit
+            const active =
+              pathname === item.href || pathname.startsWith(item.href + "/");
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors",
+                  active
+                    ? "bg-accent font-medium text-foreground"
+                    : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                )}
+              >
+                <item.icon className="h-4 w-4" />
+                <span className="hidden sm:inline">{item.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
       </div>
 
       <div className="flex items-center gap-1.5">
