@@ -290,6 +290,24 @@ export const getTargets = async (org: OrgCode): Promise<Record<string, number>> 
   return Object.fromEntries(doc.metrics);
 };
 
+/**
+ * Targets plus whether they are this org's own.
+ *
+ * getTargets falls back to DEFAULT_TARGETS, which are the source sheet's
+ * numbers for an 18-rep Dubai desk billing in AED. Handing those back
+ * indistinguishably from real ones is how Banglore ended up reported at 753%
+ * of a target nobody set for it, so the editor needs to know the difference.
+ */
+export const getTargetsDetail = async (org: OrgCode) => {
+  const doc = await TrackerTarget.findOne({ org });
+  return {
+    metrics: doc ? Object.fromEntries(doc.metrics) : { ...DEFAULT_TARGETS },
+    defaults: { ...DEFAULT_TARGETS },
+    isCustom: Boolean(doc),
+    updatedAt: doc?.get("updatedAt") ?? null,
+  };
+};
+
 export const saveTargets = async (
   org: OrgCode,
   metrics: Record<string, number>,

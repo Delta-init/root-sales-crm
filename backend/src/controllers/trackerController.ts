@@ -1,6 +1,7 @@
 import type { Response, NextFunction } from "express";
 import { z } from "zod";
 import * as tracker from "../services/trackerService.js";
+import { METRIC_KEYS } from "../services/trackerMetrics.js";
 import { sendSuccess, sendError } from "../utils/response.js";
 import type { AuthenticatedRequest, OrgCode } from "../types/index.js";
 
@@ -63,13 +64,16 @@ export const user = async (req: AuthenticatedRequest, res: Response, next: NextF
   }
 };
 
+// A plain record, then an explicit key check. z.record() with an enum key is
+// exhaustive in zod v4, which would demand a value for every metric including
+// the ones that carry no target at all.
 const targetsSchema = z.object({
-  metrics: z.record(z.string(), z.number().min(0)),
+  metrics: z.record(z.string(), z.number().min(0).finite()),
 });
 
 export const getTargets = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    sendSuccess(res, "Targets", await tracker.getTargets(req.params.code as OrgCode));
+    sendSuccess(res, "Targets", await tracker.getTargetsDetail(req.params.code as OrgCode));
   } catch (error) {
     next(error);
   }
@@ -81,6 +85,16 @@ export const putTargets = async (req: AuthenticatedRequest, res: Response, next:
     sendError(res, "Validation failed", 400, z.treeifyError(parsed.error));
     return;
   }
+  // Unknown keys are rejected rather than dropped: the scorer ignores them, so
+  // silently storing one would look saved and do nothing.
+  const unknown = Object.keys(parsed.data.metrics).filter(
+    (k) => !METRIC_KEYS.includes(k)
+  );
+  if (unknown.length) {
+    sendError(res, `Unknown metric(s): ${unknown.join(", ")}`, 400);
+    return;
+  }
+
   try {
     const saved = await tracker.saveTargets(
       req.params.code as OrgCode,

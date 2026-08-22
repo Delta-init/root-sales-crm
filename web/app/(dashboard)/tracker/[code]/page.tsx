@@ -14,14 +14,17 @@ import {
   Loader2,
   MoonStar,
   Pencil,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, apiErrorMessage } from "@/lib/axios";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/providers/AuthProvider";
 import { DayPicker, gulfToday } from "@/components/tracker/DayPicker";
 import { TargetProgress } from "@/components/tracker/TargetProgress";
+import { TargetsDialog } from "@/components/tracker/TargetsDialog";
 import type { MetricDef, OrgTracker, TrackerRow } from "@/lib/types";
 
 // Standard notation throughout: compact with maximumFractionDigits:0 renders
@@ -210,6 +213,11 @@ export default function OrgTrackerPage() {
   const [editing, setEditing] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
+  const [targetsOpen, setTargetsOpen] = useState(false);
+  const { admin } = useAuth();
+  // Targets decide how every rep in the org is scored, so editing them is
+  // root_admin only — the same gate the API applies.
+  const canEditTargets = admin?.role === "root_admin";
 
   // filter too: a hidden row's editor would keep unsaved state alive offscreen
   useEffect(() => setEditing(null), [date, filter]);
@@ -350,13 +358,26 @@ export default function OrgTrackerPage() {
           >
             <Card className="border-border/50">
               <CardHeader className="pb-3">
-                <CardTitle className="text-base font-semibold">
-                  Team total vs daily target
-                </CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  Targets are set per organisation — {data.org.name} is measured
-                  against its own numbers, in {currency}.
-                </p>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <CardTitle className="text-base font-semibold">
+                      Team total vs daily target
+                    </CardTitle>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Targets are set per organisation — {data.org.name} is measured
+                      against its own numbers, in {currency}.
+                    </p>
+                  </div>
+                  {canEditTargets && (
+                    <button
+                      onClick={() => setTargetsOpen(true)}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border/60 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <SlidersHorizontal className="h-3 w-3" />
+                      Edit targets
+                    </button>
+                  )}
+                </div>
               </CardHeader>
               <CardContent className="pt-0">
                 {/* scorable, not columns: columns drops anything with a zero
@@ -635,6 +656,16 @@ export default function OrgTrackerPage() {
               </CardContent>
             </Card>
           </motion.div>
+
+          <TargetsDialog
+            open={targetsOpen}
+            onOpenChange={setTargetsOpen}
+            orgCode={data.org.code}
+            orgName={data.org.name}
+            currency={currency}
+            workingReps={data.counts.working}
+            metrics={data.metrics}
+          />
         </>
       )}
     </div>

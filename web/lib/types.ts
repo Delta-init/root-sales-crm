@@ -163,3 +163,10 @@ export interface UserTracker {
   averageScore: number;
   activeDays: number;
 }
+
+export interface TargetsDetail {
+  metrics: Record<string, number>;
+  defaults: Record<string, number>;
+  isCustom: boolean;
+  updatedAt: string | null;
+}
