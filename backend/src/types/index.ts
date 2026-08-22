@@ -69,6 +69,19 @@ export interface IAuditLog extends Document {
   detail: string;
 }
 
+// ─── SSO handoff ──────────────────────────────────────────────────────────────
+export interface ISsoToken extends Document {
+  token: string;
+  admin: Types.ObjectId;
+  adminEmail: string;
+  org: OrgCode;
+  subjectEmail: string;
+  subjectName: string;
+  expiresAt: Date;
+  usedAt: Date | null;
+  issuedToIp: string;
+}
+
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export interface JwtPayload {
   adminId: string;

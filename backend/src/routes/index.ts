@@ -1,13 +1,15 @@
 import { Router } from "express";
 import authRoutes from "./authRoutes.js";
 import orgRoutes from "./orgRoutes.js";
+import ssoRoutes from "./ssoRoutes.js";
 
 const router = Router();
 
 router.use("/auth", authRoutes);
 router.use("/orgs", orgRoutes);
+router.use("/sso", ssoRoutes);
 
-// Phase 2 mounts /sso here, Phase 3 mounts /reports.
+// Phase 3 mounts /reports here.
 
 router.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

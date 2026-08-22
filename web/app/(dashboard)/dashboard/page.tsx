@@ -1,18 +1,21 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
+import { toast } from "sonner";
 import {
   ArrowUpRight,
   BarChart3,
   Building2,
   Clock,
   Coins,
+  Loader2,
   Globe2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/axios";
+import { api, apiErrorMessage } from "@/lib/axios";
 import { cn, timeIn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
 import type { Organization, OrgCode } from "@/lib/types";
@@ -41,6 +44,34 @@ const ORG_STYLES: Record<OrgCode, { color: string; bg: string }> = {
 export default function DashboardPage() {
   const { admin } = useAuth();
   const canLaunch = admin?.role === "root_admin";
+  const [launching, setLaunching] = useState<string | null>(null);
+
+  /**
+   * Ask the portal for a one-time handoff URL, then send the browser there.
+   *
+   * The tab is opened synchronously, before the await, because a popup opened
+   * from inside a promise callback is no longer attributable to the click and
+   * gets blocked. It is pointed at the real URL once the token arrives, and
+   * closed if the launch fails.
+   */
+  const launch = async (org: Organization) => {
+    if (launching) return;
+    setLaunching(org.code);
+
+    const tab = window.open("", "_blank", "noopener,noreferrer");
+
+    try {
+      const { data } = await api.post("/sso/launch", { org: org.code });
+      const url = data.data.url as string;
+      if (tab) tab.location.href = url;
+      else window.location.href = url; // popup blocked — fall back to this tab
+    } catch (error) {
+      tab?.close();
+      toast.error(apiErrorMessage(error, `Could not open ${org.name}`));
+    } finally {
+      setLaunching(null);
+    }
+  };
 
   const { data: orgs, isLoading, isError } = useQuery({
     queryKey: ["orgs"],
@@ -121,18 +152,24 @@ export default function DashboardPage() {
                       </span>
                     </div>
 
-                    {/* Phase 2 swaps this for an SSO launch that lands the admin
-                        already signed in. */}
                     {canLaunch ? (
-                      <a
-                        href={org.appUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-4 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-primary"
+                      <button
+                        onClick={() => launch(org)}
+                        disabled={launching !== null}
+                        className="mt-4 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-primary disabled:opacity-50"
                       >
-                        Open CRM
-                        <ArrowUpRight className="h-3 w-3" />
-                      </a>
+                        {launching === org.code ? (
+                          <>
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            Signing in…
+                          </>
+                        ) : (
+                          <>
+                            Open CRM
+                            <ArrowUpRight className="h-3 w-3" />
+                          </>
+                        )}
+                      </button>
                     ) : (
                       <p className="mt-4 text-xs text-muted-foreground/60">
                         Not permitted
