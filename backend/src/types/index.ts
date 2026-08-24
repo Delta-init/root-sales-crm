@@ -120,6 +120,8 @@ export interface RepJwtPayload {
 
 export interface AuthenticatedRequest extends Request {
   admin?: JwtPayload;
+  /** Set when a CRM backend authenticates with its org's service secret. */
+  serviceOrg?: { code: string; name: string; timezone: string; currency: string };
   rep?: {
     repId: string;
     name: string;
