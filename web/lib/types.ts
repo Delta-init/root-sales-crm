@@ -86,6 +86,7 @@ export interface MetricDef {
   computed?: boolean;
   snapshot?: boolean;
   reliableIn?: string[];
+  text?: boolean;
   note?: string;
 }
 
@@ -98,6 +99,7 @@ export interface TrackerRow {
   remarks: string;
   actionRequired: string;
   score: number;
+  texts: Record<string, string>;
   reportedManual: boolean;
   lastActiveOn: string | null;
   daysSinceActive: number | null;
@@ -146,6 +148,7 @@ export interface GroupTracker {
 export interface UserTrackerDay {
   date: string;
   values: Record<string, number>;
+  texts?: Record<string, string>;
   remarks: string;
   actionRequired: string;
   score: number;
@@ -169,4 +172,22 @@ export interface TargetsDetail {
   defaults: Record<string, number>;
   isCustom: boolean;
   updatedAt: string | null;
+}
+
+// ─── Rep self-service ─────────────────────────────────────────────────────────
+export interface Rep {
+  repId: string;
+  name: string;
+  email: string;
+  org: { code: string; name: string; timezone: string; currency: string };
+}
+
+export interface MyTracker {
+  org: { code: OrgCode; name: string; accent: string; currency: string; timezone: string };
+  date: string;
+  row: TrackerRow;
+  metrics: MetricDef[];
+  targets: Record<string, number>;
+  repTargets: Record<string, number>;
+  isToday: boolean;
 }

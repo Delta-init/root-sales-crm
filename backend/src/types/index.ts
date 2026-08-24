@@ -95,6 +95,7 @@ export interface IDailyEntry extends Document {
   userName: string;
   date: string;
   metrics: Map<string, number>;
+  texts: Map<string, string>;
   remarks: string;
   actionRequired: string;
   updatedBy: Types.ObjectId | null;
@@ -107,6 +108,22 @@ export interface JwtPayload {
   role: AdminRole;
 }
 
+/** A sales rep's session. Distinct from an admin's — `kind` is what stops an
+ *  admin token being used on rep routes and vice versa. */
+export interface RepJwtPayload {
+  kind: "rep";
+  repId: string;
+  orgCode: OrgCode;
+  email: string;
+  name: string;
+}
+
 export interface AuthenticatedRequest extends Request {
   admin?: JwtPayload;
+  rep?: {
+    repId: string;
+    name: string;
+    email: string;
+    org: { code: string; name: string; timezone: string; currency: string };
+  };
 }

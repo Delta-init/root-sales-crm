@@ -102,10 +102,14 @@ function EntryEditor({
   onClose: () => void;
 }) {
   const qc = useQueryClient();
-  const manual = tracker.metrics.filter((m) => m.source === "manual");
+  const manual = tracker.metrics.filter((m) => m.source === "manual" && !m.text);
+  const textFields = tracker.metrics.filter((m) => m.text);
 
   const [values, setValues] = useState<Record<string, number>>(() =>
     Object.fromEntries(manual.map((m) => [m.key, row.values[m.key] ?? 0]))
+  );
+  const [texts, setTexts] = useState<Record<string, string>>(() =>
+    Object.fromEntries(textFields.map((m) => [m.key, row.texts?.[m.key] ?? ""]))
   );
   const [remarks, setRemarks] = useState(row.remarks);
   const [action, setAction] = useState(row.actionRequired);
@@ -118,6 +122,7 @@ function EntryEditor({
         userName: row.name,
         date: tracker.date,
         metrics: values,
+        texts,
         remarks,
         actionRequired: action,
       }),
@@ -166,6 +171,21 @@ function EntryEditor({
             </label>
           ))}
         </div>
+
+        {textFields.map((m) => (
+          <label key={m.key} className="mt-3 block space-y-1">
+            <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">
+              {m.label}
+            </span>
+            <textarea
+              rows={2}
+              maxLength={1000}
+              value={texts[m.key] ?? ""}
+              onChange={(e) => setTexts((t) => ({ ...t, [m.key]: e.target.value }))}
+              className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-primary"
+            />
+          </label>
+        ))}
 
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <label className="space-y-1">

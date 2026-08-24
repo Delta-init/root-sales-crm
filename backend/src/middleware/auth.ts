@@ -19,6 +19,16 @@ export const authenticate = async (
 
     const decoded = verifyAccessToken(authHeader.split(" ")[1]);
 
+    // Reject rep tokens explicitly. Admin and rep sessions are signed with the
+    // same secret, so without this a rep token fell through to the AdminUser
+    // lookup and was refused only because its adminId happened to be
+    // undefined — the right outcome for the wrong reason, and one that a
+    // future payload change could quietly undo.
+    if ((decoded as unknown as { kind?: string }).kind === "rep") {
+      sendError(res, "This endpoint is for portal admins", 403);
+      return;
+    }
+
     // Hit the DB on every request rather than trusting the token alone. This
     // endpoint set can open three production CRMs, so revoking an admin has to
     // take effect immediately, not whenever their token happens to expire.

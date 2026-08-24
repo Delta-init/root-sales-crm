@@ -27,6 +27,9 @@ const dailyEntrySchema = new Schema<IDailyEntry>(
       match: [/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD"],
     },
     metrics: { type: Map, of: Number, default: () => ({}) },
+    // Free-text answers live outside the numeric map so they are never summed,
+    // scored, or coerced to 0.
+    texts: { type: Map, of: String, default: () => ({}) },
     remarks: { type: String, default: "", trim: true, maxlength: 500 },
     actionRequired: { type: String, default: "", trim: true, maxlength: 500 },
     updatedBy: { type: Schema.Types.ObjectId, ref: "AdminUser", default: null },

@@ -4,6 +4,7 @@ import orgRoutes from "./orgRoutes.js";
 import ssoRoutes from "./ssoRoutes.js";
 import reportRoutes from "./reportRoutes.js";
 import trackerRoutes from "./trackerRoutes.js";
+import repRoutes from "./repRoutes.js";
 
 const router = Router();
 
@@ -12,6 +13,7 @@ router.use("/orgs", orgRoutes);
 router.use("/sso", ssoRoutes);
 router.use("/reports", reportRoutes);
 router.use("/tracker", trackerRoutes);
+router.use("/rep", repRoutes);
 
 router.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

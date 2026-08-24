@@ -113,6 +113,7 @@ const entrySchema = z.object({
   userName: z.string().optional(),
   date: DATE,
   metrics: z.record(z.string(), z.number()).default({}),
+  texts: z.record(z.string(), z.string().max(1000)).default({}),
   remarks: z.string().max(500).optional(),
   actionRequired: z.string().max(500).optional(),
 });

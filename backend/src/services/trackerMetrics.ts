@@ -22,6 +22,8 @@ export interface MetricDef {
   computed?: boolean;
   /** A running total rather than a same-day flow — see pendingPayments. */
   snapshot?: boolean;
+  /** Free text rather than a number — never scored, never summed. */
+  text?: boolean;
   /** Only trustworthy where the org actually captures it. */
   reliableIn?: string[];
   note?: string;
@@ -31,7 +33,7 @@ export const METRICS: MetricDef[] = [
   // ── Sales activity ────────────────────────────────────────────────────
   {
     key: "callsMade",
-    label: "Calls Made",
+    label: "Total Call Count",
     group: "Sales Activity",
     source: "auto",
     // Banglore's Android dialer logs every call; the other two have 81 and 2
@@ -43,7 +45,7 @@ export const METRICS: MetricDef[] = [
       "credited to the owner of the lead they concern; calls with no lead are " +
       "shown separately as unattributed.",
   },
-  { key: "leadsContacted", label: "Leads Contacted", group: "Sales Activity", source: "auto" },
+  { key: "leadsContacted", label: "Leads Count Today", group: "Sales Activity", source: "auto" },
   { key: "followUpsDone", label: "Follow-ups Done", group: "Sales Activity", source: "auto" },
   {
     key: "demos",
@@ -64,10 +66,8 @@ export const METRICS: MetricDef[] = [
   },
 
   // ── Lead generation ───────────────────────────────────────────────────
-  { key: "whatsappMsgs", label: "WhatsApp Msgs", group: "Lead Generation", source: "manual" },
   { key: "clientReferences", label: "Client References", group: "Lead Generation", source: "manual" },
   { key: "selfGenLeads", label: "Self-Gen Leads", group: "Lead Generation", source: "manual" },
-  { key: "communityInvites", label: "Community Invites", group: "Lead Generation", source: "manual" },
   { key: "newCommunityMembers", label: "New Community Members", group: "Lead Generation", source: "manual" },
 
   // ── Financials ────────────────────────────────────────────────────────
@@ -90,15 +90,28 @@ export const METRICS: MetricDef[] = [
 
   // ── Content & community ───────────────────────────────────────────────
   { key: "contentCreated", label: "Content Created", group: "Content & Community", source: "manual" },
-  { key: "communityPosts", label: "Community Posts", group: "Content & Community", source: "manual" },
   { key: "egcContent", label: "EGC Content Created", group: "Content & Community", source: "manual" },
 
   // ── Learning ──────────────────────────────────────────────────────────
   { key: "techTopicsLearnt", label: "Tech Topics Learnt", group: "Learning", source: "manual" },
+  {
+    key: "learningSummary",
+    label: "Today's Learning Summary",
+    group: "Learning",
+    source: "manual",
+    // Prose, not a quantity: it is stored as text, carries no target, and is
+    // skipped by the scorer rather than counted as a zero.
+    text: true,
+  },
 ];
 
 export const METRIC_KEYS = METRICS.map((m) => m.key);
-export const MANUAL_KEYS = METRICS.filter((m) => m.source === "manual").map((m) => m.key);
+export const MANUAL_KEYS = METRICS.filter(
+  (m) => m.source === "manual" && !m.text
+).map((m) => m.key);
+
+/** Free-text fields a rep fills in, stored outside the numeric metric map. */
+export const TEXT_KEYS = METRICS.filter((m) => m.text).map((m) => m.key);
 export const AUTO_KEYS = METRICS.filter((m) => m.source === "auto").map((m) => m.key);
 
 /** Targets from the source sheet, used to seed a new org. */
@@ -109,14 +122,11 @@ export const DEFAULT_TARGETS: Record<string, number> = {
   demos: 36,
   closings: 18,
   convRate: 20,
-  whatsappMsgs: 180,
   clientReferences: 18,
   selfGenLeads: 18,
-  communityInvites: 90,
   newCommunityMembers: 30,
   revenueCollected: 90000,
   contentCreated: 5,
-  communityPosts: 10,
   egcContent: 5,
   techTopicsLearnt: 3,
 };
@@ -159,7 +169,10 @@ export const dailyScore = (
  */
 export const scorableKeys = (orgCode: string): string[] =>
   METRICS.filter(
-    (m) => m.source === "auto" && (!m.reliableIn || m.reliableIn.includes(orgCode))
+    (m) =>
+      m.source === "auto" &&
+      !m.text &&
+      (!m.reliableIn || m.reliableIn.includes(orgCode))
   ).map((m) => m.key);
 
 /** Manual keys a rep actually filed a figure for on the day. */

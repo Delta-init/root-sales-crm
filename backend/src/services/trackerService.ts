@@ -5,6 +5,7 @@ import { DailyEntry } from "../models/DailyEntry.js";
 import {
   METRICS,
   MANUAL_KEYS,
+  TEXT_KEYS,
   DEFAULT_TARGETS,
   dailyScore,
   achievedPct,
@@ -29,6 +30,10 @@ const OFFSETS: Record<string, number> = {
   "Asia/Kolkata": 5.5 * 60,
 };
 
+/** Today in a given org's timezone — the boundary the day locks at. */
+export const todayIn = (timezone: string): string =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(new Date());
+
 export const dayWindow = (date: string, timezone: string) => {
   const offset = (OFFSETS[timezone] ?? 0) * 60_000;
   const start = new Date(new Date(`${date}T00:00:00.000Z`).getTime() - offset);
@@ -42,6 +47,7 @@ interface RepRow {
   /** The account's own state in the CRM, distinct from being merely quiet. */
   accountStatus: string;
   values: Record<string, number>;
+  texts: Record<string, string>;
   remarks: string;
   actionRequired: string;
   score: number;
@@ -392,6 +398,7 @@ export const orgTracker = async (code: string, date: string) => {
       email: r.email,
       accountStatus: r.accountStatus,
       values: r.values,
+      texts: r.entry?.texts ? Object.fromEntries(r.entry.texts) : {},
       remarks: r.entry?.remarks ?? "",
       actionRequired: r.entry?.actionRequired ?? "",
       score: dailyScore(r.values, repTargets, keys),
@@ -615,6 +622,7 @@ export const userTracker = async (
     return {
       date: day,
       values,
+      texts: entry?.texts ? Object.fromEntries(entry.texts) : {},
       remarks: entry?.remarks ?? "",
       actionRequired: entry?.actionRequired ?? "",
       // Same basis as the org grid: this rep's share of the desk's target,
@@ -656,14 +664,49 @@ export const userTracker = async (
   };
 };
 
+/**
+ * One rep's own row for a day.
+ *
+ * Deliberately built from orgTracker rather than a separate query: a rep must
+ * see the same numbers, the same targets and the same score their manager
+ * sees, and a parallel implementation would drift.
+ */
+export const repDay = async (orgCode: string, repId: string, date: string) => {
+  const org = await orgTracker(orgCode, date);
+  const row = org.rows.find((r) => r.userId === repId);
+
+  if (!row) {
+    throw Object.assign(new Error("You are not listed in this organisation"), {
+      statusCode: 404,
+    });
+  }
+
+  return {
+    org: org.org,
+    date,
+    // Only this rep's row travels to the client. The rest of the team's
+    // figures never leave the server on this route.
+    row,
+    metrics: org.metrics,
+    targets: org.targets,
+    repTargets: org.repTargets,
+    dormantAfterDays: org.dormantAfterDays,
+    isToday: date === todayIn(org.org.timezone),
+  };
+};
+
 export const saveEntry = async (input: {
   org: OrgCode;
   userId: string;
   userName?: string;
   date: string;
   metrics: Record<string, number>;
+  texts?: Record<string, string>;
   remarks?: string;
   actionRequired?: string;
+  /** Set when a rep saves: remarks and actionRequired belong to their manager
+   *  and must survive a rep's own submission. */
+  preserveManagerNotes?: boolean;
   adminId: string;
 }) => {
   // Only manual keys are persisted. Accepting an auto key here would let a
@@ -674,14 +717,25 @@ export const saveEntry = async (input: {
     if (Number.isFinite(v) && v >= 0) metrics[k] = v;
   }
 
+  const texts: Record<string, string> = {};
+  for (const k of TEXT_KEYS) {
+    const v = input.texts?.[k];
+    if (typeof v === "string") texts[k] = v.slice(0, 1000);
+  }
+
   const doc = await DailyEntry.findOneAndUpdate(
     { org: input.org, userId: input.userId, date: input.date },
     {
       $set: {
         metrics,
+        texts,
         userName: input.userName ?? "",
-        remarks: input.remarks ?? "",
-        actionRequired: input.actionRequired ?? "",
+        ...(input.preserveManagerNotes
+          ? {}
+          : {
+              remarks: input.remarks ?? "",
+              actionRequired: input.actionRequired ?? "",
+            }),
         updatedBy: input.adminId,
       },
     },
@@ -692,6 +746,7 @@ export const saveEntry = async (input: {
     userId: doc!.userId,
     date: doc!.date,
     metrics: Object.fromEntries(doc!.metrics),
+    texts: Object.fromEntries(doc!.texts ?? new Map()),
     remarks: doc!.remarks,
     actionRequired: doc!.actionRequired,
   };
