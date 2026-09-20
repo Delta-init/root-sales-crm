@@ -1,4 +1,5 @@
 import { Organization } from "../models/Organization.js";
+import { targetConfig, missingFor } from "../config/targets.js";
 
 /**
  * Talking to one of the systems this portal fronts.
@@ -41,22 +42,27 @@ export interface ResolvedTarget {
  * fetching the row twice to get them would be worse.
  */
 export async function resolveTarget(code: string): Promise<ResolvedTarget> {
-  const org = await Organization.findOne({ code }).select("+ssoSecret");
+  // The database still says what a system is; the environment says how to
+  // reach it. Both have to agree that it exists and is in use.
+  const org = await Organization.findOne({ code }).select("code name isActive");
   if (!org) throw httpError(`Unknown target: ${code}`, 404);
   if (!org.isActive) throw httpError(`${org.name} is not active`, 409);
-  if (!org.apiUrl) throw httpError(`${org.name} has no API address configured`, 503);
-  if (!org.ssoSecret) {
+
+  const missing = missingFor(code, ["apiUrl", "ssoSecret"]);
+  if (missing.length) {
     throw httpError(
-      `${org.name} has no shared secret configured, so this portal cannot ask it anything`,
+      `${org.name} is not configured on this server — set ${missing.join(" and ")}`,
       503,
     );
   }
+
+  const cfg = targetConfig(code);
   return {
     code: org.code,
     name: org.name,
-    base: org.apiUrl.replace(/\/+$/, "").replace(/\/api\/v1$/, ""),
-    secret: org.ssoSecret,
-    remoteOrgId: org.remoteOrgId || "",
+    base: cfg.apiUrl.replace(/\/+$/, "").replace(/\/api\/v1$/, ""),
+    secret: cfg.ssoSecret,
+    remoteOrgId: cfg.remoteOrgId,
   };
 }
 

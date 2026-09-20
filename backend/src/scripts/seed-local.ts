@@ -26,10 +26,6 @@ await Promise.all([
   Access.deleteMany({}),
 ]);
 
-const FINANCE_API = process.env.LOCAL_FINANCE_API ?? "http://localhost:4000";
-const FINANCE_APP = process.env.LOCAL_FINANCE_APP ?? "http://localhost:3000";
-const SECRET = process.env.LOCAL_PORTAL_SECRET ?? "local-sandbox-portal-secret";
-const FINANCE_ORG_ID = process.env.LOCAL_FINANCE_ORG_ID ?? "";
 
 const root = await AdminUser.create({
   name: "Root Admin",
@@ -47,19 +43,21 @@ const member = await AdminUser.create({
   status: "active",
 });
 
-/* The finance organization on the local finance server, as a target. */
+/*
+ * The finance organization on the local finance server, as a target.
+ *
+ * Only what it is, not how to reach it: the address, secret and remote
+ * organization id are read from the environment, which local-stack.sh sets
+ * as FINANCE_HQ_APP_URL, FINANCE_HQ_API_URL, FINANCE_HQ_SSO_SECRET,
+ * FINANCE_HQ_REMOTE_ORG_ID and FINANCE_HQ_SERVICE_EMAIL.
+ */
 await Organization.create({
   code: "finance-hq",
   kind: "finance",
   name: "Delta HQ Finance (local)",
-  appUrl: FINANCE_APP,
-  apiUrl: FINANCE_API,
   timezone: "Asia/Dubai",
   currency: "AED",
   fxToBase: 1,
-  serviceEmail: "root@local.test",
-  remoteOrgId: FINANCE_ORG_ID,
-  ssoSecret: SECRET,
   isActive: true,
   sortOrder: 1,
 });

@@ -1,5 +1,6 @@
 import mongoose, { type Connection } from "mongoose";
 import { Organization } from "../models/Organization.js";
+import { targetConfig, envKeyFor } from "../config/targets.js";
 import type { IOrganization } from "../types/index.js";
 
 /**
@@ -41,20 +42,21 @@ export const getSources = async (): Promise<{
   sources: CrmSource[];
   failures: { code: string; name: string; error: string }[];
 }> => {
-  const orgs = await Organization.find({ isActive: true })
-    .select("+mongoUri")
-    .sort({ sortOrder: 1 });
+  const orgs = await Organization.find({ isActive: true }).sort({ sortOrder: 1 });
 
   const sources: CrmSource[] = [];
   const failures: { code: string; name: string; error: string }[] = [];
 
   await Promise.all(
     orgs.map(async (org) => {
-      if (!org.mongoUri) {
+      // The connection string lives in the environment, not in this
+      // database. Naming the variable saves whoever sees this a search.
+      const uri = targetConfig(org.code).mongoUri;
+      if (!uri) {
         failures.push({
           code: org.code,
           name: org.name,
-          error: "No database URI configured",
+          error: `No database URI configured — set ${envKeyFor(org.code)}_MONGODB_URI`,
         });
         return;
       }
@@ -62,7 +64,7 @@ export const getSources = async (): Promise<{
       try {
         let conn = pool.get(org.code);
         if (!conn || conn.readyState !== 1) {
-          conn = await openConnection(org.mongoUri);
+          conn = await openConnection(uri);
           pool.set(org.code, conn);
         }
         sources.push({ org, conn });

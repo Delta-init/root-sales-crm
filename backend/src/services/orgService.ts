@@ -1,19 +1,18 @@
 import { Organization } from "../models/Organization.js";
 import type { IOrganization } from "../types/index.js";
+import { targetConfig, envKeyFor, missingFor } from "../config/targets.js";
 
 /**
  * Whitelist of fields safe to send to the browser.
  *
- * mongoUri and ssoSecret are select:false on the schema, but this function is
- * the belt to that pair of braces: the shape returned here is built by naming
- * fields, not by stripping them, so a future field added to the model is
- * private by default rather than public by accident.
+ * Built by naming fields rather than by stripping them, so a field added to
+ * the model tomorrow is private by default rather than public by accident.
  */
 export const toPublic = (org: IOrganization) => ({
   id: org._id.toString(),
   code: org.code,
   name: org.name,
-  appUrl: org.appUrl,
+  appUrl: targetConfig(org.code).appUrl,
   timezone: org.timezone,
   currency: org.currency,
   accent: org.accent,
@@ -35,41 +34,59 @@ export const toPublic = (org: IOrganization) => ({
  * behind it; nobody needs to read it back out of the screen, and a value that
  * is never sent cannot leak from one.
  */
-export const toAdmin = (org: IOrganization & { mongoUri?: string; ssoSecret?: string }) => ({
-  id: org._id.toString(),
-  code: org.code,
-  kind: org.kind ?? "crm",
-  name: org.name,
-  appUrl: org.appUrl,
-  apiUrl: org.apiUrl,
-  timezone: org.timezone,
-  currency: org.currency,
-  fxToBase: org.fxToBase,
-  serviceEmail: org.serviceEmail,
-  remoteOrgId: org.remoteOrgId,
-  accent: org.accent,
-  isActive: org.isActive,
-  sortOrder: org.sortOrder,
-  hasMongoUri: Boolean(org.mongoUri),
-  hasSsoSecret: Boolean(org.ssoSecret),
-});
+export const toAdmin = (org: IOrganization) => {
+  /*
+   * How this system is reached is reported, never returned.
+   *
+   * The values live in the environment and this says which of them are set,
+   * plus the variable names to set the missing ones. An address is not a
+   * secret, so it is shown; the connection string and the shared secret are
+   * only ever "set" or "not set", because nobody needs to read those back out
+   * of a screen and a value that is never sent cannot leak from one.
+   */
+  const cfg = targetConfig(org.code);
+  return {
+    id: org._id.toString(),
+    code: org.code,
+    kind: org.kind ?? "crm",
+    name: org.name,
+    timezone: org.timezone,
+    currency: org.currency,
+    fxToBase: org.fxToBase,
+    serviceEmail: cfg.serviceEmail,
+    accent: org.accent,
+    isActive: org.isActive,
+    sortOrder: org.sortOrder,
 
-/** Fields an administrator may write. Code is not among them — see update(). */
+    envPrefix: envKeyFor(org.code),
+    appUrl: cfg.appUrl,
+    apiUrl: cfg.apiUrl,
+    remoteOrgId: cfg.remoteOrgId,
+    hasMongoUri: Boolean(cfg.mongoUri),
+    hasSsoSecret: Boolean(cfg.ssoSecret),
+    /** What is still unset, by variable name, so nobody has to go and look. */
+    missing: missingFor(org.code, ["appUrl", "apiUrl", "ssoSecret", "serviceEmail"]),
+  };
+};
+
+/**
+ * Fields an administrator may write.
+ *
+ * The code is not among them — see update(). Neither are the addresses, the
+ * database URI, the shared secret or the remote organization id: those are
+ * the environment's to set, and a screen that could edit them would be
+ * editing a copy the next deploy overwrites.
+ */
 const WRITABLE = [
-  "kind", "name", "appUrl", "apiUrl", "timezone", "currency",
-  "fxToBase", "serviceEmail", "remoteOrgId", "accent", "isActive", "sortOrder",
+  "kind", "name", "timezone", "currency",
+  "fxToBase", "accent", "isActive", "sortOrder",
 ] as const;
-
-/** Written when given, never returned. Blank means "leave what is there". */
-const SECRETS = ["mongoUri", "ssoSecret"] as const;
 
 export const orgService = {
   /** Everything, switched off included. Administrators only. */
   async listAll() {
-    const orgs = await Organization.find({})
-      .select("+mongoUri +ssoSecret")
-      .sort({ sortOrder: 1, name: 1 });
-    return orgs.map((o) => toAdmin(o as unknown as IOrganization & { mongoUri?: string; ssoSecret?: string }));
+    const orgs = await Organization.find({}).sort({ sortOrder: 1, name: 1 });
+    return orgs.map((o) => toAdmin(o as unknown as IOrganization));
   },
 
   async create(input: Record<string, unknown>) {
@@ -81,10 +98,9 @@ export const orgService = {
 
     const doc: Record<string, unknown> = { code };
     for (const f of WRITABLE) if (input[f] !== undefined) doc[f] = input[f];
-    for (const f of SECRETS) if (String(input[f] ?? "").trim()) doc[f] = input[f];
 
     const org = await Organization.create(doc);
-    return toAdmin(org as unknown as IOrganization & { mongoUri?: string; ssoSecret?: string });
+    return toAdmin(org as unknown as IOrganization);
   },
 
   /**
@@ -95,19 +111,17 @@ export const orgService = {
    * every one of those pointing at something that no longer exists — silently,
    * because they hold the string rather than a reference.
    *
-   * A blank secret leaves the stored one alone, so somebody editing the name
-   * does not have to retype a connection string they cannot see.
+   * Addresses and secrets are not writable here at all. They come from the
+   * environment, so a field posted for one is ignored rather than stored
+   * somewhere that looks authoritative and is not.
    */
   async update(code: string, input: Record<string, unknown>) {
-    const org = await Organization.findOne({ code }).select("+mongoUri +ssoSecret");
+    const org = await Organization.findOne({ code });
     if (!org) throw Object.assign(new Error(`Unknown target: ${code}`), { statusCode: 404 });
 
     for (const f of WRITABLE) if (input[f] !== undefined) (org as unknown as Record<string, unknown>)[f] = input[f];
-    for (const f of SECRETS) {
-      if (String(input[f] ?? "").trim()) (org as unknown as Record<string, unknown>)[f] = input[f];
-    }
     await org.save();
-    return toAdmin(org as unknown as IOrganization & { mongoUri?: string; ssoSecret?: string });
+    return toAdmin(org as unknown as IOrganization);
   },
 
   async list() {
@@ -115,8 +129,14 @@ export const orgService = {
     return orgs.map(toPublic);
   },
 
-  /** Internal use only — includes the secrets. Never hand the result to a route. */
+  /**
+   * The record, for internal callers.
+   *
+   * Kept under its old name so callers do not all change at once, but it no
+   * longer carries anything secret — there is nothing secret left on the
+   * document to carry.
+   */
   async getWithSecrets(code: string) {
-    return Organization.findOne({ code }).select("+mongoUri +ssoSecret");
+    return Organization.findOne({ code });
   },
 };

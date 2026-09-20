@@ -1,5 +1,5 @@
-import { Organization } from "../models/Organization.js";
 import { AdminUser } from "../models/AdminUser.js";
+import { callTarget, resolveTarget, httpError } from "../lib/targetClient.js";
 
 /**
  * Making somebody an account in another system.
@@ -19,11 +19,6 @@ import { AdminUser } from "../models/AdminUser.js";
  * means no provisioning, rather than an unauthenticated call.
  */
 
-const TIMEOUT_MS = 15_000;
-
-const httpError = (message: string, statusCode: number) =>
-  Object.assign(new Error(message), { statusCode });
-
 export interface ProvisionResult {
   created: boolean;
   userId: string;
@@ -42,57 +37,21 @@ export const provisionService = {
       throw httpError("That account is deactivated here, so it should not be created elsewhere", 409);
     }
 
-    const org = await Organization.findOne({ code: input.targetCode }).select("+ssoSecret");
-    if (!org) throw httpError(`Unknown target: ${input.targetCode}`, 404);
-    if (!org.isActive) throw httpError(`${org.name} is not active`, 409);
-    if (!org.apiUrl) throw httpError(`${org.name} has no API address configured`, 503);
-    if (!org.ssoSecret) {
-      throw httpError(
-        `${org.name} has no shared secret configured, so this portal cannot ask it to create anything`,
-        503,
-      );
-    }
+    const target = await resolveTarget(input.targetCode);
 
-    const base = org.apiUrl.replace(/\/+$/, "").replace(/\/api\/v1$/, "");
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const data = await callTarget<ProvisionResult>(target, "/provision-user", {
+      method: "POST",
+      verb: "create the account",
+      body: {
+        email: person.email,
+        name: person.name,
+        role: input.roleInTarget,
+        // Blank where the target is one organization per deployment; the
+        // target decides whether it needs it.
+        remoteOrgId: target.remoteOrgId || undefined,
+      },
+    });
 
-    try {
-      const res = await fetch(`${base}/api/v1/service/provision-user`, {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-portal-secret": org.ssoSecret },
-        body: JSON.stringify({
-          email: person.email,
-          name: person.name,
-          role: input.roleInTarget,
-          // Blank where the target is one organization per deployment; the
-          // target decides whether it needs it.
-          remoteOrgId: org.remoteOrgId || undefined,
-        }),
-        signal: controller.signal,
-      });
-
-      const body = (await res.json().catch(() => ({}))) as {
-        success?: boolean;
-        data?: ProvisionResult;
-        message?: string;
-        error?: { message?: string };
-      };
-
-      if (!res.ok) {
-        // The target's own words. It knows why far better than this does —
-        // an unknown role, a name that fails its own validation.
-        const why = body.error?.message ?? body.message ?? `refused with ${res.status}`;
-        throw httpError(`${org.name} would not create the account: ${why}`, res.status === 401 ? 502 : 409);
-      }
-      if (!body.data) throw httpError(`${org.name} returned nothing`, 502);
-
-      return { ...body.data, targetName: org.name, email: person.email };
-    } catch (err) {
-      if ((err as { statusCode?: number }).statusCode) throw err;
-      throw httpError(`${org.name} could not be reached`, 502);
-    } finally {
-      clearTimeout(timer);
-    }
+    return { ...data, targetName: target.name, email: person.email };
   },
 };

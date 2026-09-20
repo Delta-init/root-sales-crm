@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { Response, NextFunction } from "express";
 import { Organization } from "../models/Organization.js";
+import { allServiceSecrets } from "../config/targets.js";
 import { sendError } from "../utils/response.js";
 import type { AuthenticatedRequest } from "../types/index.js";
 
@@ -34,16 +35,26 @@ export const authenticateOrgService = async (
   }
 
   try {
-    const orgs = await Organization.find({ isActive: true }).select("+ssoSecret");
+    /*
+     * The secrets come from the environment now, not from the database. The
+     * property that matters is unchanged: the org is decided by WHICH secret
+     * matched, never by anything in the request.
+     *
+     * Only active organizations are considered, so deactivating one in the
+     * portal closes this door too rather than leaving its secret working.
+     */
+    const orgs = await Organization.find({ isActive: true })
+      .select("code name timezone currency")
+      .lean();
 
-    const matched = orgs.find(
-      (o) => o.ssoSecret && safeEqual(o.ssoSecret, presented)
-    );
+    const candidates = allServiceSecrets(orgs.map((o) => o.code));
+    const hit = candidates.find((c) => safeEqual(c.secret, presented));
 
-    if (!matched) {
+    if (!hit) {
       sendError(res, "Invalid service credential", 401);
       return;
     }
+    const matched = orgs.find((o) => o.code === hit.code)!;
 
     req.serviceOrg = {
       code: matched.code,

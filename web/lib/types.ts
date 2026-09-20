@@ -313,6 +313,12 @@ export interface RegistryTarget {
   sortOrder: number;
   hasMongoUri: boolean;
   hasSsoSecret: boolean;
+  /** `finance-hq` → `FINANCE_HQ`: the prefix of its environment variables. */
+  envPrefix: string;
+  /** Variables still unset, by name, so the screen can name them. */
+  missing: string[];
+  /** Kept for the registry row; comes from the environment, not the record. */
+  remoteOrgId: string;
 }
 
 /** Somebody HRMS knows about, and whether the portal already has them. */

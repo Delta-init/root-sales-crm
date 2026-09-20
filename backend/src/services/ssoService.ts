@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { SsoToken } from "../models/SsoToken.js";
 import { orgService } from "./orgService.js";
 import type { JwtPayload, OrgCode } from "../types/index.js";
+import { targetConfig, missingFor, envKeyFor } from "../config/targets.js";
 
 /** Deliberately short. The token is only in flight for one redirect. */
 const TOKEN_TTL_MS = 60_000;
@@ -64,14 +65,16 @@ export const ssoService = {
       }
     }
 
-    if (isRootAdmin && !org.serviceEmail) {
+    const cfg = targetConfig(org.code);
+    if (isRootAdmin && !cfg.serviceEmail) {
       throw httpError(
-        `${org.name} has no service account configured. Set serviceEmail on the org registry.`,
+        `${org.name} has no service account configured — set ${envKeyFor(org.code)}_SERVICE_EMAIL`,
         503
       );
     }
-    if (!org.appUrl) {
-      throw httpError(`${org.name} has no appUrl configured`, 503);
+    const missing = missingFor(org.code, ["appUrl"]);
+    if (missing.length) {
+      throw httpError(`${org.name} is not configured on this server — set ${missing[0]}`, 503);
     }
 
     const token = randomBytes(32).toString("hex");
@@ -81,13 +84,13 @@ export const ssoService = {
       admin: admin.adminId,
       adminEmail: admin.email,
       org: org.code,
-      subjectEmail: isRootAdmin ? org.serviceEmail : admin.email,
+      subjectEmail: isRootAdmin ? cfg.serviceEmail : admin.email,
       subjectName,
       expiresAt: new Date(Date.now() + TOKEN_TTL_MS),
       issuedToIp: ip,
     });
 
-    const base = org.appUrl.replace(/\/+$/, "");
+    const base = cfg.appUrl.replace(/\/+$/, "");
     return {
       url: `${base}/sso?token=${token}`,
       org: { code: org.code as OrgCode, name: org.name },

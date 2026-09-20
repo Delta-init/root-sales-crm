@@ -26,32 +26,24 @@ const organizationSchema = new Schema<IOrganization>(
       enum: ["crm", "finance", "hrms"],
       default: "crm",
     },
-    appUrl: { type: String, required: true, trim: true },
-    apiUrl: { type: String, required: true, trim: true },
-
-    // Read-only URI. Never exposed by any route — see orgService.toPublic().
-    mongoUri: { type: String, default: "", select: false },
-
+    /*
+     * Where this system lives and how to reach it is NOT here.
+     *
+     * The addresses, the database URI, the shared secret and the remote
+     * organization id all come from the environment — see config/targets.ts.
+     * They used to be set in the environment, copied into this collection by
+     * the bootstrap seed and then edited from a Registry screen, which meant
+     * two sources of truth and the one being edited was the copy.
+     *
+     * A consequence worth keeping: a dump of this database now contains no
+     * service credential and no connection string.
+     *
+     * What remains here is what a system *is* to the business — none of it
+     * opens anything.
+     */
     timezone: { type: String, required: true },
     currency: { type: String, required: true },
     fxToBase: { type: Number, required: true, default: 1 },
-
-    serviceEmail: { type: String, trim: true, lowercase: true, default: "" },
-    /*
-     * Which organization this target is *inside* the system it points at.
-     *
-     * Needed only where one deployment holds several. Finance is one server
-     * with a Delta HQ and a Delta Banglore organization in it, so two registry
-     * rows share an address and are told apart by this. A CRM is one
-     * organization per deployment and leaves it blank.
-     *
-     * Only provisioning needs it: signing somebody in uses the memberships
-     * they already have, which say where they belong without being asked.
-     */
-    remoteOrgId: { type: String, trim: true, default: "" },
-    // Shared secret for this org's SSO endpoint. select:false so it can never
-    // leak through a stray .find() that gets serialised to the browser.
-    ssoSecret: { type: String, default: "", select: false },
 
     accent: { type: String, default: "#2563eb" },
     dataStartsAt: { type: Date, default: null },

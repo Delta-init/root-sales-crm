@@ -10,15 +10,21 @@ import { env } from "../config/env.js";
 import { connectDB } from "../config/db.js";
 import { AdminUser } from "../models/AdminUser.js";
 import { Organization } from "../models/Organization.js";
+import { missingFor } from "../config/targets.js";
 import type { OrgCode } from "../types/index.js";
 
+/**
+ * What each system is to the business.
+ *
+ * Every known system is seeded, including ones nobody has configured yet, so
+ * a row always exists and the environment alone decides whether a system can
+ * actually be reached. That is what makes configuring one a matter of setting
+ * variables rather than filling in a form: there is no row to create.
+ */
 interface OrgSeed {
   code: OrgCode;
+  kind: "crm" | "finance" | "hrms";
   name: string;
-  appUrl: string;
-  apiUrl: string;
-  mongoUri: string;
-  ssoSecret: string;
   timezone: string;
   currency: string;
   fxToBase: number;
@@ -29,11 +35,8 @@ interface OrgSeed {
 const orgSeeds = (): OrgSeed[] => [
   {
     code: "delta",
+    kind: "crm",
     name: "Delta",
-    appUrl: env.DELTA_APP_URL,
-    apiUrl: env.DELTA_API_URL,
-    mongoUri: env.DELTA_MONGODB_URI,
-    ssoSecret: env.DELTA_SSO_SECRET,
     timezone: "Asia/Dubai",
     currency: "AED",
     fxToBase: 1,
@@ -42,11 +45,8 @@ const orgSeeds = (): OrgSeed[] => [
   },
   {
     code: "banglore",
+    kind: "crm",
     name: "Banglore",
-    appUrl: env.BANGLORE_APP_URL,
-    apiUrl: env.BANGLORE_API_URL,
-    mongoUri: env.BANGLORE_MONGODB_URI,
-    ssoSecret: env.BANGLORE_SSO_SECRET,
     timezone: "Asia/Kolkata",
     currency: "INR",
     fxToBase: Number(env.INR_TO_AED),
@@ -55,16 +55,43 @@ const orgSeeds = (): OrgSeed[] => [
   },
   {
     code: "draw",
+    kind: "crm",
     name: "Delta Draw",
-    appUrl: env.DRAW_APP_URL,
-    apiUrl: env.DRAW_API_URL,
-    mongoUri: env.DRAW_MONGODB_URI,
-    ssoSecret: env.DRAW_SSO_SECRET,
     timezone: "Asia/Dubai",
     currency: "AED",
     fxToBase: 1,
     accent: "#c026d3",
     sortOrder: 3,
+  },
+  {
+    code: "finance-hq",
+    kind: "finance",
+    name: "Delta HQ Finance",
+    timezone: "Asia/Dubai",
+    currency: "AED",
+    fxToBase: 1,
+    accent: "#ea580c",
+    sortOrder: 4,
+  },
+  {
+    code: "finance-banglore",
+    kind: "finance",
+    name: "Banglore Finance",
+    timezone: "Asia/Kolkata",
+    currency: "INR",
+    fxToBase: Number(env.INR_TO_AED),
+    accent: "#ea580c",
+    sortOrder: 5,
+  },
+  {
+    code: "hrms",
+    kind: "hrms",
+    name: "Delta HRMS",
+    timezone: "Asia/Dubai",
+    currency: "AED",
+    fxToBase: 1,
+    accent: "#0891b2",
+    sortOrder: 6,
   },
 ];
 
@@ -91,24 +118,23 @@ const run = async () => {
   for (const seed of orgSeeds()) {
     const { code, ...rest } = seed;
 
-    // Only overwrite secrets when this run actually supplies them, so a seed
-    // run with a partial .env cannot blank out credentials already stored.
+    /*
+     * Only what a system is to the business. How to reach it is read from
+     * the environment at the moment it is needed rather than copied in here,
+     * so there is one source of truth and this seed cannot overwrite it with
+     * a stale value from a partial .env.
+     */
     const update: Record<string, unknown> = { ...rest, code };
-    if (!seed.mongoUri) delete update.mongoUri;
-    if (!seed.ssoSecret) delete update.ssoSecret;
 
     await Organization.findOneAndUpdate(
       { code },
-      { $set: update, $setOnInsert: { serviceEmail: env.ROOT_ADMIN_EMAIL.toLowerCase() } },
+      { $set: update },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    const missing = [
-      !seed.appUrl && "appUrl",
-      !seed.apiUrl && "apiUrl",
-      !seed.mongoUri && "mongoUri",
-      !seed.ssoSecret && "ssoSecret (Phase 2)",
-    ].filter(Boolean);
+    // Reported by variable name: "banglore is missing apiUrl" sends somebody
+    // to read code, "BANGLORE_API_URL is unset" does not.
+    const missing = missingFor(code, ["appUrl", "apiUrl", "ssoSecret", "serviceEmail"]);
 
     console.log(
       `org     ${code.padEnd(9)} ${seed.currency}  ${seed.timezone.padEnd(14)}` +

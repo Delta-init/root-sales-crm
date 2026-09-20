@@ -52,12 +52,19 @@ const targets = [
 ] as const;
 
 for (const t of targets) {
+  /*
+   * How to reach it lives in the environment, so the fixtures set it there.
+   * That is the point of the change: there is nowhere else to put it.
+   */
+  const key = t.code.toUpperCase().replace(/-/g, "_");
+  process.env[`${key}_APP_URL`] = `https://${t.code}.example.com`;
+  process.env[`${key}_API_URL`] = `https://api-${t.code}.example.com`;
+  process.env[`${key}_SSO_SECRET`] = `secret-for-${t.code}`;
+  process.env[`${key}_SERVICE_EMAIL`] = "root@deltainstitutions.com";
+
   await Organization.create({
     code: t.code, kind: t.kind, name: t.name,
-    appUrl: `https://${t.code}.example.com`,
-    apiUrl: `https://api-${t.code}.example.com`,
     timezone: "Asia/Dubai", currency: "AED", fxToBase: 1,
-    serviceEmail: "root@deltainstitutions.com",
     isActive: true,
   });
 }
@@ -208,31 +215,60 @@ step("Keeping the registry's secrets out of the screen");
   // what the screen is for rather than inventing new ones.
   await Organization.deleteOne({ code: "finance-hq" });
 
+  /*
+   * How a system is reached comes from the environment now, so the test sets
+   * it there — which is also the only way to set it.
+   */
+  process.env.FINANCE_HQ_APP_URL = "https://finance.example.com";
+  process.env.FINANCE_HQ_API_URL = "https://api-finance.example.com";
+  process.env.FINANCE_HQ_MONGODB_URI = "mongodb://secret:hunter2@db.example.com/finance";
+  process.env.FINANCE_HQ_SSO_SECRET = "a-very-secret-value";
+  process.env.FINANCE_HQ_SERVICE_EMAIL = "root@deltainstitutions.com";
+
   const made = await orgService.create({
     code: "finance-hq", kind: "finance", name: "Delta HQ Finance",
-    appUrl: "https://finance.example.com", apiUrl: "https://api-finance.example.com",
     timezone: "Asia/Dubai", currency: "AED", fxToBase: 1,
-    serviceEmail: "root@deltainstitutions.com",
-    mongoUri: "mongodb://secret:hunter2@db.example.com/finance",
-    ssoSecret: "a-very-secret-value",
+    // Posted on purpose: a screen must not be able to put these in the
+    // database and create a second source of truth.
+    mongoUri: "mongodb://posted:should-not-store@example.com/x",
+    ssoSecret: "posted-should-not-store",
   });
   check("a target can be registered", made.code === "finance-hq", `got ${made.code}`);
   check("...and is reported as a finance system", made.kind === "finance", `kind=${made.kind}`);
+
+  const stored = await Organization.findOne({ code: "finance-hq" }).lean() as Record<string, unknown>;
+  check("a secret posted to the registry is not stored",
+    !JSON.stringify(stored).includes("should-not-store"), "it was written to the database");
+  check("...and neither is an address",
+    stored["apiUrl"] === undefined, `got ${String(stored["apiUrl"])}`);
 
   // The whole point of the admin serializer.
   const asJson = JSON.stringify(made);
   check("the connection string never reaches the screen", !asJson.includes("hunter2"), "it leaked");
   check("...nor the SSO secret", !asJson.includes("a-very-secret-value"), "it leaked");
   check("...but the screen can tell they are set", made.hasMongoUri && made.hasSsoSecret);
+  check("...and the address, which is not a secret, is shown",
+    made.apiUrl === "https://api-finance.example.com", `got ${made.apiUrl}`);
+  check("...and it names the variables behind it",
+    made.envPrefix === "FINANCE_HQ", `got ${made.envPrefix}`);
 
   const rows = await orgService.listAll();
   check("the registry lists it", rows.some((r) => r.code === "finance-hq"));
   check("...with no secrets in the list either",
     !JSON.stringify(rows).includes("hunter2"), "a secret leaked into the list");
 
-  // Editing the name must not oblige somebody to retype a secret they cannot see.
+  // Unsetting a variable must show up, rather than the last known value
+  // continuing to be reported from somewhere.
+  delete process.env.FINANCE_HQ_SSO_SECRET;
+  const afterUnset = (await orgService.listAll()).find((r) => r.code === "finance-hq");
+  check("removing a variable is noticed at once", afterUnset?.hasSsoSecret === false);
+  check("...and the missing one is named",
+    afterUnset?.missing.includes("FINANCE_HQ_SSO_SECRET") === true,
+    `got ${afterUnset?.missing.join(", ")}`);
+  process.env.FINANCE_HQ_SSO_SECRET = "a-very-secret-value";
+
   const renamed = await orgService.update("finance-hq", { name: "Delta HQ Accounts" });
-  check("renaming leaves the secrets alone", renamed.hasMongoUri && renamed.hasSsoSecret);
+  check("renaming leaves the configuration alone", renamed.hasMongoUri && renamed.hasSsoSecret);
   check("...and takes the new name", renamed.name === "Delta HQ Accounts", `got ${renamed.name}`);
 
   let dupe = "";
@@ -261,9 +297,8 @@ step("Letting a role in one system mean a role in another");
   if (!(await Organization.findOne({ code: "finance-hq" }))) {
     await Organization.create({
       code: "finance-hq", kind: "finance", name: "Delta HQ Finance",
-      appUrl: "https://f.example.com", apiUrl: "https://api-f.example.com",
       timezone: "Asia/Dubai", currency: "AED", fxToBase: 1,
-      serviceEmail: "root@deltainstitutions.com", isActive: true,
+      isActive: true,
     });
   }
 

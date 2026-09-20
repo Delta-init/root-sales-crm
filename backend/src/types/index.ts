@@ -118,20 +118,15 @@ export interface IOrganization extends Document {
   name: string;
   /** What kind of system this is — see TargetKind. Older rows are CRMs. */
   kind: TargetKind;
-  appUrl: string;
-  apiUrl: string;
-  /** Read-only connection string, used by the group report only. */
-  mongoUri: string;
+  /*
+   * How to reach this system is not here — see config/targets.ts. The
+   * addresses, database URI and shared secret come from the environment, so
+   * nothing on this document opens anything.
+   */
   timezone: string;
   currency: string;
   /** Multiplier to BASE_CURRENCY. 1 for orgs already in the base currency. */
   fxToBase: number;
-  /** Email of the dedicated service account the portal signs in as. */
-  serviceEmail: string;
-  /** Which organization this target is inside the system it points at. */
-  remoteOrgId: string;
-  /** Shared secret for this org's SSO endpoint. Never sent to the browser. */
-  ssoSecret: string;
   accent: string;
   /** Earliest lead in this org's data — the group report uses it so short-lived
    *  orgs are not silently compared against Delta's much longer history. */

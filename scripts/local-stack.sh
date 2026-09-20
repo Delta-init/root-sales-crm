@@ -90,11 +90,16 @@ AUTH_SECRET="$LONG" NEXTAUTH_SECRET="$LONG" NEXTAUTH_URL="http://localhost:$FINA
 echo "Seeding the portal…"
 cd "$PORTAL/backend"
 MONGODB_URI="$PORTAL_DB" \
-LOCAL_FINANCE_API="http://localhost:$FINANCE_API" \
-LOCAL_FINANCE_APP="http://localhost:$FINANCE_WEB" \
-LOCAL_FINANCE_ORG_ID="$FINANCE_ORG_ID" \
-LOCAL_PORTAL_SECRET="$SECRET" \
   bun src/scripts/seed-local.ts
+
+# How the portal reaches finance. These live in the environment rather than in
+# the database — see backend/src/config/targets.ts — so the rig has to set them
+# the same way a real deployment does.
+export FINANCE_HQ_APP_URL="http://localhost:$FINANCE_WEB"
+export FINANCE_HQ_API_URL="http://localhost:$FINANCE_API"
+export FINANCE_HQ_SSO_SECRET="$SECRET"
+export FINANCE_HQ_REMOTE_ORG_ID="$FINANCE_ORG_ID"
+export FINANCE_HQ_SERVICE_EMAIL="root@local.test"
 
 echo "Starting the portal API on :$PORTAL_API…"
 MONGODB_URI="$PORTAL_DB" PORT="$PORTAL_API" NODE_ENV=development \
