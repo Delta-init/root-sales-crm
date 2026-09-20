@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
-  Building2, GraduationCap, KeyRound, Loader2, Plus, Search, ShieldCheck, Trash2, UserPlus, Users2, Wallet,
+  Building2, Download, GraduationCap, KeyRound, Loader2, Plus, Search, ShieldCheck, Trash2, UserPlus, Users2, Wallet,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -17,7 +17,9 @@ import {
 import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
-import type { Person, PortalRole, Target, TargetCode, TargetKind } from "@/lib/types";
+import type {
+  DirectoryPerson, ImportResult, Person, PortalRole, Target, TargetCode, TargetKind,
+} from "@/lib/types";
 
 /**
  * Who may open what.
@@ -50,6 +52,7 @@ export default function AccessPage() {
   const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [granting, setGranting] = useState<Person | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const people = useQuery({
     queryKey: ["access", "people", q],
@@ -91,14 +94,21 @@ export default function AccessPage() {
         </p>
       </motion.div>
 
-      <div className="relative max-w-sm">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search by name or email…"
-          className="pl-9"
-        />
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative max-w-sm flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search by name or email…"
+            className="pl-9"
+          />
+        </div>
+        {/* HRMS is where a person first exists, so they are brought in from
+            there rather than typed here a second time. */}
+        <Button variant="outline" className="gap-1.5" onClick={() => setImporting(true)}>
+          <Download className="h-4 w-4" /> Import from HRMS
+        </Button>
       </div>
 
       {people.isLoading ? (
@@ -199,6 +209,13 @@ export default function AccessPage() {
           ))}
         </div>
       )}
+
+      <ImportDialog
+        open={importing}
+        targets={targets.data ?? []}
+        onClose={() => setImporting(false)}
+        onDone={() => void qc.invalidateQueries({ queryKey: ["access", "people"] })}
+      />
 
       <GrantDialog
         person={granting}
@@ -375,6 +392,221 @@ function GrantDialog({
             Give access
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+
+/**
+ * Bringing people in from HRMS.
+ *
+ * Name and email come from HRMS and cannot be edited here — that is the point
+ * of importing rather than typing, since email is what every handoff matches
+ * on and a second spelling of an address is somebody who cannot sign in.
+ *
+ * Their systems can be chosen at the same time, because the alternative is
+ * importing twenty people and then opening twenty dialogs. Everybody selected
+ * gets the same ones, which is the common case: a batch of joiners on the same
+ * team. Anything unusual is a grant afterwards.
+ */
+function ImportDialog({
+  open, targets, onClose, onDone,
+}: {
+  open: boolean;
+  targets: Target[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [grants, setGrants] = useState<{ target: string; roleInTarget: string }[]>([]);
+  const [results, setResults] = useState<ImportResult[] | null>(null);
+  const [error, setError] = useState("");
+
+  const directory = useQuery({
+    queryKey: ["access", "hrms-directory"],
+    enabled: open,
+    queryFn: async () =>
+      (await api.get<{ data: DirectoryPerson[] }>("/access/hrms-directory")).data.data,
+  });
+
+  const run = useMutation({
+    mutationFn: async () =>
+      (await api.post<{ data: ImportResult[] }>("/access/import", {
+        emails: Array.from(picked),
+        grants: grants.filter((g) => g.target && g.roleInTarget.trim()),
+      })).data.data,
+    onSuccess: (r) => { setResults(r); setError(""); onDone(); },
+    onError: (e: unknown) => {
+      setError(
+        (e as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+          "The import failed",
+      );
+    },
+  });
+
+  function close() {
+    setPicked(new Set());
+    setGrants([]);
+    setResults(null);
+    setError("");
+    onClose();
+  }
+
+  const available = (directory.data ?? []).filter((d) => !d.alreadyHere);
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && close()}>
+      <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Import from HRMS</DialogTitle>
+          <DialogDescription>
+            Everybody HR has created. Their name and address come from there, so the two systems
+            cannot disagree about who somebody is.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Shown once. There is nowhere else these are kept. */}
+        {results ? (
+          <div className="space-y-3">
+            <p className="text-sm">
+              {results.filter((r) => r.created).length} added,{" "}
+              {results.filter((r) => !r.created).length} already here.
+            </p>
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+              <p className="text-xs text-amber-400">
+                These passwords are shown once and stored nowhere. Copy them before closing.
+              </p>
+              <div className="mt-2 space-y-1 font-mono text-xs">
+                {results.filter((r) => r.password).map((r) => (
+                  <div key={r.email} className="flex justify-between gap-3">
+                    <span className="truncate">{r.email}</span>
+                    <span className="shrink-0 font-semibold">{r.password}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {results.some((r) => r.note) && (
+              <div className="space-y-1 text-xs text-muted-foreground">
+                {results.filter((r) => r.note).map((r) => (
+                  <p key={r.email}>{r.email} — {r.note}</p>
+                ))}
+              </div>
+            )}
+            <DialogFooter>
+              <Button onClick={close}>Done</Button>
+            </DialogFooter>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {directory.isLoading ? (
+              <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> Asking HRMS…
+              </div>
+            ) : directory.isError ? (
+              <p className="text-sm text-red-400">
+                {(directory.error as { response?: { data?: { message?: string } } })?.response?.data
+                  ?.message ?? "HRMS could not be reached"}
+              </p>
+            ) : available.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                Everybody HRMS knows about is already here.
+              </p>
+            ) : (
+              <>
+                <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-border p-2">
+                  {available.map((d) => (
+                    <label
+                      key={d.email}
+                      className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 text-sm hover:bg-accent/50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={picked.has(d.email)}
+                        onChange={(e) => {
+                          const next = new Set(picked);
+                          if (e.target.checked) next.add(d.email); else next.delete(d.email);
+                          setPicked(next);
+                        }}
+                      />
+                      <span className="flex-1 truncate">
+                        {d.name}
+                        <span className="ml-2 text-xs text-muted-foreground">{d.email}</span>
+                      </span>
+                      {d.designation && (
+                        <span className="shrink-0 text-xs text-muted-foreground">{d.designation}</span>
+                      )}
+                      {d.status !== "active" && <Badge variant="outline">{d.status}</Badge>}
+                    </label>
+                  ))}
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    Give everybody selected these systems (optional)
+                  </p>
+                  {grants.map((g, i) => (
+                    <div key={i} className="flex gap-2">
+                      <select
+                        value={g.target}
+                        onChange={(e) => {
+                          const next = [...grants];
+                          next[i] = { ...next[i]!, target: e.target.value };
+                          setGrants(next);
+                        }}
+                        className="h-9 flex-1 rounded-md border border-border bg-background px-2 text-sm"
+                      >
+                        <option value="">Choose a system…</option>
+                        {targets.map((t) => (
+                          <option key={t.code} value={t.code}>{t.name}</option>
+                        ))}
+                      </select>
+                      <Input
+                        value={g.roleInTarget}
+                        onChange={(e) => {
+                          const next = [...grants];
+                          next[i] = { ...next[i]!, roleInTarget: e.target.value };
+                          setGrants(next);
+                        }}
+                        placeholder="their role there"
+                        className="flex-1"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setGrants(grants.filter((_, j) => j !== i))}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => setGrants([...grants, { target: "", roleInTarget: "" }])}
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add a system
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {error && <p className="text-sm text-red-400">{error}</p>}
+
+            <DialogFooter>
+              <Button variant="ghost" onClick={close}>Cancel</Button>
+              <Button
+                disabled={picked.size === 0 || run.isPending}
+                onClick={() => run.mutate()}
+                className="gap-1.5"
+              >
+                {run.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Import {picked.size > 0 ? picked.size : ""}
+              </Button>
+            </DialogFooter>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

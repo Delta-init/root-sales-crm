@@ -256,3 +256,22 @@ export interface RegistryTarget {
   hasMongoUri: boolean;
   hasSsoSecret: boolean;
 }
+
+/** Somebody HRMS knows about, and whether the portal already has them. */
+export interface DirectoryPerson {
+  employeeCode: string;
+  name: string;
+  email: string;
+  designation: string;
+  status: string;
+  alreadyHere: boolean;
+}
+
+/** What came of importing one person. The password is shown once and kept nowhere. */
+export interface ImportResult {
+  email: string;
+  name: string;
+  created: boolean;
+  password?: string;
+  note?: string;
+}

@@ -1,4 +1,5 @@
 import type { Response, NextFunction } from "express";
+import { randomBytes } from "node:crypto";
 import { AdminUser } from "../models/AdminUser.js";
 import { Access } from "../models/Access.js";
 import { Organization } from "../models/Organization.js";
@@ -135,6 +136,122 @@ export const provision = async (req: AuthenticatedRequest, res: Response, next: 
     });
 
     sendSuccess(res, result.created ? "Account created" : "They already had one", result);
+  } catch (err) { next(err); }
+};
+
+/**
+ * Everybody HRMS knows, and whether the portal already has them.
+ *
+ * HRMS is where a person first exists — HR creates the employee, and this
+ * reads them from there rather than asking somebody to type the same staff in
+ * twice. Two lists of one workforce drift, and since email is what every
+ * handoff matches on, a second spelling of an address is a person who cannot
+ * sign in rather than a cosmetic difference.
+ */
+export const hrmsDirectory = async (_req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { listEmployees } = await import("../lib/hrmsClient.js");
+    const staff = await listEmployees();
+
+    const existing = await AdminUser.find({}).select("email").lean();
+    const have = new Set(existing.map((u) => String(u.email).toLowerCase()));
+
+    sendSuccess(
+      res,
+      "Directory fetched",
+      staff
+        // Somebody with no address cannot be imported: there would be nothing
+        // to sign them in with, here or anywhere they were then sent.
+        .filter((e) => e.email?.trim())
+        .map((e) => ({
+          employeeCode: e.employeeCode,
+          name: e.name,
+          email: e.email.toLowerCase(),
+          designation: e.designation,
+          status: e.status,
+          alreadyHere: have.has(e.email.toLowerCase()),
+        })),
+    );
+  } catch (err) { next(err); }
+};
+
+/**
+ * Bring people in from HRMS, optionally with their systems already granted.
+ *
+ * Name and email come from HRMS and are not editable here — that is the point
+ * of importing rather than typing. A password is generated and returned once:
+ * they sign in to the portal with it, and there is nowhere else it is kept.
+ */
+export const importFromHrms = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { emails, grants } = req.body as {
+      emails?: string[];
+      grants?: { target: string; roleInTarget: string }[];
+    };
+    if (!Array.isArray(emails) || emails.length === 0) {
+      sendError(res, "Choose at least one person", 400);
+      return;
+    }
+
+    const { listEmployees } = await import("../lib/hrmsClient.js");
+    const staff = await listEmployees();
+    const byEmail = new Map(staff.filter((e) => e.email).map((e) => [e.email.toLowerCase(), e]));
+
+    const results: { email: string; name: string; created: boolean; password?: string; note?: string }[] = [];
+
+    for (const raw of emails) {
+      const email = String(raw).toLowerCase().trim();
+      const person = byEmail.get(email);
+      if (!person) {
+        results.push({ email, name: "", created: false, note: "HRMS does not have this address" });
+        continue;
+      }
+
+      let user = await AdminUser.findOne({ email });
+      let password: string | undefined;
+
+      if (!user) {
+        // Long and random. Nobody memorises it; it is shown once so an
+        // administrator can pass it on, and stored only as a hash.
+        password = `Dl-${randomBytes(9).toString("base64url")}`;
+        user = await AdminUser.create({
+          name: person.name,
+          email,
+          password,
+          role: "member",
+          status: person.status === "active" ? "active" : "inactive",
+        });
+      }
+
+      for (const g of grants ?? []) {
+        if (!g?.target || !g.roleInTarget?.trim()) continue;
+        const org = await Organization.findOne({ code: g.target }).select("_id");
+        if (!org) continue;
+        await accessService.grant({
+          userId: String(user._id),
+          target: g.target as TargetCode,
+          roleInTarget: g.roleInTarget.trim(),
+          grantedBy: req.admin!.adminId,
+        });
+      }
+
+      results.push({
+        email,
+        name: person.name,
+        created: Boolean(password),
+        ...(password ? { password } : {}),
+        ...(password ? {} : { note: "Already in the portal — access updated" }),
+      });
+    }
+
+    await record(req, "people_imported", {
+      adminId: req.admin!.adminId,
+      adminEmail: req.admin!.email,
+      org: null,
+      detail: `Imported ${results.filter((r) => r.created).length} of ${results.length} from HRMS`,
+    });
+
+    sendSuccess(res, "Imported", results);
   } catch (err) { next(err); }
 };
 

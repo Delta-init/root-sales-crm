@@ -44,6 +44,20 @@ const envSchema = z.object({
   // Banglore is converted.
   BASE_CURRENCY: z.string().default("AED"),
   INR_TO_AED: z.string().default("0.0435"),
+  /**
+   * HRMS, which is where a person first exists.
+   *
+   * HR creates the employee there and the portal reads them from it, rather
+   * than being a second place the same staff are typed in. Unset, the import
+   * is simply unavailable and people can still be added another way.
+   *
+   * HRMS_ORG_ID is the organization inside HRMS whose staff this portal serves.
+   */
+  HRMS_API_URL:             z.string().default(""),
+  HRMS_CLIENT_ID:           z.string().default(""),
+  HRMS_INTEGRATION_SECRET:  z.string().default(""),
+  HRMS_ORG_ID:              z.string().default(""),
+
 });
 
 const parsed = envSchema.safeParse(process.env);
