@@ -73,16 +73,14 @@ const orgSeeds = (): OrgSeed[] => [
     accent: "#ea580c",
     sortOrder: 4,
   },
-  {
-    code: "finance-banglore",
-    kind: "finance",
-    name: "Banglore Finance",
-    timezone: "Asia/Kolkata",
-    currency: "INR",
-    fxToBase: Number(env.INR_TO_AED),
-    accent: "#ea580c",
-    sortOrder: 5,
-  },
+  /*
+   * Banglore Finance is deliberately not seeded.
+   *
+   * It is one organization inside the same finance server as Delta HQ, told
+   * apart by a remote organization id nobody has supplied, so a row for it
+   * could only ever be a system that looks launchable and refuses. The code
+   * stays in the enums: the row is what is absent, not the idea of it.
+   */
   {
     code: "hrms",
     kind: "hrms",
