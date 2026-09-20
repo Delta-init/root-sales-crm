@@ -60,7 +60,7 @@ export default function PersonAccessPage() {
   return (
     <div className="space-y-5 p-6">
       <div className="flex items-start gap-3">
-        <Button variant="ghost" size="icon" onClick={() => router.push("/access")}>
+        <Button variant="ghost" size="icon" onClick={() => router.push("/users")}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div className="min-w-0 flex-1">

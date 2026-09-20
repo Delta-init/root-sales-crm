@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, ClipboardList, KeyRound, LayoutGrid, LogOut, Server, Shuffle, User } from "lucide-react";
+import { BarChart3, ClipboardList, KeyRound, LayoutGrid, LogOut, Server, Shuffle, User , Users2 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -23,7 +23,7 @@ const NAV = [
   { href: "/tracker", label: "Daily tracker", icon: ClipboardList },
   // Root admins only: deciding who may open which production system is the
   // portal's most consequential act, and the API refuses anybody else anyway.
-  { href: "/access", label: "Access", icon: KeyRound, rootOnly: true },
+  { href: "/users", label: "Users", icon: Users2, rootOnly: true },
   { href: "/registry", label: "Registry", icon: Server, rootOnly: true },
   { href: "/role-map", label: "Role map", icon: Shuffle, rootOnly: true },
 ];

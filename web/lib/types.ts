@@ -329,6 +329,8 @@ export interface DirectoryPerson {
   email: string;
   designation: string;
   status: string;
+  /** Resolved from HRMS's department id; blank where none is set there. */
+  department: string;
   alreadyHere: boolean;
 }
 
