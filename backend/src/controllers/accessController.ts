@@ -100,7 +100,37 @@ export const grant = async (req: AuthenticatedRequest, res: Response, next: Next
       detail: `Granted ${person.email} access to ${org.name} as ${roleInTarget.trim()}`,
     });
 
-    sendSuccess(res, "Access granted", { target: row.target, roleInTarget: row.roleInTarget });
+    /*
+     * What the rules say this also means — applied, and named in the answer.
+     * Access appearing that nobody asked for is alarming even when it is
+     * right, so the screen is told what was added and why.
+     */
+    const sourceName = org.name;
+    const alsoGave: { target: string; roleInTarget: string }[] = [];
+    for (const extra of await accessService.implied({
+      userId, target: target as TargetCode, roleInTarget: roleInTarget.trim(),
+    })) {
+      const org = await Organization.findOne({ code: extra.target }).select("name isActive");
+      if (!org?.isActive) continue;
+      await accessService.grant({
+        userId, target: extra.target,
+        roleInTarget: extra.roleInTarget,
+        grantedBy: req.admin!.adminId,
+      });
+      alsoGave.push({ target: org.name, roleInTarget: extra.roleInTarget });
+      await record(req, "access_granted", {
+        adminId: req.admin!.adminId,
+        adminEmail: req.admin!.email,
+        org: null,
+        detail: `Granted ${person.email} access to ${org.name} as ${extra.roleInTarget}, implied by being ${roleInTarget.trim()} in ${sourceName}`,
+      });
+    }
+
+    sendSuccess(res, "Access granted", {
+      target: row.target,
+      roleInTarget: row.roleInTarget,
+      alsoGave,
+    });
   } catch (err) { next(err); }
 };
 
@@ -252,6 +282,81 @@ export const importFromHrms = async (req: AuthenticatedRequest, res: Response, n
     });
 
     sendSuccess(res, "Imported", results);
+  } catch (err) { next(err); }
+};
+
+// ── The role map ──────────────────────────────────────────────────────────────
+
+export const listRoleMap = async (_req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { RoleMap } = await import("../models/RoleMap.js");
+    const rules = await RoleMap.find({}).sort({ fromTarget: 1, fromRole: 1 }).lean();
+    sendSuccess(
+      res,
+      "Rules fetched",
+      rules.map((r) => ({
+        id: String(r._id),
+        fromTarget: r.fromTarget,
+        fromRole: r.label || r.fromRole,
+        toTarget: r.toTarget,
+        toRole: r.toRole,
+      })),
+    );
+  } catch (err) { next(err); }
+};
+
+export const addRoleMap = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { fromTarget, fromRole, toTarget, toRole } = req.body as Record<string, string>;
+    if (!fromTarget || !fromRole?.trim() || !toTarget || !toRole?.trim()) {
+      sendError(res, "A rule needs a system and role on both sides", 400);
+      return;
+    }
+    if (fromTarget === toTarget) {
+      sendError(res, "A rule has to point at a different system", 400);
+      return;
+    }
+
+    const { RoleMap } = await import("../models/RoleMap.js");
+    // Upserted: writing the same rule twice is the same rule, and a second row
+    // would be a second answer to one question.
+    const rule = await RoleMap.findOneAndUpdate(
+      { fromTarget, fromRole: fromRole.trim().toLowerCase(), toTarget },
+      {
+        $set: { toRole: toRole.trim(), label: fromRole.trim(), createdBy: req.admin!.adminId },
+        $setOnInsert: { fromTarget, fromRole: fromRole.trim().toLowerCase(), toTarget },
+      },
+      { new: true, upsert: true },
+    );
+
+    await record(req, "role_map_changed", {
+      adminId: req.admin!.adminId,
+      adminEmail: req.admin!.email,
+      org: null,
+      detail: `${fromRole.trim()} in ${fromTarget} now means ${toRole.trim()} in ${toTarget}`,
+    });
+
+    sendSuccess(res, "Rule saved", { id: String(rule!._id) });
+  } catch (err) { next(err); }
+};
+
+export const removeRoleMap = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { RoleMap } = await import("../models/RoleMap.js");
+    const rule = await RoleMap.findByIdAndDelete(String(req.params["id"] ?? ""));
+    if (!rule) { sendError(res, "No such rule", 404); return; }
+
+    await record(req, "role_map_changed", {
+      adminId: req.admin!.adminId,
+      adminEmail: req.admin!.email,
+      org: null,
+      detail: `Removed: ${rule.label || rule.fromRole} in ${rule.fromTarget} meant ${rule.toRole} in ${rule.toTarget}`,
+    });
+
+    // Deliberately leaves alone the access it has already implied. Those were
+    // real grants somebody can see and revoke; withdrawing them because a rule
+    // changed would take away access nobody asked to remove.
+    sendSuccess(res, "Rule removed", { id: String(rule._id) });
   } catch (err) { next(err); }
 };
 

@@ -275,3 +275,12 @@ export interface ImportResult {
   password?: string;
   note?: string;
 }
+
+/** What a role in one system makes somebody in another. */
+export interface RoleRule {
+  id: string;
+  fromTarget: TargetCode;
+  fromRole: string;
+  toTarget: TargetCode;
+  toRole: string;
+}

@@ -252,6 +252,75 @@ step("Keeping the registry's secrets out of the screen");
   check("editing something unregistered is refused", /unknown target/i.test(unknown), `"${unknown}"`);
 }
 
+step("Letting a role in one system mean a role in another");
+{
+  const { RoleMap } = await import("../models/RoleMap.js");
+  const { accessService } = await import("../services/accessService.js");
+
+  // Registered again: the registry section above deleted and remade it.
+  if (!(await Organization.findOne({ code: "finance-hq" }))) {
+    await Organization.create({
+      code: "finance-hq", kind: "finance", name: "Delta HQ Finance",
+      appUrl: "https://f.example.com", apiUrl: "https://api-f.example.com",
+      timezone: "Asia/Dubai", currency: "AED", fxToBase: 1,
+      serviceEmail: "root@deltainstitutions.com", isActive: true,
+    });
+  }
+
+  await RoleMap.create({
+    fromTarget: "banglore", fromRole: "bde", label: "BDE",
+    toTarget: "finance-hq", toRole: "salesperson",
+  });
+
+  const fresh = await AdminUser.create({
+    name: "New Joiner", email: "joiner@e2e-test.com", password: "Password123!",
+    role: "member", status: "active",
+  });
+
+  const implied = await accessService.implied({
+    userId: String(fresh._id), target: "banglore", roleInTarget: "BDE",
+  });
+  check("a BDE is a salesperson in finance", implied.length === 1, `${implied.length} implied`);
+  check("...naming the system", implied[0]?.target === "finance-hq", `got ${implied[0]?.target}`);
+  check("...and the role that system uses", implied[0]?.roleInTarget === "salesperson", `got ${implied[0]?.roleInTarget}`);
+
+  // Whoever types it is a person, and the CRMs do not agree on capitals.
+  const lower = await accessService.implied({
+    userId: String(fresh._id), target: "banglore", roleInTarget: "  bde  ",
+  });
+  check("the match does not care about case or spacing", lower.length === 1, `${lower.length}`);
+
+  const other = await accessService.implied({
+    userId: String(fresh._id), target: "banglore", roleInTarget: "Team Leader",
+  });
+  check("a role with no rule implies nothing", other.length === 0, `${other.length}`);
+
+  const elsewhere = await accessService.implied({
+    userId: String(fresh._id), target: "delta", roleInTarget: "BDE",
+  });
+  check("...nor does the same role in a different CRM", elsewhere.length === 0, `${elsewhere.length}`);
+
+  // Somebody deliberately made this person an accountant. A later grant must
+  // not quietly put them back to what the rule says.
+  await accessService.grant({
+    userId: String(fresh._id), target: "finance-hq",
+    roleInTarget: "accountant", grantedBy: String(root._id),
+  });
+  const afterDecision = await accessService.implied({
+    userId: String(fresh._id), target: "banglore", roleInTarget: "BDE",
+  });
+  check("a decision already made is left alone", afterDecision.length === 0, `${afterDecision.length} would be re-applied`);
+
+  // One answer per question.
+  let dupe = "";
+  try {
+    await RoleMap.create({
+      fromTarget: "banglore", fromRole: "bde", toTarget: "finance-hq", toRole: "accountant",
+    });
+  } catch (e) { dupe = (e as Error).message; }
+  check("two answers to one question are refused", dupe.length > 0, "a second rule was accepted");
+}
+
 await mongoose.disconnect();
 console.log("");
 if (failures) { console.log(`\x1b[31m${failures} of ${checks} checks failed\x1b[0m`); process.exit(1); }

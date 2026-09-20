@@ -1,7 +1,9 @@
 import { Router } from "express";
 import { authenticate, requireRole } from "../middleware/auth.js";
 import {
-  listPeople, listTargets, hrmsDirectory, importFromHrms, grant, provision, revoke, setRole,
+  listPeople, listTargets, hrmsDirectory, importFromHrms,
+  listRoleMap, addRoleMap, removeRoleMap,
+  grant, provision, revoke, setRole,
 } from "../controllers/accessController.js";
 
 const router = Router();
@@ -20,6 +22,9 @@ router.get("/people", listPeople);
 router.get("/targets", listTargets);
 router.get("/hrms-directory", hrmsDirectory);
 router.post("/import", importFromHrms);
+router.get("/role-map", listRoleMap);
+router.post("/role-map", addRoleMap);
+router.delete("/role-map/:id", removeRoleMap);
 router.post("/grant", grant);
 router.post("/provision", provision);
 router.delete("/:userId/:target", revoke);

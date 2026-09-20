@@ -23,6 +23,7 @@ const auditLogSchema = new Schema<IAuditLog>(
         "target_updated",
         "account_provisioned",
         "people_imported",
+        "role_map_changed",
       ],
       required: true,
     },

@@ -280,8 +280,25 @@ function GrantDialog({
 
   const grant = useMutation({
     mutationFn: async () =>
-      api.post("/access/grant", { userId: person!.id, target, roleInTarget: role.trim() }),
-    onSuccess: () => { setTarget(""); setRole(""); setError(""); setNote(""); onDone(); },
+      (await api.post<{ data: { alsoGave?: { target: string; roleInTarget: string }[] } }>(
+        "/access/grant",
+        { userId: person!.id, target, roleInTarget: role.trim() },
+      )).data,
+    onSuccess: (d) => {
+      // The role map may have given them more than was asked for. Access
+      // appearing that nobody asked for is alarming even when it is right, so
+      // it is said rather than found later.
+      const also = d.data?.alsoGave ?? [];
+      if (also.length) {
+        setNote(
+          `Also given ${also.map((a) => `${a.target} as ${a.roleInTarget}`).join(", ")} — from the role map.`,
+        );
+        setError("");
+        onDone();
+        return;
+      }
+      setTarget(""); setRole(""); setError(""); setNote(""); onDone();
+    },
     onError: (e: unknown) => {
       setError(
         (e as { response?: { data?: { message?: string } } })?.response?.data?.message ??

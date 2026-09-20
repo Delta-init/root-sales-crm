@@ -44,6 +44,39 @@ export const accessService = {
     return row!;
   },
 
+  /**
+   * What else a grant implies.
+   *
+   * A BDE in a sales CRM is a salesperson in finance, so giving somebody the
+   * first should give them the second — that is the whole point of writing the
+   * rule down. Returned rather than applied here so the caller can say what it
+   * is about to do: access appearing that nobody asked for is alarming even
+   * when it is correct, and especially then.
+   *
+   * An existing grant for the same target is left alone. Somebody deliberately
+   * made a salesperson an accountant once; a rule should not quietly put that
+   * back on the next unrelated grant.
+   */
+  async implied(input: {
+    userId: string;
+    target: TargetCode;
+    roleInTarget: string;
+  }): Promise<{ target: TargetCode; roleInTarget: string }[]> {
+    const { RoleMap } = await import("../models/RoleMap.js");
+    const rules = await RoleMap.find({
+      fromTarget: input.target,
+      fromRole: input.roleInTarget.trim().toLowerCase(),
+    }).lean();
+    if (rules.length === 0) return [];
+
+    const held = new Set(
+      (await Access.find({ user: input.userId }).select("target").lean()).map((a) => String(a.target)),
+    );
+    return rules
+      .filter((r) => !held.has(String(r.toTarget)))
+      .map((r) => ({ target: r.toTarget as TargetCode, roleInTarget: r.toRole }));
+  },
+
   async revoke(userId: string, target: TargetCode): Promise<boolean> {
     const { deletedCount } = await Access.deleteOne({ user: userId, target });
     return (deletedCount ?? 0) > 0;

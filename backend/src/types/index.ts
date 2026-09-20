@@ -74,6 +74,26 @@ export type TargetCode = OrgCode;
  * open to be a row somebody put there — not a rule that infers it from a role,
  * a name or an email domain, each of which is one rename away from being wrong.
  */
+/**
+ * What a role in one system makes somebody in another.
+ *
+ * A BDE in a sales CRM is a salesperson in finance — a fact about the business
+ * that was being retyped on every grant, and therefore retyped differently.
+ */
+export interface IRoleMap extends Document {
+  _id: Types.ObjectId;
+  fromTarget: TargetCode;
+  /** Lowercased for matching; `label` keeps what somebody actually typed. */
+  fromRole: string;
+  label: string;
+  toTarget: TargetCode;
+  /** Spelled as the far system spells it — sent there verbatim. */
+  toRole: string;
+  createdBy: Types.ObjectId | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface IAccess extends Document {
   _id: Types.ObjectId;
   user: Types.ObjectId;
@@ -136,7 +156,8 @@ export type AuditAction =
   | "target_registered"
   | "target_updated"
   | "account_provisioned"
-  | "people_imported";
+  | "people_imported"
+  | "role_map_changed";
 
 export interface IAuditLog extends Document {
   admin: Types.ObjectId | null;
