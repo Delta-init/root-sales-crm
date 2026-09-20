@@ -108,6 +108,8 @@ export interface IOrganization extends Document {
   fxToBase: number;
   /** Email of the dedicated service account the portal signs in as. */
   serviceEmail: string;
+  /** Which organization this target is inside the system it points at. */
+  remoteOrgId: string;
   /** Shared secret for this org's SSO endpoint. Never sent to the browser. */
   ssoSecret: string;
   accent: string;
@@ -132,7 +134,8 @@ export type AuditAction =
   | "access_revoked"
   | "portal_role_changed"
   | "target_registered"
-  | "target_updated";
+  | "target_updated"
+  | "account_provisioned";
 
 export interface IAuditLog extends Document {
   admin: Types.ObjectId | null;

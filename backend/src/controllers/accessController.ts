@@ -3,6 +3,7 @@ import { AdminUser } from "../models/AdminUser.js";
 import { Access } from "../models/Access.js";
 import { Organization } from "../models/Organization.js";
 import { accessService } from "../services/accessService.js";
+import { provisionService } from "../services/provisionService.js";
 import { record } from "../services/auditService.js";
 import { sendError, sendSuccess } from "../utils/response.js";
 import type { AuthenticatedRequest, TargetCode } from "../types/index.js";
@@ -99,6 +100,41 @@ export const grant = async (req: AuthenticatedRequest, res: Response, next: Next
     });
 
     sendSuccess(res, "Access granted", { target: row.target, roleInTarget: row.roleInTarget });
+  } catch (err) { next(err); }
+};
+
+/**
+ * Create the account in the target, for somebody who has none.
+ *
+ * Separate from granting, and on purpose. A grant says where somebody may go;
+ * this makes them exist there. Rolling the two together would mean every grant
+ * silently creating accounts in production systems, which is a much bigger
+ * thing than deciding who may open what.
+ */
+export const provision = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { userId, target, roleInTarget } = req.body as {
+      userId?: string; target?: string; roleInTarget?: string;
+    };
+    if (!userId || !target || !roleInTarget?.trim()) {
+      sendError(res, "userId, target and roleInTarget are all required", 400);
+      return;
+    }
+
+    const result = await provisionService.provision({
+      userId, targetCode: target, roleInTarget: roleInTarget.trim(),
+    });
+
+    await record(req, "account_provisioned", {
+      adminId: req.admin!.adminId,
+      adminEmail: req.admin!.email,
+      org: null,
+      detail: result.created
+        ? `Created an account for ${result.email} in ${result.targetName} as ${roleInTarget.trim()}`
+        : `${result.email} already had an account in ${result.targetName}`,
+    });
+
+    sendSuccess(res, result.created ? "Account created" : "They already had one", result);
   } catch (err) { next(err); }
 };
 

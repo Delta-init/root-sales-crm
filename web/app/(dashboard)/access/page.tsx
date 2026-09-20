@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
-  Building2, GraduationCap, KeyRound, Loader2, Plus, Search, ShieldCheck, Trash2, Users2, Wallet,
+  Building2, GraduationCap, KeyRound, Loader2, Plus, Search, ShieldCheck, Trash2, UserPlus, Users2, Wallet,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -233,10 +233,38 @@ function GrantDialog({
   const [role, setRole] = useState("");
   const [error, setError] = useState("");
 
+  const [note, setNote] = useState("");
+
+  /*
+   * Making the account in the target, for somebody who has none.
+   *
+   * Its own button rather than something the grant does quietly. A grant says
+   * where somebody may go; this makes them exist there, with a role, in a
+   * production system. Rolling the two together would mean every grant
+   * creating accounts, which is a much larger thing to do by accident.
+   */
+  const provision = useMutation({
+    mutationFn: async () =>
+      (await api.post<{ data: { created: boolean }; message: string }>("/access/provision", {
+        userId: person!.id, target, roleInTarget: role.trim(),
+      })).data,
+    onSuccess: (d) => {
+      setError("");
+      setNote(d.data.created ? "Account created there." : "They already had an account there.");
+    },
+    onError: (e: unknown) => {
+      setNote("");
+      setError(
+        (e as { response?: { data?: { message?: string } } })?.response?.data?.message ??
+          "The account could not be created",
+      );
+    },
+  });
+
   const grant = useMutation({
     mutationFn: async () =>
       api.post("/access/grant", { userId: person!.id, target, roleInTarget: role.trim() }),
-    onSuccess: () => { setTarget(""); setRole(""); setError(""); onDone(); },
+    onSuccess: () => { setTarget(""); setRole(""); setError(""); setNote(""); onDone(); },
     onError: (e: unknown) => {
       setError(
         (e as { response?: { data?: { message?: string } } })?.response?.data?.message ??
@@ -307,6 +335,31 @@ function GrantDialog({
               </div>
             )}
           </div>
+
+          {/* Said here rather than left to be discovered on the first launch:
+              access to a system somebody has no account in fails at sign-in,
+              with a message they cannot act on. */}
+          {target && role.trim() && (
+            <div className="rounded-lg border border-border bg-muted/20 p-3 text-xs">
+              <p className="text-muted-foreground">
+                They need an account in that system already. If they have none, create one here —
+                it is made with the role above and no password, since they arrive through the portal.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2 gap-1.5"
+                disabled={provision.isPending}
+                onClick={() => provision.mutate()}
+              >
+                {provision.isPending
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <UserPlus className="h-3.5 w-3.5" />}
+                Create their account there
+              </Button>
+              {note && <p className="mt-2 text-emerald-400">{note}</p>}
+            </div>
+          )}
 
           {error && <p className="text-sm text-red-400">{error}</p>}
         </div>

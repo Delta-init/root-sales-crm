@@ -21,6 +21,7 @@ const auditLogSchema = new Schema<IAuditLog>(
         "portal_role_changed",
         "target_registered",
         "target_updated",
+        "account_provisioned",
       ],
       required: true,
     },

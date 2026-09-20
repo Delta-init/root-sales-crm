@@ -46,6 +46,7 @@ export const toAdmin = (org: IOrganization & { mongoUri?: string; ssoSecret?: st
   currency: org.currency,
   fxToBase: org.fxToBase,
   serviceEmail: org.serviceEmail,
+  remoteOrgId: org.remoteOrgId,
   accent: org.accent,
   isActive: org.isActive,
   sortOrder: org.sortOrder,
@@ -56,7 +57,7 @@ export const toAdmin = (org: IOrganization & { mongoUri?: string; ssoSecret?: st
 /** Fields an administrator may write. Code is not among them — see update(). */
 const WRITABLE = [
   "kind", "name", "appUrl", "apiUrl", "timezone", "currency",
-  "fxToBase", "serviceEmail", "accent", "isActive", "sortOrder",
+  "fxToBase", "serviceEmail", "remoteOrgId", "accent", "isActive", "sortOrder",
 ] as const;
 
 /** Written when given, never returned. Blank means "leave what is there". */

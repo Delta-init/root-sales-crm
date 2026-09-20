@@ -8,6 +8,7 @@
     "start": "bun src/index.ts",
     "seed": "bun src/seeds/bootstrap.ts",
     "check:access": "./scripts/access-check.sh",
+    "seed:local": "bun src/scripts/seed-local.ts",
     "build": "bun build src/index.ts --outdir dist --target bun"
   },
   "dependencies": {

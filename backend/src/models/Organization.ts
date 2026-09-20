@@ -37,6 +37,18 @@ const organizationSchema = new Schema<IOrganization>(
     fxToBase: { type: Number, required: true, default: 1 },
 
     serviceEmail: { type: String, trim: true, lowercase: true, default: "" },
+    /*
+     * Which organization this target is *inside* the system it points at.
+     *
+     * Needed only where one deployment holds several. Finance is one server
+     * with a Delta HQ and a Delta Banglore organization in it, so two registry
+     * rows share an address and are told apart by this. A CRM is one
+     * organization per deployment and leaves it blank.
+     *
+     * Only provisioning needs it: signing somebody in uses the memberships
+     * they already have, which say where they belong without being asked.
+     */
+    remoteOrgId: { type: String, trim: true, default: "" },
     // Shared secret for this org's SSO endpoint. select:false so it can never
     // leak through a stray .find() that gets serialised to the browser.
     ssoSecret: { type: String, default: "", select: false },
