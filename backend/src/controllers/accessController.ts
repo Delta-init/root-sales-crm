@@ -181,8 +181,21 @@ export const provision = async (req: AuthenticatedRequest, res: Response, next: 
  */
 export const hrmsDirectory = async (_req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    const { listEmployees } = await import("../lib/hrmsClient.js");
-    const staff = await listEmployees();
+    const { listEmployees, listDepartments } = await import("../lib/hrmsClient.js");
+
+    /*
+     * The roster, and the department names it refers to by id.
+     *
+     * Settled rather than awaited together: a directory that arrives without
+     * department names is still the list somebody came here to read, and
+     * failing the whole screen because one of two calls did not answer would
+     * trade something useful for nothing.
+     */
+    const [staff, departments] = await Promise.all([
+      listEmployees(),
+      listDepartments().catch(() => []),
+    ]);
+    const deptName = new Map(departments.map((d) => [d.id, d.name]));
 
     const existing = await AdminUser.find({}).select("email").lean();
     const have = new Set(existing.map((u) => String(u.email).toLowerCase()));
@@ -200,6 +213,7 @@ export const hrmsDirectory = async (_req: AuthenticatedRequest, res: Response, n
           email: e.email.toLowerCase(),
           designation: e.designation,
           status: e.status,
+          department: e.departmentId ? deptName.get(e.departmentId) ?? "" : "",
           alreadyHere: have.has(e.email.toLowerCase()),
         })),
     );
@@ -479,5 +493,118 @@ export const setRoleInTarget = async (req: AuthenticatedRequest, res: Response, 
     });
 
     sendSuccess(res, result.detail, result);
+  } catch (err) { next(err); }
+};
+
+/**
+ * Give one person one system, with whatever the role map says that implies.
+ *
+ * Shared by the single grant and the bulk one so the two cannot drift: a rule
+ * that fired when granting one person and not when granting ten would be the
+ * kind of difference nobody notices until somebody is missing an account.
+ */
+async function applyGrant(
+  req: AuthenticatedRequest,
+  person: { _id: unknown; email: string },
+  target: string,
+  roleInTarget: string,
+): Promise<{ target: string; targetName: string; roleInTarget: string;
+            alsoGave: { target: string; roleInTarget: string }[] }> {
+  const org = await Organization.findOne({ code: target }).select("name isActive");
+  if (!org) throw Object.assign(new Error(`Unknown target: ${target}`), { statusCode: 404 });
+  if (!org.isActive) throw Object.assign(new Error(`${org.name} is not active`), { statusCode: 409 });
+
+  const userId = String(person._id);
+  const role = roleInTarget.trim();
+
+  await accessService.grant({
+    userId, target: target as TargetCode, roleInTarget: role,
+    grantedBy: req.admin!.adminId,
+  });
+  await record(req, "access_granted", {
+    adminId: req.admin!.adminId, adminEmail: req.admin!.email, org: null,
+    detail: `Granted ${person.email} access to ${org.name} as ${role}`,
+  });
+
+  const alsoGave: { target: string; roleInTarget: string }[] = [];
+  for (const extra of await accessService.implied({
+    userId, target: target as TargetCode, roleInTarget: role,
+  })) {
+    const other = await Organization.findOne({ code: extra.target }).select("name isActive");
+    if (!other?.isActive) continue;
+    await accessService.grant({
+      userId, target: extra.target, roleInTarget: extra.roleInTarget,
+      grantedBy: req.admin!.adminId,
+    });
+    alsoGave.push({ target: other.name, roleInTarget: extra.roleInTarget });
+    await record(req, "access_granted", {
+      adminId: req.admin!.adminId, adminEmail: req.admin!.email, org: null,
+      detail: `Granted ${person.email} access to ${other.name} as ${extra.roleInTarget}, implied by being ${role} in ${org.name}`,
+    });
+  }
+
+  return { target, targetName: org.name, roleInTarget: role, alsoGave };
+}
+
+/**
+ * Several people, several systems, one action.
+ *
+ * Each pairing is applied on its own and reported on its own. One person
+ * failing — a system switched off, a role that system does not have — must not
+ * silently drop the other nineteen, and an administrator needs to know which
+ * of the twenty did not happen rather than being told "some errors occurred".
+ */
+export const grantMany = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { userIds, grants } = req.body as {
+      userIds?: string[];
+      grants?: { target?: string; roleInTarget?: string }[];
+    };
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      sendError(res, "Choose at least one person", 400); return;
+    }
+    const wanted = (grants ?? []).filter((g) => g.target && g.roleInTarget?.trim());
+    if (wanted.length === 0) {
+      sendError(res, "Choose at least one system and role", 400); return;
+    }
+
+    const people = await AdminUser.find({ _id: { $in: userIds } }).select("name email role");
+    const results: {
+      email: string; name: string;
+      given: { targetName: string; roleInTarget: string }[];
+      alsoGave: { target: string; roleInTarget: string }[];
+      failed: { target: string; why: string }[];
+    }[] = [];
+
+    for (const person of people) {
+      const row = { email: person.email, name: person.name,
+                    given: [] as { targetName: string; roleInTarget: string }[],
+                    alsoGave: [] as { target: string; roleInTarget: string }[],
+                    failed: [] as { target: string; why: string }[] };
+
+      /*
+       * A root admin already opens everything without a grant, so giving them
+       * one records a permission they do not need and did not gain.
+       */
+      if (person.role === "root_admin") {
+        row.failed.push({ target: "—", why: "Root admins already open every system" });
+        results.push(row);
+        continue;
+      }
+
+      for (const g of wanted) {
+        try {
+          const done = await applyGrant(req, person, g.target!, g.roleInTarget!);
+          row.given.push({ targetName: done.targetName, roleInTarget: done.roleInTarget });
+          row.alsoGave.push(...done.alsoGave);
+        } catch (err) {
+          row.failed.push({ target: g.target!, why: (err as Error).message });
+        }
+      }
+      results.push(row);
+    }
+
+    const total = results.reduce((n, r) => n + r.given.length, 0);
+    sendSuccess(res, total === 1 ? "1 grant made" : `${total} grants made`, results);
   } catch (err) { next(err); }
 };

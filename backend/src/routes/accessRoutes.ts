@@ -4,7 +4,7 @@ import {
   listPeople, listTargets, hrmsDirectory, importFromHrms,
   listRoleMap, addRoleMap, removeRoleMap,
   grant, provision, revoke, setRole,
-  targetRoles, describePerson, setRoleInTarget,
+  targetRoles, describePerson, setRoleInTarget, grantMany,
 } from "../controllers/accessController.js";
 
 const router = Router();
@@ -29,6 +29,7 @@ router.get("/role-map", listRoleMap);
 router.post("/role-map", addRoleMap);
 router.delete("/role-map/:id", removeRoleMap);
 router.post("/grant", grant);
+router.post("/grant-many", grantMany);
 router.post("/provision", provision);
 router.delete("/:userId/:target", revoke);
 router.patch("/:userId/role", setRole);
