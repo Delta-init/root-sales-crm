@@ -5,6 +5,7 @@ import { Access } from "../models/Access.js";
 import { Organization } from "../models/Organization.js";
 import { accessService } from "../services/accessService.js";
 import { provisionService } from "../services/provisionService.js";
+import { directoryService } from "../services/directoryService.js";
 import { record } from "../services/auditService.js";
 import { sendError, sendSuccess } from "../utils/response.js";
 import type { AuthenticatedRequest, TargetCode } from "../types/index.js";
@@ -413,5 +414,70 @@ export const setRole = async (req: AuthenticatedRequest, res: Response, next: Ne
     });
 
     sendSuccess(res, "Role updated", { id: String(person._id), role: person.role });
+  } catch (err) { next(err); }
+};
+
+/**
+ * The roles a target actually has, so the screen can offer them.
+ *
+ * Asked of the target every time. A root admin picking a role from a list the
+ * system itself just supplied cannot invent one that does not exist, which is
+ * the whole point — the box they used to type into accepted anything and only
+ * failed later, at provisioning time, in a system they were not looking at.
+ */
+export const targetRoles = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { code } = req.params as { code: string };
+    const { targetName, roles } = await directoryService.listRoles(code);
+    sendSuccess(res, `${targetName} roles`, { targetName, roles });
+  } catch (err) { next(err); }
+};
+
+/**
+ * One person, as every system actually sees them.
+ *
+ * The portal's own record sits beside what each target reports, and where
+ * they disagree the disagreement is named. Showing only the grants would be
+ * showing what somebody once intended, not what is true now.
+ */
+export const describePerson = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = req.params as { userId: string };
+    sendSuccess(res, "Access", await directoryService.describe(userId));
+  } catch (err) { next(err); }
+};
+
+/**
+ * Change the role somebody holds inside a target — in that target, not just here.
+ *
+ * Distinct from granting. A grant is this portal deciding somebody may go
+ * somewhere; this reaches into that system and changes what they are once
+ * they arrive, which is a larger act and audited as one.
+ */
+export const setRoleInTarget = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { userId, target } = req.params as { userId: string; target: string };
+    const { roleInTarget } = req.body as { roleInTarget?: string };
+    if (!roleInTarget?.trim()) { sendError(res, "roleInTarget is required", 400); return; }
+
+    const person = await AdminUser.findById(userId).select("email");
+    if (!person) { sendError(res, "No such person", 404); return; }
+
+    const before = await Access.findOne({ user: userId, target }).select("roleInTarget").lean();
+
+    const result = await directoryService.setRoleInTarget({
+      userId, targetCode: target,
+      roleInTarget: roleInTarget.trim(),
+      grantedBy: req.admin!.adminId,
+    });
+
+    await record(req, "access_granted", {
+      adminId: req.admin!.adminId,
+      adminEmail: req.admin!.email,
+      org: null,
+      detail: `Changed ${person.email} in ${result.targetName} from ${before?.roleInTarget ?? "no recorded role"} to ${result.roleKey}`,
+    });
+
+    sendSuccess(res, result.detail, result);
   } catch (err) { next(err); }
 };

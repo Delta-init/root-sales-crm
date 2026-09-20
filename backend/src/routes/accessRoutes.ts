@@ -4,6 +4,7 @@ import {
   listPeople, listTargets, hrmsDirectory, importFromHrms,
   listRoleMap, addRoleMap, removeRoleMap,
   grant, provision, revoke, setRole,
+  targetRoles, describePerson, setRoleInTarget,
 } from "../controllers/accessController.js";
 
 const router = Router();
@@ -20,6 +21,8 @@ router.use(authenticate, requireRole("root_admin"));
 
 router.get("/people", listPeople);
 router.get("/targets", listTargets);
+router.get("/targets/:code/roles", targetRoles);
+router.get("/person/:userId", describePerson);
 router.get("/hrms-directory", hrmsDirectory);
 router.post("/import", importFromHrms);
 router.get("/role-map", listRoleMap);
@@ -29,5 +32,6 @@ router.post("/grant", grant);
 router.post("/provision", provision);
 router.delete("/:userId/:target", revoke);
 router.patch("/:userId/role", setRole);
+router.patch("/:userId/:target/role", setRoleInTarget);
 
 export default router;
