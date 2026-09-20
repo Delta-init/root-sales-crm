@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, ClipboardList, KeyRound, LayoutGrid, LogOut, Server, Shuffle, User , Users2 } from "lucide-react";
+import { BarChart3, ClipboardList, KeyRound, LayoutGrid, LogOut, User, Users2 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -24,8 +24,18 @@ const NAV = [
   // Root admins only: deciding who may open which production system is the
   // portal's most consequential act, and the API refuses anybody else anyway.
   { href: "/users", label: "Users", icon: Users2, rootOnly: true },
-  { href: "/registry", label: "Registry", icon: Server, rootOnly: true },
-  { href: "/role-map", label: "Role map", icon: Shuffle, rootOnly: true },
+  /*
+   * Registry and Role map are not in the navigation.
+   *
+   * Both are still there and still work — /registry reports which systems are
+   * configured and names the variables any of them is missing, and /role-map
+   * edits the rules that make a role in one system imply a role in another.
+   * They are just not things anybody needs weekly, and two permanent links to
+   * them crowded out the ones that are used daily.
+   *
+   * Reachable by address. Put them back here the moment that becomes a
+   * nuisance rather than a tidy-up.
+   */
 ];
 
 export function Header() {

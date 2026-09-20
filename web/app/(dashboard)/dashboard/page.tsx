@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
@@ -7,17 +8,21 @@ import { motion } from "framer-motion";
 import {
   ArrowUpRight,
   BarChart3,
+  BookOpen,
   Building2,
+  Clapperboard,
   Clock,
   Coins,
   Globe2,
+  GraduationCap,
+  Wallet,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/axios";
 import { cn, timeIn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
-import type { Organization, OrgCode } from "@/lib/types";
+import type { Organization, TargetKind } from "@/lib/types";
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -32,13 +37,75 @@ const itemVariants = {
   show: { opacity: 1, y: 0, transition: { duration: 0.35, ease: "easeOut" } },
 };
 
-// Kept in the same idiom as the CRM dashboard's stat tiles: a soft 10% tinted
-// square behind a 400-weight icon.
-const ORG_STYLES: Record<OrgCode, { color: string; bg: string }> = {
-  delta: { color: "text-blue-400", bg: "bg-blue-500/10" },
-  banglore: { color: "text-green-400", bg: "bg-green-500/10" },
-  draw: { color: "text-fuchsia-400", bg: "bg-fuchsia-500/10" },
+/*
+ * Keyed by what a system is, not by its code.
+ *
+ * This was a list of the three CRMs, so every system added since fell through
+ * to Delta's blue building: the two finance organizations, HRMS, the LMS and
+ * the media ERP were all drawn and labelled as though they were Delta. Keying
+ * by kind means a new system of a known kind is right without being listed.
+ */
+const KIND: Record<TargetKind, { label: string; icon: typeof Building2; color: string; bg: string }> = {
+  crm: { label: "Sales CRM", icon: Building2, color: "text-blue-400", bg: "bg-blue-500/10" },
+  finance: { label: "Finance", icon: Wallet, color: "text-amber-400", bg: "bg-amber-500/10" },
+  hrms: { label: "HRMS", icon: GraduationCap, color: "text-violet-400", bg: "bg-violet-500/10" },
+  lms: { label: "LMS", icon: BookOpen, color: "text-purple-400", bg: "bg-purple-500/10" },
+  erp: { label: "Media ERP", icon: Clapperboard, color: "text-pink-400", bg: "bg-pink-500/10" },
 };
+
+/*
+ * Where these applications keep their icon.
+ *
+ * Tried in order, because they disagree: the CRMs answer /icon, finance
+ * /icon.png, HRMS /icon-192.png, the LMS /icons/icon.svg and the media ERP
+ * /favicon.ico. Only one of the seven serves the conventional path, so asking
+ * for that alone would have fallen back to a generic shape almost everywhere
+ * and looked like the feature simply did not work.
+ *
+ * Each application does declare its own path in its HTML, and with a build
+ * hash on it — but reading that would mean fetching and parsing seven pages
+ * from the browser, and the hash changes on every deploy. These paths resolve
+ * without it.
+ */
+const ICON_PATHS = ["/icon", "/icon.png", "/icon-192.png", "/icons/icon.svg", "/favicon.ico"];
+
+/**
+ * A system's own icon, falling back to the mark for its kind.
+ *
+ * The icon is what people already recognise from the tab they keep open all
+ * day, which tells seven systems apart better than five tinted shapes. Each
+ * candidate is tried in turn and a system that serves none of them — or has no
+ * address configured yet — keeps the icon it had before rather than showing a
+ * broken image.
+ */
+function SystemMark({ org }: { org: Organization }) {
+  const k = KIND[org.kind] ?? KIND.crm;
+  const Icon = k.icon;
+  const [attempt, setAttempt] = useState(0);
+
+  const base = org.appUrl ? org.appUrl.replace(/\/+$/, "") : "";
+  const src = base && attempt < ICON_PATHS.length ? `${base}${ICON_PATHS[attempt]}` : "";
+
+  return (
+    <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", k.bg)}>
+      {src ? (
+        // eslint-disable-next-line @next/next/no-img-element -- a remote icon
+        // from a host that is configuration, not a domain known at build time.
+        <img
+          key={src}
+          src={src}
+          alt=""
+          width={18}
+          height={18}
+          className="h-[18px] w-[18px] rounded-sm object-contain"
+          onError={() => setAttempt((n) => n + 1)}
+        />
+      ) : (
+        <Icon className={cn("h-4 w-4", k.color)} />
+      )}
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   const { admin } = useAuth();
@@ -72,9 +139,11 @@ export default function DashboardPage() {
           Welcome back, {admin?.name?.split(" ")[0]} 👋
         </h2>
         <p className="mt-1 text-muted-foreground">
+          {/* Counted rather than written down: it said "the three CRMs" while
+              seven systems were listed underneath it. */}
           {canLaunch
-            ? "Open any of the three CRMs below, or review them together in the group report."
-            : "Your account can view the group report but cannot open the CRMs."}
+            ? `Open any of the ${orgs?.length ?? ""} systems below, or review the CRMs together in the group report.`.replace("  ", " ")
+            : "Your account can view the group report but cannot open these systems."}
         </p>
       </motion.div>
 
@@ -103,24 +172,26 @@ export default function DashboardPage() {
           className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
         >
           {orgs.map((org) => {
-            const style = ORG_STYLES[org.code] ?? ORG_STYLES.delta;
-
             return (
               <motion.div key={org.id} variants={itemVariants}>
                 <Card className="group h-full border-border/50 transition-colors hover:border-border">
-                  <CardHeader className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-sm font-medium text-muted-foreground">
-                      Organisation
-                    </CardTitle>
-                    <div className={cn("rounded-lg p-2", style.bg)}>
-                      <Building2 className={cn("h-4 w-4", style.color)} />
+                  <CardContent className="flex h-full flex-col p-4">
+                    <div className="flex items-start gap-3">
+                      <SystemMark org={org} />
+                      <div className="min-w-0 flex-1">
+                        {/* The name first and largest. Every card used to lead
+                            with the word "Organisation", which was the one
+                            thing they all had in common. */}
+                        <p className="truncate text-lg font-semibold leading-tight text-foreground">
+                          {org.name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {(KIND[org.kind] ?? KIND.crm).label}
+                        </p>
+                      </div>
                     </div>
-                  </CardHeader>
 
-                  <CardContent>
-                    <p className="text-3xl font-bold text-foreground">{org.name}</p>
-
-                    <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
+                    <div className="mt-3 flex items-center gap-3 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">
                         <Coins className="h-3 w-3" />
                         {org.currency}
@@ -134,13 +205,13 @@ export default function DashboardPage() {
                     {canLaunch ? (
                       <button
                         onClick={() => open(org)}
-                        className="mt-4 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-primary"
+                        className="mt-auto inline-flex items-center gap-1 pt-4 text-xs text-muted-foreground transition-colors hover:text-primary"
                       >
-                        Open CRM
+                        Open
                         <ArrowUpRight className="h-3 w-3" />
                       </button>
                     ) : (
-                      <p className="mt-4 text-xs text-muted-foreground/60">
+                      <p className="mt-auto pt-4 text-xs text-muted-foreground/60">
                         Not permitted
                       </p>
                     )}
@@ -177,8 +248,8 @@ export default function DashboardPage() {
                 <Globe2 className="h-4 w-4 text-muted-foreground" />
               </div>
               <Link href="/reports" className="text-sm text-muted-foreground hover:text-foreground">
-                Leads, conversion and revenue across all three organisations —
-                normalised to AED and each org&apos;s own timezone.
+                Leads, conversion and revenue across the CRMs — normalised to
+                AED and each one&apos;s own timezone.
               </Link>
             </div>
           </CardContent>

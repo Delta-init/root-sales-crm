@@ -11,6 +11,10 @@ import { targetConfig, envKeyFor, missingFor } from "../config/targets.js";
 export const toPublic = (org: IOrganization) => ({
   id: org._id.toString(),
   code: org.code,
+  // What kind of system it is. The dashboard labels and illustrates each card
+  // from this; without it every entry read "Organisation" and offered to
+  // "Open CRM", including the two finance organizations and HRMS.
+  kind: org.kind ?? "crm",
   name: org.name,
   appUrl: targetConfig(org.code).appUrl,
   timezone: org.timezone,

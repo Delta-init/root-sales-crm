@@ -3,6 +3,7 @@ export type OrgCode = "delta" | "banglore" | "draw";
 export interface Organization {
   id: string;
   code: OrgCode;
+  kind: TargetKind;
   name: string;
   appUrl: string;
   timezone: string;

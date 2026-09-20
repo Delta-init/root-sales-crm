@@ -88,7 +88,7 @@ export function LoginForm() {
             <div>
               <CardTitle className="text-2xl font-bold">Root Sales CRM</CardTitle>
               <CardDescription className="mt-1">
-                Sign in to reach Delta, Banglore and Draw
+                Sign in to reach every system from one place
               </CardDescription>
             </div>
           </CardHeader>
