@@ -233,6 +233,64 @@ export interface Person {
 }
 
 /**
+ * A role, as the system that owns it describes it.
+ *
+ * The permissions come with it deliberately. Choosing somebody's role is a
+ * decision about what they will be able to do, and a list of bare names asks
+ * an administrator to make that decision from memory of another application.
+ */
+export interface TargetRole {
+  key: string;
+  name: string;
+  description: string;
+  permissions: string[];
+  isSystem: boolean;
+}
+
+/** What a target says about an account, as opposed to what the portal granted. */
+export interface TargetAccount {
+  exists: boolean;
+  inOrganization: boolean;
+  name: string;
+  status: string;
+  membershipStatus: string | null;
+  roleKey: string | null;
+  roleName: string | null;
+  permissions: string[];
+  lastLoginAt: string | null;
+}
+
+/**
+ * One system's view of one person, next to the portal's own record.
+ *
+ * `drift` is the point of the whole thing: where the grant this portal holds
+ * and the account that system actually has disagree, said in words rather
+ * than left for somebody to spot by comparing two columns.
+ */
+export interface TargetView {
+  target: TargetCode;
+  targetName: string;
+  kind: string;
+  granted: boolean;
+  roleInTarget: string | null;
+  grantedAt: string | null;
+  account: TargetAccount | null;
+  unreachable: string | null;
+  drift: string | null;
+}
+
+export interface PersonDetail {
+  person: {
+    id: string;
+    name: string;
+    email: string;
+    role: PortalRole;
+    status: "active" | "inactive";
+  };
+  targets: TargetView[];
+}
+
+/**
  * A registered target, as an administrator sees it.
  *
  * The connection string and the SSO secret are never sent — only whether they

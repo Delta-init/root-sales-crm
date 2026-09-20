@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
-  Building2, Download, GraduationCap, KeyRound, Loader2, Plus, Search, ShieldCheck, Trash2, UserPlus, Users2, Wallet,
+  Building2, ChevronRight, Download, GraduationCap, KeyRound, Loader2, Plus, Search, ShieldCheck, Trash2, UserPlus, Users2, Wallet,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -19,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
 import type {
   DirectoryPerson, ImportResult, Person, PortalRole, Target, TargetCode, TargetKind,
+  TargetRole,
 } from "@/lib/types";
 
 /**
@@ -199,11 +201,20 @@ export default function AccessPage() {
                   )}
                 </div>
 
-                {p.role !== "root_admin" && (
-                  <Button variant="outline" size="sm" onClick={() => setGranting(p)} className="gap-1.5">
-                    <Plus className="h-3.5 w-3.5" /> Give access
+                <div className="flex gap-1.5">
+                  {/* What every system actually says about them, as opposed to
+                      what this portal recorded. The two drift. */}
+                  <Button variant="ghost" size="sm" asChild className="gap-1.5">
+                    <Link href={`/access/${p.id}`}>
+                      Manage <ChevronRight className="h-3.5 w-3.5" />
+                    </Link>
                   </Button>
-                )}
+                  {p.role !== "root_admin" && (
+                    <Button variant="outline" size="sm" onClick={() => setGranting(p)} className="gap-1.5">
+                      <Plus className="h-3.5 w-3.5" /> Give access
+                    </Button>
+                  )}
+                </div>
               </CardContent>
             </Card>
           ))}
@@ -309,11 +320,27 @@ function GrantDialog({
 
   const already = new Set(person?.access.map((a) => a.target) ?? []);
   const available = targets.filter((t) => !already.has(t.code));
-  const kind = targets.find((t) => t.code === target)?.kind;
-  const suggestions =
-    kind === "finance" ? ["salesperson", "accountant", "viewer"]
-    : kind === "hrms" ? ["employee"]
-    : ["BDE", "Team Leader", "Manager"];
+
+  /*
+   * The roles that system actually has, asked of it directly.
+   *
+   * This used to be three hardcoded guesses per kind of system, and typing
+   * anything else was accepted here and refused much later, at provisioning
+   * time, in a system the administrator was not looking at. A system that
+   * cannot be asked falls back to the free-text box rather than blocking the
+   * grant — a registry entry still being filled in should not stop work.
+   */
+  const roleList = useQuery({
+    queryKey: ["target-roles", target],
+    enabled: Boolean(target),
+    retry: false,
+    staleTime: 60_000,
+    queryFn: async () =>
+      (await api.get<{ data: { roles: TargetRole[] } }>(`/access/targets/${target}/roles`))
+        .data.data.roles,
+  });
+  const roles = roleList.data ?? [];
+  const chosen = roles.find((r) => r.key === role);
 
   return (
     <Dialog open={Boolean(person)} onOpenChange={(o) => !o && onClose()}>
@@ -348,24 +375,57 @@ function GrantDialog({
 
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Their role there</label>
-            <Input
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              placeholder={suggestions[0]}
-              disabled={!target}
-            />
-            {target && (
-              <div className="flex flex-wrap gap-1.5 pt-0.5">
-                {suggestions.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setRole(s)}
-                    className="rounded-md border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-                  >
-                    {s}
-                  </button>
+
+            {roleList.isLoading && target ? (
+              <Skeleton className="h-9 w-full" />
+            ) : roles.length > 0 ? (
+              <select
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
+              >
+                <option value="">Choose one…</option>
+                {roles.map((r) => (
+                  <option key={r.key} value={r.key}>{r.name}</option>
                 ))}
+              </select>
+            ) : (
+              <>
+                <Input
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                  placeholder="Their role there"
+                  disabled={!target}
+                />
+                {target && !roleList.isLoading && (
+                  <p className="text-[11px] text-amber-400">
+                    {roleList.error
+                      ? "That system could not be asked for its roles, so this has to be typed."
+                      : "That system lists no roles, so this has to be typed."}
+                  </p>
+                )}
+              </>
+            )}
+
+            {/* What the role permits, from the system itself. Choosing between
+                names alone asks an administrator to decide what somebody will
+                be able to do from memory of software they may never have used. */}
+            {chosen && (
+              <div className="rounded-md border border-border bg-muted/20 p-2">
+                {chosen.description && (
+                  <p className="text-[11px] text-muted-foreground">{chosen.description}</p>
+                )}
+                {chosen.permissions.length > 0 ? (
+                  <>
+                    <p className="pt-0.5 text-[11px] text-muted-foreground">
+                      Lets them: {chosen.permissions.slice(0, 6).join(", ")}
+                      {chosen.permissions.length > 6 &&
+                        ` and ${chosen.permissions.length - 6} more`}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">No permissions listed.</p>
+                )}
               </div>
             )}
           </div>
