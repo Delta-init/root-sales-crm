@@ -205,9 +205,10 @@ export interface MyTracker {
  */
 export type TargetCode =
   | "delta" | "banglore" | "draw"
-  | "finance-hq" | "finance-banglore" | "hrms";
+  | "finance-hq" | "finance-banglore" | "hrms"
+  | "lms" | "media-erp";
 
-export type TargetKind = "crm" | "finance" | "hrms";
+export type TargetKind = "crm" | "finance" | "hrms" | "lms" | "erp";
 
 export interface Target {
   code: TargetCode;

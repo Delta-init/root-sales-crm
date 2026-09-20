@@ -42,18 +42,21 @@ export type OrgCode =
   | "draw"
   | "finance-hq"
   | "finance-banglore"
-  | "hrms";
+  | "hrms"
+  | "lms"
+  | "media-erp";
 
 /**
  * What kind of system a registered target is.
  *
  * The registry began as a list of CRMs, and everything in it was one. It is now
  * the list of everywhere a person can be sent — the CRMs, the two finance
- * organizations, and HRMS — and those behave differently enough that the code
- * has to know which it is holding: a CRM is scoped to the people who work in
- * it, HRMS is somewhere everyone belongs, and finance has no Draw at all.
+ * organizations, HRMS, the LMS and the media ERP — and those behave
+ * differently enough that the code has to know which it is holding: a CRM is
+ * scoped to the people who work in it, HRMS is somewhere everyone belongs, and
+ * finance has no Draw at all.
  */
-export type TargetKind = "crm" | "finance" | "hrms";
+export type TargetKind = "crm" | "finance" | "hrms" | "lms" | "erp";
 
 /**
  * Somewhere a person may be sent.

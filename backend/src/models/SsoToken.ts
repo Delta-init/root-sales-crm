@@ -21,7 +21,7 @@ const ssoTokenSchema = new Schema<ISsoToken>(
      */
     org: {
       type: String,
-      enum: ["delta", "banglore", "draw", "finance-hq", "finance-banglore", "hrms"],
+      enum: ["delta", "banglore", "draw", "finance-hq", "finance-banglore", "hrms", "lms", "media-erp"],
       required: true,
     },
     /** The CRM account this token authorises — the org's service account. */

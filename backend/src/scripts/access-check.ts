@@ -288,6 +288,76 @@ step("Keeping the registry's secrets out of the screen");
   check("editing something unregistered is refused", /unknown target/i.test(unknown), `"${unknown}"`);
 }
 
+step("Knowing about every system it claims to know about");
+{
+  /*
+   * Mongoose enums are strings in a schema, invisible to the compiler. Adding
+   * a system means widening five of them — the organization, the access row,
+   * the SSO token, and both ends of a role map — and missing one fails only at
+   * the moment somebody uses it, with a validation error naming a code that is
+   * plainly in the type. So every code is exercised against every enum here.
+   */
+  const { Access } = await import("../models/Access.js");
+  const { SsoToken } = await import("../models/SsoToken.js");
+  const { RoleMap } = await import("../models/RoleMap.js");
+
+  const CODES = [
+    "delta", "banglore", "draw",
+    "finance-hq", "finance-banglore", "hrms", "lms", "media-erp",
+  ] as const;
+
+  const victim = await AdminUser.create({
+    name: "Enum Probe", email: "enum-probe@example.com",
+    password: "Password123!", role: "member", status: "active",
+  });
+
+  for (const code of CODES) {
+    let why = "";
+    try {
+      await Organization.create({
+        code, kind: "crm", name: `Probe ${code}`,
+        timezone: "Asia/Dubai", currency: "AED", fxToBase: 1, isActive: true,
+      });
+    } catch (e) { why = (e as Error).message; }
+    // Already seeded for the six, which is itself proof the code is accepted.
+    check(`${code} is a code the registry accepts`,
+      why === "" || /duplicate key|E11000/i.test(why), why);
+
+    let accessWhy = "";
+    try {
+      await Access.create({
+        user: victim._id, target: code, roleInTarget: "probe", grantedBy: victim._id,
+      });
+    } catch (e) { accessWhy = (e as Error).message; }
+    check(`...and an access row can name it`, accessWhy === "", accessWhy);
+
+    let tokenWhy = "";
+    try {
+      await SsoToken.create({
+        token: `probe-${code}`, admin: victim._id, adminEmail: victim.email,
+        org: code, subjectEmail: victim.email, subjectName: "Enum Probe",
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+    } catch (e) { tokenWhy = (e as Error).message; }
+    check(`...and a launch into it can be recorded`, tokenWhy === "", tokenWhy);
+  }
+
+  let mapWhy = "";
+  try {
+    await RoleMap.create({
+      fromTarget: "lms", fromRole: "probe", label: "Probe",
+      toTarget: "media-erp", toRole: "probe",
+    });
+  } catch (e) { mapWhy = (e as Error).message; }
+  check("a role map can span the two newest systems", mapWhy === "", mapWhy);
+
+  await Access.deleteMany({ user: victim._id });
+  await SsoToken.deleteMany({ admin: victim._id });
+  await RoleMap.deleteMany({ fromRole: "probe" });
+  await Organization.deleteMany({ name: /^Probe / });
+  await AdminUser.deleteOne({ _id: victim._id });
+}
+
 step("Letting a role in one system mean a role in another");
 {
   const { RoleMap } = await import("../models/RoleMap.js");

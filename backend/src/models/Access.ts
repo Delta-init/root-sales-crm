@@ -29,7 +29,7 @@ const accessSchema = new Schema<IAccess>(
     },
     target: {
       type: String,
-      enum: ["delta", "banglore", "draw", "finance-hq", "finance-banglore", "hrms"],
+      enum: ["delta", "banglore", "draw", "finance-hq", "finance-banglore", "hrms", "lms", "media-erp"],
       required: true,
     },
     roleInTarget: { type: String, required: true, trim: true },

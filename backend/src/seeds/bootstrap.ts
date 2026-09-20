@@ -11,7 +11,7 @@ import { connectDB } from "../config/db.js";
 import { AdminUser } from "../models/AdminUser.js";
 import { Organization } from "../models/Organization.js";
 import { missingFor } from "../config/targets.js";
-import type { OrgCode } from "../types/index.js";
+import type { OrgCode, TargetKind } from "../types/index.js";
 
 /**
  * What each system is to the business.
@@ -23,7 +23,7 @@ import type { OrgCode } from "../types/index.js";
  */
 interface OrgSeed {
   code: OrgCode;
-  kind: "crm" | "finance" | "hrms";
+  kind: TargetKind;
   name: string;
   timezone: string;
   currency: string;
@@ -92,6 +92,26 @@ const orgSeeds = (): OrgSeed[] => [
     fxToBase: 1,
     accent: "#0891b2",
     sortOrder: 6,
+  },
+  {
+    code: "lms",
+    kind: "lms",
+    name: "Delta LMS",
+    timezone: "Asia/Dubai",
+    currency: "AED",
+    fxToBase: 1,
+    accent: "#7c3aed",
+    sortOrder: 7,
+  },
+  {
+    code: "media-erp",
+    kind: "erp",
+    name: "Media ERP",
+    timezone: "Asia/Dubai",
+    currency: "AED",
+    fxToBase: 1,
+    accent: "#db2777",
+    sortOrder: 8,
   },
 ];
 
