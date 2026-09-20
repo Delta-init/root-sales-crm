@@ -22,13 +22,16 @@ import { envKeyFor } from "../config/targets.js";
 
 const clean = process.argv.includes("--clean");
 
-const OLD_FIELDS = ["appUrl", "apiUrl", "mongoUri", "ssoSecret", "remoteOrgId"] as const;
+const OLD_FIELDS = [
+  "appUrl", "apiUrl", "mongoUri", "ssoSecret", "remoteOrgId", "serviceEmail",
+] as const;
 const VAR_SUFFIX: Record<(typeof OLD_FIELDS)[number], string> = {
   appUrl: "APP_URL",
   apiUrl: "API_URL",
   mongoUri: "MONGODB_URI",
   ssoSecret: "SSO_SECRET",
   remoteOrgId: "REMOTE_ORG_ID",
+  serviceEmail: "SERVICE_EMAIL",
 };
 
 const run = async () => {
