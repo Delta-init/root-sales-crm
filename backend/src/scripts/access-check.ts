@@ -163,6 +163,42 @@ step("Closing a door");
     /deactivated/i.test(deactivated), `"${deactivated}"`);
 }
 
+step("Granting and revoking, as the screen does it");
+{
+  const { record } = await import("../services/auditService.js");
+  const { AuditLog } = await import("../models/AuditLog.js");
+
+  // The audit entries the controller writes. Checked here because the enums
+  // they must satisfy are a runtime check that no typecheck would catch — a
+  // missing value fails only when somebody actually grants something.
+  const req = {
+    admin: { adminId: String(root._id), email: root.email },
+    headers: {}, ip: "127.0.0.1", socket: {}, get: () => "",
+  } as never;
+  await record(req, "access_granted", {
+    adminId: String(root._id), adminEmail: root.email, org: null,
+    detail: "Granted rep@e2e-test.com access to Banglore CRM as BDE",
+  });
+  await record(req, "access_revoked", {
+    adminId: String(root._id), adminEmail: root.email, org: null,
+    detail: "Revoked rep@e2e-test.com's access to banglore",
+  });
+  await record(req, "portal_role_changed", {
+    adminId: String(root._id), adminEmail: root.email, org: null,
+    detail: "Set rep@e2e-test.com to member",
+  });
+  check("a grant is written to the audit log", (await AuditLog.countDocuments({ action: "access_granted" })) === 1);
+  check("...a revoke too", (await AuditLog.countDocuments({ action: "access_revoked" })) === 1);
+  check("...and a change of portal role", (await AuditLog.countDocuments({ action: "portal_role_changed" })) === 1);
+
+  // A launch into finance has to be loggable, or every launch there throws.
+  await record(req, "sso_launch", {
+    adminId: String(root._id), adminEmail: root.email, org: "finance-hq",
+    detail: "Launched into Delta HQ Finance",
+  });
+  check("a launch into finance can be logged", (await AuditLog.countDocuments({ org: "finance-hq" })) === 1);
+}
+
 await mongoose.disconnect();
 console.log("");
 if (failures) { console.log(`\x1b[31m${failures} of ${checks} checks failed\x1b[0m`); process.exit(1); }

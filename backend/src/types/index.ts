@@ -125,7 +125,12 @@ export type AuditAction =
   | "logout"
   | "sso_launch"
   | "sso_launch_failed"
-  | "report_view";
+  | "report_view"
+  // A grant is the moment somebody gains reach into another system, and the
+  // question asked afterwards is who opened the door and when.
+  | "access_granted"
+  | "access_revoked"
+  | "portal_role_changed";
 
 export interface IAuditLog extends Document {
   admin: Types.ObjectId | null;

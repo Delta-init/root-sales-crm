@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, ClipboardList, LayoutGrid, LogOut, User } from "lucide-react";
+import { BarChart3, ClipboardList, KeyRound, LayoutGrid, LogOut, User } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -21,6 +21,9 @@ const NAV = [
   { href: "/dashboard", label: "Organisations", icon: LayoutGrid },
   { href: "/reports", label: "Group report", icon: BarChart3 },
   { href: "/tracker", label: "Daily tracker", icon: ClipboardList },
+  // Root admins only: deciding who may open which production system is the
+  // portal's most consequential act, and the API refuses anybody else anyway.
+  { href: "/access", label: "Access", icon: KeyRound, rootOnly: true },
 ];
 
 export function Header() {
@@ -41,7 +44,7 @@ export function Header() {
         <div className="hidden h-8 w-px bg-border sm:block" />
 
         <nav className="flex items-center gap-1">
-          {NAV.map((item) => {
+          {NAV.filter((item) => !item.rootOnly || admin?.role === "root_admin").map((item) => {
             // startsWith so a drill-down like /reports/sources keeps the tab lit
             const active =
               pathname === item.href || pathname.startsWith(item.href + "/");

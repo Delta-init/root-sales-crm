@@ -17,7 +17,8 @@ export interface Admin {
   _id: string;
   name: string;
   email: string;
-  role: "root_admin" | "viewer";
+  /** `member` is most people now — see PortalRole. */
+  role: "root_admin" | "member" | "viewer";
   status: "active" | "inactive";
   lastLoginAt: string | null;
 }
@@ -190,4 +191,43 @@ export interface MyTracker {
   targets: Record<string, number>;
   repTargets: Record<string, number>;
   isToday: boolean;
+}
+
+// ─── Access ───────────────────────────────────────────────────────────────────
+
+/**
+ * Somewhere a person may be sent.
+ *
+ * The three CRM codes plus finance and HRMS. Kept as a wider type than
+ * `OrgCode`, which the dashboard and the reports still use to mean "one of the
+ * three sales CRMs" — widening that would oblige every colour map and every
+ * report filter to have an opinion about HRMS.
+ */
+export type TargetCode =
+  | "delta" | "banglore" | "draw"
+  | "finance-hq" | "finance-banglore" | "hrms";
+
+export type TargetKind = "crm" | "finance" | "hrms";
+
+export interface Target {
+  code: TargetCode;
+  name: string;
+  kind: TargetKind;
+}
+
+export type PortalRole = "root_admin" | "member" | "viewer";
+
+export interface PersonAccess {
+  target: TargetCode;
+  roleInTarget: string;
+}
+
+export interface Person {
+  id: string;
+  name: string;
+  email: string;
+  role: PortalRole;
+  status: "active" | "inactive";
+  lastLoginAt: string | null;
+  access: PersonAccess[];
 }

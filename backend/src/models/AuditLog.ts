@@ -16,10 +16,20 @@ const auditLogSchema = new Schema<IAuditLog>(
         "sso_launch",
         "sso_launch_failed",
         "report_view",
+        "access_granted",
+        "access_revoked",
+        "portal_role_changed",
       ],
       required: true,
     },
-    org: { type: String, enum: ["delta", "banglore", "draw", null], default: null },
+    // Every target, since a launch into finance or HRMS is logged like any
+    // other. Null for entries that are not about one place — a grant names the
+    // target in its detail instead.
+    org: {
+      type: String,
+      enum: ["delta", "banglore", "draw", "finance-hq", "finance-banglore", "hrms", null],
+      default: null,
+    },
     ip: { type: String, default: "" },
     userAgent: { type: String, default: "" },
     detail: { type: String, default: "" },
