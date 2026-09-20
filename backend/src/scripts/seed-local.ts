@@ -62,8 +62,38 @@ await Organization.create({
   sortOrder: 1,
 });
 
+/* HRMS, which is where a person first exists and where the import reads. */
+await Organization.create({
+  code: "hrms",
+  kind: "hrms",
+  name: "Delta HRMS (local)",
+  timezone: "Asia/Dubai",
+  currency: "AED",
+  fxToBase: 1,
+  isActive: true,
+  sortOrder: 2,
+});
+
 /*
- * Only finance is registered. A row for a CRM that is not running would look
+ * The LMS and the media ERP, registered but not configured on purpose.
+ *
+ * Nothing runs locally for either, so they show what an unconfigured system
+ * looks like: named, listed, and honest that it cannot be reached yet, with
+ * the variables it wants. That is the state most of the estate is actually in.
+ */
+await Organization.create({
+  code: "lms", kind: "lms", name: "Delta LMS (local)",
+  timezone: "Asia/Dubai", currency: "AED", fxToBase: 1,
+  isActive: true, sortOrder: 3,
+});
+await Organization.create({
+  code: "media-erp", kind: "erp", name: "Media ERP (local)",
+  timezone: "Asia/Dubai", currency: "AED", fxToBase: 1,
+  isActive: true, sortOrder: 4,
+});
+
+/*
+ * Only finance and HRMS are actually running. A row for a CRM that is not running would look
  * launchable and fail on the click, which is a worse first impression than an
  * honest list of one — and the registry screen names the missing systems at
  * the top anyway, which is the thing worth seeing.
