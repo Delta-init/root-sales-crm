@@ -19,6 +19,8 @@ const auditLogSchema = new Schema<IAuditLog>(
         "access_granted",
         "access_revoked",
         "portal_role_changed",
+        "target_registered",
+        "target_updated",
       ],
       required: true,
     },

@@ -231,3 +231,28 @@ export interface Person {
   lastLoginAt: string | null;
   access: PersonAccess[];
 }
+
+/**
+ * A registered target, as an administrator sees it.
+ *
+ * The connection string and the SSO secret are never sent — only whether they
+ * are set, which is what somebody configuring a target needs to know. A value
+ * that never reaches the browser cannot leak from it.
+ */
+export interface RegistryTarget {
+  id: string;
+  code: TargetCode;
+  kind: TargetKind;
+  name: string;
+  appUrl: string;
+  apiUrl: string;
+  timezone: string;
+  currency: string;
+  fxToBase: number;
+  serviceEmail: string;
+  accent: string;
+  isActive: boolean;
+  sortOrder: number;
+  hasMongoUri: boolean;
+  hasSsoSecret: boolean;
+}

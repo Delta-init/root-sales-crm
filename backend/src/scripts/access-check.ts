@@ -199,6 +199,59 @@ step("Granting and revoking, as the screen does it");
   check("a launch into finance can be logged", (await AuditLog.countDocuments({ org: "finance-hq" })) === 1);
 }
 
+step("Keeping the registry's secrets out of the screen");
+{
+  const { orgService } = await import("../services/orgService.js");
+
+  // The six targets are seeded above, so this exercises registering one from
+  // scratch: the codes are a fixed list, and configuring the known systems is
+  // what the screen is for rather than inventing new ones.
+  await Organization.deleteOne({ code: "finance-hq" });
+
+  const made = await orgService.create({
+    code: "finance-hq", kind: "finance", name: "Delta HQ Finance",
+    appUrl: "https://finance.example.com", apiUrl: "https://api-finance.example.com",
+    timezone: "Asia/Dubai", currency: "AED", fxToBase: 1,
+    serviceEmail: "root@deltainstitutions.com",
+    mongoUri: "mongodb://secret:hunter2@db.example.com/finance",
+    ssoSecret: "a-very-secret-value",
+  });
+  check("a target can be registered", made.code === "finance-hq", `got ${made.code}`);
+  check("...and is reported as a finance system", made.kind === "finance", `kind=${made.kind}`);
+
+  // The whole point of the admin serializer.
+  const asJson = JSON.stringify(made);
+  check("the connection string never reaches the screen", !asJson.includes("hunter2"), "it leaked");
+  check("...nor the SSO secret", !asJson.includes("a-very-secret-value"), "it leaked");
+  check("...but the screen can tell they are set", made.hasMongoUri && made.hasSsoSecret);
+
+  const rows = await orgService.listAll();
+  check("the registry lists it", rows.some((r) => r.code === "finance-hq"));
+  check("...with no secrets in the list either",
+    !JSON.stringify(rows).includes("hunter2"), "a secret leaked into the list");
+
+  // Editing the name must not oblige somebody to retype a secret they cannot see.
+  const renamed = await orgService.update("finance-hq", { name: "Delta HQ Accounts" });
+  check("renaming leaves the secrets alone", renamed.hasMongoUri && renamed.hasSsoSecret);
+  check("...and takes the new name", renamed.name === "Delta HQ Accounts", `got ${renamed.name}`);
+
+  let dupe = "";
+  try { await orgService.create({ code: "finance-hq", name: "Again" }); }
+  catch (e) { dupe = (e as Error).message; }
+  check("registering the same code twice is refused", /already registered/i.test(dupe), `"${dupe}"`);
+
+  // The code is what access rows and audit entries point at by string.
+  await orgService.update("finance-hq", { code: "something-else" } as never);
+  const after = (await orgService.listAll()).find((r) => r.name === "Delta HQ Accounts");
+  check("the code cannot be changed out from under the access rows",
+    after?.code === "finance-hq", `got ${after?.code}`);
+
+  let unknown = "";
+  try { await orgService.update("no-such-target", { name: "x" }); }
+  catch (e) { unknown = (e as Error).message; }
+  check("editing something unregistered is refused", /unknown target/i.test(unknown), `"${unknown}"`);
+}
+
 await mongoose.disconnect();
 console.log("");
 if (failures) { console.log(`\x1b[31m${failures} of ${checks} checks failed\x1b[0m`); process.exit(1); }

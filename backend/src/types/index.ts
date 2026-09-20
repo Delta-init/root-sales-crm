@@ -130,7 +130,9 @@ export type AuditAction =
   // question asked afterwards is who opened the door and when.
   | "access_granted"
   | "access_revoked"
-  | "portal_role_changed";
+  | "portal_role_changed"
+  | "target_registered"
+  | "target_updated";
 
 export interface IAuditLog extends Document {
   admin: Types.ObjectId | null;
