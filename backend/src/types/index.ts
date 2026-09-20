@@ -10,7 +10,19 @@ export interface ApiResponse<T = unknown> {
 }
 
 // ─── Admin ────────────────────────────────────────────────────────────────────
-export type AdminRole = "root_admin" | "viewer";
+/**
+ * What somebody is in the portal itself.
+ *
+ * `member` is new, and is most people: a rep or a counsellor who signs in here
+ * and opens the systems they have been given. They administer nothing — what
+ * they may reach is the access rows a root admin wrote for them.
+ *
+ * `viewer` is kept rather than folded into `member` because the two are not the
+ * same thing: a viewer reads the group report and opens nothing, which is what
+ * somebody in head office wants, and quietly upgrading them to a member would
+ * hand them doors nobody decided to give them.
+ */
+export type AdminRole = "root_admin" | "member" | "viewer";
 
 export interface IAdminUser extends Document {
   _id: Types.ObjectId;
@@ -24,12 +36,68 @@ export interface IAdminUser extends Document {
 }
 
 // ─── Organization ─────────────────────────────────────────────────────────────
-export type OrgCode = "delta" | "banglore" | "draw";
+export type OrgCode =
+  | "delta"
+  | "banglore"
+  | "draw"
+  | "finance-hq"
+  | "finance-banglore"
+  | "hrms";
+
+/**
+ * What kind of system a registered target is.
+ *
+ * The registry began as a list of CRMs, and everything in it was one. It is now
+ * the list of everywhere a person can be sent — the CRMs, the two finance
+ * organizations, and HRMS — and those behave differently enough that the code
+ * has to know which it is holding: a CRM is scoped to the people who work in
+ * it, HRMS is somewhere everyone belongs, and finance has no Draw at all.
+ */
+export type TargetKind = "crm" | "finance" | "hrms";
+
+/**
+ * Somewhere a person may be sent.
+ *
+ * The same code the registry uses, deliberately: an access row points at a
+ * registered target, and giving the two separate vocabularies would mean a
+ * translation nobody reads and a rename that only half lands. The three CRM
+ * codes are the ones already in the database and are left alone — the reports
+ * and the three CRMs all know them.
+ */
+export type TargetCode = OrgCode;
+
+/**
+ * One person's right to open one thing.
+ *
+ * Listed, never derived. Somebody who works in the Banglore CRM must not turn
+ * up in Delta's, and the way to be sure of that is for every door a person may
+ * open to be a row somebody put there — not a rule that infers it from a role,
+ * a name or an email domain, each of which is one rename away from being wrong.
+ */
+export interface IAccess extends Document {
+  _id: Types.ObjectId;
+  user: Types.ObjectId;
+  target: TargetCode;
+  /**
+   * What they are once they arrive, in that system's own vocabulary.
+   *
+   * A BDE in a CRM is a salesperson in finance. The translation is recorded
+   * here rather than worked out on the way in, because a convention that maps
+   * "BDE" to "salesperson" reads as obvious right up until somebody adds
+   * "BDE II" and it quietly maps to nothing at all.
+   */
+  roleInTarget: string;
+  grantedBy: Types.ObjectId | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
 
 export interface IOrganization extends Document {
   _id: Types.ObjectId;
   code: OrgCode;
   name: string;
+  /** What kind of system this is — see TargetKind. Older rows are CRMs. */
+  kind: TargetKind;
   appUrl: string;
   apiUrl: string;
   /** Read-only connection string, used by the group report only. */

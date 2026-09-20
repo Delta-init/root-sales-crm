@@ -7,6 +7,7 @@
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
     "seed": "bun src/seeds/bootstrap.ts",
+    "check:access": "./scripts/access-check.sh",
     "build": "bun build src/index.ts --outdir dist --target bun"
   },
   "dependencies": {

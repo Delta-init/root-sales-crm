@@ -22,7 +22,49 @@ export const ssoService = {
     if (!org) throw httpError(`Unknown organisation: ${orgCode}`, 404);
     if (!org.isActive) throw httpError(`${org.name} is not active`, 409);
 
-    if (!org.serviceEmail) {
+    /*
+     * Who is going, and as whom.
+     *
+     * A root admin arrives as the org's shared service account, which is what
+     * this portal has always done: they are there to administer, the account
+     * exists for the purpose, and every use of it is in the audit log.
+     *
+     * Everybody else arrives as themselves. That is the whole difference
+     * between a control tower and somewhere staff sign in: a rep landing in a
+     * CRM as "Root Admin" would own every record they touched, and the CRM
+     * would have no idea who had actually been in it.
+     */
+    const isRootAdmin = admin.role === "root_admin";
+
+    /*
+     * The name is read from the record rather than carried in the token: a
+     * session minted before somebody was renamed would otherwise walk into
+     * another system under the old one, and the status check below is the same
+     * gate a password login applies — deactivating somebody has to lock every
+     * door, not only the one with the password on it.
+     */
+    let subjectName = "Root Admin";
+    if (!isRootAdmin) {
+      const { AdminUser } = await import("../models/AdminUser.js");
+      const user = await AdminUser.findById(admin.adminId).select("name status");
+      if (!user) throw httpError("Your account no longer exists", 401);
+      if (user.status !== "active") throw httpError("Your account has been deactivated", 403);
+      subjectName = user.name || admin.email;
+    }
+
+    if (!isRootAdmin) {
+      /*
+       * Listed, not inferred. A member may open exactly what somebody wrote an
+       * access row for — the rule that keeps a Banglore rep out of Delta's CRM.
+       */
+      const { accessService } = await import("./accessService.js");
+      const grant = await accessService.find(admin.adminId, org.code);
+      if (!grant) {
+        throw httpError(`You do not have access to ${org.name}`, 403);
+      }
+    }
+
+    if (isRootAdmin && !org.serviceEmail) {
       throw httpError(
         `${org.name} has no service account configured. Set serviceEmail on the org registry.`,
         503
@@ -39,8 +81,8 @@ export const ssoService = {
       admin: admin.adminId,
       adminEmail: admin.email,
       org: org.code,
-      subjectEmail: org.serviceEmail,
-      subjectName: "Root Admin",
+      subjectEmail: isRootAdmin ? org.serviceEmail : admin.email,
+      subjectName,
       expiresAt: new Date(Date.now() + TOKEN_TTL_MS),
       issuedToIp: ip,
     });

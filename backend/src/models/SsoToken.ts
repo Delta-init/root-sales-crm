@@ -14,7 +14,16 @@ const ssoTokenSchema = new Schema<ISsoToken>(
     token: { type: String, required: true, unique: true, index: true },
     admin: { type: Schema.Types.ObjectId, ref: "AdminUser", required: true },
     adminEmail: { type: String, required: true, lowercase: true, trim: true },
-    org: { type: String, enum: ["delta", "banglore", "draw"], required: true },
+    /*
+     * Every target, not only the CRMs: the portal now sends people into finance
+     * and HRMS as well. The tracker's own models stay narrow on purpose — a
+     * daily sales figure filed against HRMS would not mean anything.
+     */
+    org: {
+      type: String,
+      enum: ["delta", "banglore", "draw", "finance-hq", "finance-banglore", "hrms"],
+      required: true,
+    },
     /** The CRM account this token authorises — the org's service account. */
     subjectEmail: { type: String, required: true, lowercase: true, trim: true },
     subjectName: { type: String, default: "Root Admin" },

@@ -5,11 +5,27 @@ const organizationSchema = new Schema<IOrganization>(
   {
     code: {
       type: String,
-      enum: ["delta", "banglore", "draw"],
+      enum: ["delta", "banglore", "draw", "finance-hq", "finance-banglore", "hrms"],
       required: true,
       unique: true,
     },
     name: { type: String, required: true, trim: true },
+    /*
+     * What kind of system this is.
+     *
+     * The registry began as a list of CRMs and everything in it was one. It now
+     * holds everywhere a person can be sent, and those differ in ways the code
+     * has to know about: a CRM is scoped to whoever works in it, HRMS is
+     * somewhere every employee belongs, and finance has no Draw at all.
+     *
+     * Defaulted to "crm" so the three rows that predate this keep their
+     * meaning without being rewritten.
+     */
+    kind: {
+      type: String,
+      enum: ["crm", "finance", "hrms"],
+      default: "crm",
+    },
     appUrl: { type: String, required: true, trim: true },
     apiUrl: { type: String, required: true, trim: true },
 

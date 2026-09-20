@@ -24,10 +24,18 @@ const adminUserSchema = new Schema<IAdminUser>(
       minlength: [8, "Password must be at least 8 characters"],
       select: false,
     },
-    // root_admin can launch into any CRM; viewer sees the group report only.
+    /*
+     * root_admin launches into anything and administers the portal.
+     * member launches into whatever their access rows allow, and nothing else.
+     * viewer reads the group report and opens nothing.
+     *
+     * The default stays `viewer`, which is the least a new row can be. A
+     * default of `member` would mean an account created carelessly could open
+     * systems, and the safe default is the one that opens none.
+     */
     role: {
       type: String,
-      enum: ["root_admin", "viewer"],
+      enum: ["root_admin", "member", "viewer"],
       default: "viewer",
     },
     status: {

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { launch } from "../controllers/ssoController.js";
-import { authenticate, requireRole } from "../middleware/auth.js";
+import { authenticate } from "../middleware/auth.js";
 
 // A launch is a deliberate click, never a burst.
 const launchLimiter = rateLimit({
@@ -14,8 +14,15 @@ const launchLimiter = rateLimit({
 
 const router = Router();
 
-// requireRole, not just authenticate: a viewer may read the group report but
-// must never be handed a session inside a production CRM.
-router.post("/launch", authenticate, requireRole("root_admin"), launchLimiter, launch);
+/*
+ * Open to members as well as root admins.
+ *
+ * The gate moved rather than went: `ssoService.launch` refuses a member with no
+ * access row for the target, and a viewer has none by definition. Keeping the
+ * role check here too would have meant deciding the same question in two
+ * places, and the one further from the token minting would have been the one
+ * somebody forgot.
+ */
+router.post("/launch", authenticate, launchLimiter, launch);
 
 export default router;
