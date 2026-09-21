@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
-  BookOpen, Building2, Check, ChevronRight, Clapperboard, Download, GraduationCap,
+  BookOpen, Building2, Check, ChevronRight, Clapperboard, Download, Eye, GraduationCap,
   Loader2, Plus, Power, PowerOff, Search, ShieldCheck, Trash2, Users2, Wallet, X,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -74,7 +74,7 @@ interface PresenceResponse {
 }
 
 export default function UsersPage() {
-  const { admin } = useAuth();
+  const { admin, startImpersonation } = useAuth();
   const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [dept, setDept] = useState("");
@@ -129,6 +129,41 @@ export default function UsersPage() {
       api.delete(`/access/${v.userId}/${v.target}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["access", "people"] }),
   });
+
+  /*
+   * Borrow somebody's session, straight from their row.
+   *
+   * One click, no confirmation. What makes that defensible is not the action
+   * being small — it ends in a real session in somebody's account — but that
+   * it is loud and it ends: a banner sits above every screen naming whose
+   * account it is, and the session expires by itself in half an hour. A
+   * dialog before it would be a step everybody learns to click through.
+   *
+   * It is also refused for the cases that matter before the button is ever
+   * drawn, so this cannot open anything the server would not.
+   */
+  const impersonate = useMutation({
+    mutationFn: async (userId: string) =>
+      (
+        await api.post<{ data: { token: string; expiresInSeconds: number } }>(
+          `/access/person/${userId}/impersonate`,
+        )
+      ).data.data,
+    onSuccess: (d) => startImpersonation(d.token, d.expiresInSeconds),
+    onError: (e) => complain(e, "Could not open the portal as them"),
+  });
+
+  /*
+   * Offered only where it would show something rather than gain something:
+   * never yourself, never another root admin, never a deactivated account,
+   * and never from inside a session that is already borrowed.
+   */
+  const canImpersonate = (p: Person) =>
+    admin?.role === "root_admin" &&
+    !admin?.impersonatedBy &&
+    p.id !== admin?._id &&
+    p.role !== "root_admin" &&
+    p.status === "active";
 
   const [problem, setProblem] = useState("");
   const complain = (e: unknown, fallback: string) =>
@@ -732,6 +767,26 @@ export default function UsersPage() {
 
                       <td className="px-3 py-2.5 align-top">
                         <div className="flex justify-end gap-1.5">
+                          {/*
+                            On the row, because the question it answers — "what
+                            does this person actually see?" — is usually asked
+                            while scanning the list rather than after opening
+                            somebody. The banner and the thirty-minute clock
+                            are what make it safe to be one click.
+                          */}
+                          {canImpersonate(p) && (
+                            <Button
+                              variant="ghost" size="sm" className="gap-1"
+                              title={`Open the portal as ${p.email} for thirty minutes`}
+                              disabled={impersonate.isPending}
+                              onClick={() => impersonate.mutate(p.id)}
+                            >
+                              {impersonate.isPending && impersonate.variables === p.id
+                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                : <Eye className="h-3.5 w-3.5" />}
+                              View as
+                            </Button>
+                          )}
                           <Button variant="ghost" size="sm" asChild className="gap-1">
                             <Link href={`/users/${p.id}`}>
                               Manage <ChevronRight className="h-3.5 w-3.5" />

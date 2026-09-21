@@ -81,13 +81,13 @@ export default function PersonAccessPage() {
   /*
    * Borrow this person's session.
    *
-   * Confirmed in two clicks rather than one. The banner makes it obvious
-   * afterwards, but the moment before is the one worth slowing down: it ends
-   * with a real session in somebody else's account, and anything opened from
-   * it lands in the far system under their name.
+   * One click, the same as from their row on the list. What makes that
+   * defensible is not the action being small — it ends in a real session in
+   * somebody else's account — but that it is loud and it ends: a banner sits
+   * above every screen naming whose account it is, and the session expires by
+   * itself in half an hour. A confirmation in front of it would be a step
+   * everybody learns to click through without reading.
    */
-  const [confirmingAs, setConfirmingAs] = useState(false);
-
   const impersonate = useMutation({
     mutationFn: async () =>
       (
@@ -141,41 +141,19 @@ export default function PersonAccessPage() {
         </div>
         <div className="flex items-center gap-2">
           {canImpersonate && (
-            confirmingAs ? (
-              <div className="flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1">
-                <span className="text-xs text-muted-foreground">
-                  Open the portal as them?
-                </span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 px-2 text-xs"
-                  disabled={impersonate.isPending}
-                  onClick={() => impersonate.mutate()}
-                >
-                  {impersonate.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Yes"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 px-2 text-xs"
-                  onClick={() => setConfirmingAs(false)}
-                >
-                  No
-                </Button>
-              </div>
-            ) : (
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1.5"
-                title="See the portal as this person sees it, for thirty minutes"
-                onClick={() => setConfirmingAs(true)}
-              >
-                <Eye className="h-3.5 w-3.5" />
-                View as
-              </Button>
-            )
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              title={`Open the portal as ${person.email} for thirty minutes`}
+              disabled={impersonate.isPending}
+              onClick={() => impersonate.mutate()}
+            >
+              {impersonate.isPending
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <Eye className="h-3.5 w-3.5" />}
+              View as
+            </Button>
           )}
           <Badge variant={person.status === "active" ? "default" : "secondary"}>
             {person.status}
