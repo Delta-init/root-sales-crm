@@ -49,8 +49,14 @@ export const scheduleMeeting = async (
       scheduledStart: String(b["scheduledStart"] ?? ""),
       durationMins: Number(b["durationMins"] ?? 0),
       meetingUrl: b["meetingUrl"] ? String(b["meetingUrl"]) : undefined,
-      attendeeName: String(b["attendeeName"] ?? ""),
-      attendeeEmail: b["attendeeEmail"] ? String(b["attendeeEmail"]) : undefined,
+      /* Taken as a list, filtered to the rows somebody actually filled in. A
+         half-typed row left behind in the form is not a person to invite. */
+      attendees: (Array.isArray(b["attendees"]) ? b["attendees"] : [])
+        .map((a) => {
+          const row = (a ?? {}) as { name?: unknown; email?: unknown };
+          return { name: String(row.name ?? "").trim(), email: String(row.email ?? "").trim() };
+        })
+        .filter((a) => a.name.length > 0),
       notes: b["notes"] ? String(b["notes"]) : undefined,
       // Never taken from the request. Whoever is signed in is who booked it.
       bookedByEmail: req.admin!.impersonatedBy?.email ?? req.admin!.email,

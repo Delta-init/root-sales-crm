@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarDays, ChevronLeft, ChevronRight, Loader2, Search, Users2 } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Loader2, Plus, Search, Users2, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,7 +48,7 @@ interface MentorMeeting {
   kind: string;
   startsAt: string;
   durationMins: number;
-  attendeeName: string;
+  attendeeNames: string[];
 }
 
 interface Mentor {
@@ -150,15 +150,22 @@ export default function MentorsPage() {
   const [booking, setBooking] = useState<{ mentor: Mentor; day: Date } | null>(null);
   const [form, setForm] = useState({
     title: "", kind: "staff", time: "10:00", durationMins: "30",
-    attendeeName: "", attendeeEmail: "", meetingUrl: "", notes: "",
+    meetingUrl: "", notes: "",
   });
+  /* Who is coming, as rows. A staff meeting is rarely two people, and everybody
+     with an address gets the invitation and the joining link. Starts as one
+     empty row so the commonest case needs no clicking. */
+  const [guests, setGuests] = useState<{ name: string; email: string }[]>([
+    { name: "", email: "" },
+  ]);
 
   const openBooking = (mentor: Mentor, day: Date) => {
     setBooking({ mentor, day });
     setForm({
       title: "", kind: "staff", time: "10:00", durationMins: "30",
-      attendeeName: "", attendeeEmail: "", meetingUrl: "", notes: "",
+      meetingUrl: "", notes: "",
     });
+    setGuests([{ name: "", email: "" }]);
   };
 
   const book = useMutation({
@@ -183,15 +190,23 @@ export default function MentorsPage() {
           kind: form.kind,
           scheduledStart: startsAt.toISOString(),
           durationMins: Number(form.durationMins),
-          attendeeName: form.attendeeName.trim(),
-          attendeeEmail: form.attendeeEmail.trim() || undefined,
+          attendees: guests
+            .map((g) => ({ name: g.name.trim(), email: g.email.trim() }))
+            .filter((g) => g.name.length > 0),
           meetingUrl: form.meetingUrl.trim() || undefined,
           notes: form.notes.trim() || undefined,
         })
       ).data.data;
     },
     onSuccess: (d) => {
-      toast.success(d?.linkNote ?? "Booked — both of them have been emailed");
+      /* Counted rather than written down: it said "both of them" while any
+         number of people could be on it. Only the ones with an address are
+         emailed, so that is the number worth reporting. */
+      const emailed = guests.filter((g) => g.name.trim() && g.email.trim()).length;
+      toast.success(
+        d?.linkNote ??
+          `Booked — the mentor${emailed ? ` and ${emailed} guest${emailed > 1 ? "s" : ""}` : ""} emailed`,
+      );
       setBooking(null);
       void qc.invalidateQueries({ queryKey: ["mentors", "schedule"] });
     },
@@ -391,11 +406,11 @@ export default function MentorsPage() {
                               {meetings.map((v) => (
                                 <div
                                   key={v.id}
-                                  title={`${v.title} · with ${v.attendeeName} · ${v.durationMins} minutes`}
+                                  title={`${v.title} · with ${v.attendeeNames.join(", ")} · ${v.durationMins} minutes`}
                                   className="rounded border border-violet-500/30 bg-violet-500/15 px-1.5 py-0.5 text-[11px] text-violet-300"
                                 >
                                   <span className="tabular-nums">{at(v.startsAt)}</span>{" "}
-                                  {KIND_LABEL[v.kind] ?? v.kind} · {v.attendeeName}
+                                  {KIND_LABEL[v.kind] ?? v.kind} · {v.attendeeNames.join(", ")}
                                 </div>
                               ))}
                             </div>
@@ -477,21 +492,56 @@ export default function MentorsPage() {
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="maname">Who they are meeting</Label>
-              <Input
-                id="maname" value={form.attendeeName}
-                onChange={(e) => setForm((f) => ({ ...f, attendeeName: e.target.value }))}
-                placeholder="Name"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="maemail">Their email</Label>
-              <Input
-                id="maemail" type="email" value={form.attendeeEmail}
-                onChange={(e) => setForm((f) => ({ ...f, attendeeEmail: e.target.value }))}
-                placeholder="So they get the invite too"
-              />
+            {/*
+              Who is coming, as many as there are. Everybody with an address
+              gets the invitation and the joining link, sent to each of them
+              separately — one message with all of them in `to` would publish
+              their addresses to each other, and some of these people are
+              outside the company.
+
+              A row with no name is ignored rather than refused: leaving a
+              half-typed line behind is not a mistake worth stopping somebody
+              for.
+            */}
+            <div className="space-y-2 sm:col-span-2">
+              <Label>Who they are meeting</Label>
+              {guests.map((g, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <Input
+                    value={g.name}
+                    onChange={(e) =>
+                      setGuests((rows) => rows.map((r, j) => (j === i ? { ...r, name: e.target.value } : r)))
+                    }
+                    placeholder="Name"
+                  />
+                  <Input
+                    type="email"
+                    value={g.email}
+                    onChange={(e) =>
+                      setGuests((rows) => rows.map((r, j) => (j === i ? { ...r, email: e.target.value } : r)))
+                    }
+                    placeholder="Email, so they get the invite"
+                  />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="shrink-0"
+                    title="Remove"
+                    disabled={guests.length === 1}
+                    onClick={() => setGuests((rows) => rows.filter((_, j) => j !== i))}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => setGuests((rows) => [...rows, { name: "", email: "" }])}
+              >
+                <Plus className="h-3.5 w-3.5" /> Add another person
+              </Button>
             </div>
 
             <div className="space-y-1.5 sm:col-span-2">
@@ -516,7 +566,11 @@ export default function MentorsPage() {
           <DialogFooter>
             <Button variant="ghost" onClick={() => setBooking(null)}>Cancel</Button>
             <Button
-              disabled={book.isPending || form.title.trim().length < 3 || !form.attendeeName.trim()}
+              disabled={
+                book.isPending ||
+                form.title.trim().length < 3 ||
+                !guests.some((g) => g.name.trim())
+              }
               onClick={() => book.mutate()}
             >
               {book.isPending && <Loader2 className="h-4 w-4 animate-spin" />}

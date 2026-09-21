@@ -33,7 +33,8 @@ export interface MentorMeeting {
   kind: string;
   startsAt: string;
   durationMins: number;
-  attendeeName: string;
+  /** Names only — the calendar says who, not how to reach them. */
+  attendeeNames: string[];
 }
 
 export interface Mentor {
@@ -121,8 +122,7 @@ export const mentorService = {
     scheduledStart: string;
     durationMins: number;
     meetingUrl?: string;
-    attendeeName: string;
-    attendeeEmail?: string;
+    attendees: { name: string; email?: string }[];
     notes?: string;
     bookedByEmail: string;
   }): Promise<{ meeting: MentorMeeting & { meetingUrl: string }; linkNote: string | null }> {
