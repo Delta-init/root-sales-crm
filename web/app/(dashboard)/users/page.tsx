@@ -43,6 +43,26 @@ const KIND_STYLE: Record<TargetKind, { icon: typeof Building2; className: string
 
 const PAGE_SIZE = 25;
 
+/** One system's answer about one person. */
+interface PresenceEntry {
+  roleKey: string | null;
+  roleName: string | null;
+  status: string;
+}
+
+/**
+ * What the presence query returns.
+ *
+ * Two separate things on purpose: which systems were asked and which of them
+ * could not answer, and then what the ones that did answer said. A system
+ * missing from somebody's `presence` means "that system says no account" only
+ * when it is not also in the unreachable list.
+ */
+interface PresenceResponse {
+  platforms: { target: TargetCode; targetName: string; kind: TargetKind; unreachable: string | null }[];
+  presence: Record<string, Record<string, PresenceEntry>>;
+}
+
 const ROLE_LABEL: Record<PortalRole, string> = {
   root_admin: "Root admin",
   member: "Member",
@@ -198,6 +218,40 @@ export default function UsersPage() {
   const selectable = rows.filter((p) => p.role !== "root_admin");
   const allPicked = selectable.length > 0 && selectable.every((p) => picked.has(p.id));
 
+  /*
+   * Which systems the people on this page are really on.
+   *
+   * The column beside this one shows what this portal granted. This one shows
+   * what those systems say about themselves, which is not the same thing and
+   * is the whole reason it exists: a grant nobody ever acted on, and an
+   * account nobody granted, both look like an ordinary row until something
+   * asks.
+   *
+   * Only the page being looked at is asked about — twenty-five people, one
+   * request to each system rather than one per person — and in its own query,
+   * so a system that cannot be reached costs this column and nothing else.
+   */
+  const pageEmails = useMemo(() => rows.map((p) => p.email.toLowerCase()).sort(), [rows]);
+
+  const presence = useQuery({
+    queryKey: ["access", "presence", pageEmails],
+    enabled: pageEmails.length > 0,
+    retry: false,
+    staleTime: 60_000,
+    queryFn: async () =>
+      (await api.post<{ data: PresenceResponse }>("/access/presence", { emails: pageEmails })).data.data,
+  });
+
+  /*
+   * The systems that did not answer, kept apart from the ones that did.
+   *
+   * Everything below depends on this distinction. A system that could not be
+   * asked knows nothing about anybody, and letting that read as "no account
+   * here" would turn an outage into a statement about a person.
+   */
+  const silent = (presence.data?.platforms ?? []).filter((t) => t.unreachable);
+  const answered = (presence.data?.platforms ?? []).filter((t) => !t.unreachable);
+
   const toggle = (id: string) =>
     setPicked((s) => {
       const next = new Set(s);
@@ -334,6 +388,17 @@ export default function UsersPage() {
                   <th className="px-3 py-2.5 font-medium">Department</th>
                   <th className="px-3 py-2.5 font-medium">Here</th>
                   <th className="px-3 py-2.5 font-medium">Can open</th>
+                  <th className="px-3 py-2.5 font-medium">
+                    Actually on
+                    {silent.length > 0 && (
+                      <span
+                        className="ml-1.5 font-normal text-[11px] text-amber-400"
+                        title={silent.map((t) => `${t.targetName}: ${t.unreachable}`).join("\n")}
+                      >
+                        · {silent.length} silent
+                      </span>
+                    )}
+                  </th>
                   <th className="w-40 px-3 py-2.5" />
                 </tr>
               </thead>
@@ -447,6 +512,73 @@ export default function UsersPage() {
                             })}
                           </div>
                         )}
+                      </td>
+
+                      <td className="px-3 py-2.5 align-top">
+                        {(() => {
+                          if (presence.isPending && pageEmails.length > 0) {
+                            return <Skeleton className="h-4 w-20" />;
+                          }
+                          /*
+                           * Nothing answered at all — which says nothing about
+                           * this person, and must not be written as though it
+                           * did.
+                           */
+                          if (presence.isError || answered.length === 0) {
+                            return (
+                              <span className="text-xs text-muted-foreground">
+                                Could not ask
+                              </span>
+                            );
+                          }
+
+                          const on = presence.data?.presence?.[p.email.toLowerCase()] ?? {};
+                          const codes = Object.keys(on);
+
+                          if (codes.length === 0) {
+                            return (
+                              <span className="text-xs text-muted-foreground">
+                                {silent.length > 0
+                                  ? `None of the ${answered.length} that answered`
+                                  : "No account anywhere"}
+                              </span>
+                            );
+                          }
+
+                          return (
+                            <div className="flex flex-wrap gap-1.5">
+                              {codes.map((code) => {
+                                const t = byCode.get(code as TargetCode);
+                                const k = KIND_STYLE[t?.kind ?? "crm"] ?? KIND_STYLE.crm;
+                                const Icon = k.icon;
+                                const entry = on[code]!;
+                                const inactive = entry.status === "inactive";
+                                return (
+                                  <span
+                                    key={code}
+                                    title={
+                                      `${t?.name ?? code}: ${entry.roleName ?? entry.roleKey ?? "unknown role"}` +
+                                      (entry.status ? ` · ${entry.status}` : "")
+                                    }
+                                    className={cn(
+                                      "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px]",
+                                      k.className,
+                                      inactive && "opacity-50",
+                                    )}
+                                  >
+                                    <Icon className="h-3 w-3" />
+                                    {t?.name ?? code}
+                                    {(entry.roleName || entry.roleKey) && (
+                                      <span className="opacity-70">
+                                        · {entry.roleName ?? entry.roleKey}
+                                      </span>
+                                    )}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
                       </td>
 
                       <td className="px-3 py-2.5 align-top">

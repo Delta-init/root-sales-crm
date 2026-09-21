@@ -51,6 +51,33 @@ export interface TargetView {
   drift: string | null;
 }
 
+/** One system's answer about one person, as the list column needs it. */
+export interface PresenceEntry {
+  roleKey: string | null;
+  roleName: string | null;
+  status: string;
+}
+
+/** What a target's bulk endpoint returns per address. */
+interface PortalAccountSummary {
+  email: string;
+  exists: boolean;
+  inOrganization?: boolean;
+  name?: string;
+  status?: string;
+  roleKey?: string | null;
+  roleName?: string | null;
+}
+
+/**
+ * The most people this portal will ask about in one sweep.
+ *
+ * A page of the user list is twenty-five. The cap is far above that so the
+ * page never has to think about it, and it matches what the targets accept,
+ * so a request this portal allows cannot be one they will refuse.
+ */
+const MAX_EMAILS = 500;
+
 const qs = (params: Record<string, string>) => {
   const search = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v) search.set(k, v);
@@ -219,5 +246,99 @@ export const directoryService = {
     );
 
     return { detail: result.detail, targetName: target.name, roleKey: result.roleKey || role };
+  },
+
+  /**
+   * Which systems each of these people actually has an account on.
+   *
+   * `describe` answers this for one person by asking every system about them.
+   * The user list needs the same answer for a page of twenty-five, and asking
+   * per person would be twenty-five requests to each system for one screen.
+   * So each system is asked once, about everybody on the page.
+   *
+   * What comes back is deliberately two separate things. `platforms` says
+   * which systems were asked and which of them could not answer; `presence`
+   * says what the ones that did answer said. A system that is unreachable has
+   * no entry in anybody's presence, and the caller must read that as "not
+   * known" rather than "no account" — the whole value of this column is that
+   * it reports what is really there, and a column that quietly turns silence
+   * into absence would be worse than no column at all.
+   */
+  async presenceFor(emails: string[]): Promise<{
+    platforms: { target: TargetCode; targetName: string; kind: string; unreachable: string | null }[];
+    presence: Record<string, Record<string, PresenceEntry>>;
+  }> {
+    const wanted: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of emails) {
+      const email = String(raw ?? "").toLowerCase().trim();
+      if (!email || seen.has(email)) continue;
+      seen.add(email);
+      wanted.push(email);
+    }
+    if (wanted.length === 0) return { platforms: [], presence: {} };
+    if (wanted.length > MAX_EMAILS) {
+      throw httpError(`At most ${MAX_EMAILS} people at a time`, 400);
+    }
+
+    const orgs = await Organization.find({ isActive: true })
+      .select("code name kind")
+      .sort({ name: 1 })
+      .lean();
+
+    const presence: Record<string, Record<string, PresenceEntry>> = {};
+    for (const email of wanted) presence[email] = {};
+
+    /*
+     * Every system asked at once, and one being down must not hide the rest.
+     * A settled result per system means an undeployed LMS shows as "cannot
+     * say" beside a Finance that answered properly, rather than the column
+     * failing as a whole because of one of them.
+     */
+    const platforms = await Promise.all(
+      orgs.map(async (org) => {
+        const row = {
+          target: org.code as TargetCode,
+          targetName: org.name,
+          kind: String(org.kind ?? ""),
+          unreachable: null as string | null,
+        };
+
+        try {
+          const target = await resolveTarget(String(org.code));
+          const data = await callTarget<{ accounts: PortalAccountSummary[] }>(
+            target,
+            "/accounts",
+            {
+              method: "POST",
+              verb: "say who has an account",
+              body: {
+                emails: wanted,
+                remoteOrgId: target.remoteOrgId || undefined,
+              },
+            },
+          );
+
+          for (const account of data.accounts ?? []) {
+            const email = String(account.email ?? "").toLowerCase().trim();
+            // Only record what was asked for. A system answering about
+            // somebody else is not something to quietly put on a row.
+            if (!presence[email]) continue;
+            if (!account.exists || account.inOrganization === false) continue;
+            presence[email][String(org.code)] = {
+              roleKey: account.roleKey ?? null,
+              roleName: account.roleName ?? null,
+              status: account.status ?? "",
+            };
+          }
+        } catch (err) {
+          row.unreachable = (err as Error).message;
+        }
+
+        return row;
+      }),
+    );
+
+    return { platforms, presence };
   },
 };

@@ -462,6 +462,25 @@ export const describePerson = async (req: AuthenticatedRequest, res: Response, n
 };
 
 /**
+ * Which systems each of these people is actually on.
+ *
+ * Deliberately its own request rather than part of /people. That list is one
+ * query against this portal's own database and is always fast; this one waits
+ * on every other system in the estate. Folding them together would mean a
+ * slow finance server delaying the user list itself, or an unreachable one
+ * emptying a screen that has plenty to show without it.
+ *
+ * So the table arrives first and this fills in behind it.
+ */
+export const peoplePresence = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { emails } = (req.body ?? {}) as { emails?: unknown };
+    if (!Array.isArray(emails)) { sendError(res, "emails must be a list of addresses", 400); return; }
+    sendSuccess(res, "Presence", await directoryService.presenceFor(emails as string[]));
+  } catch (err) { next(err); }
+};
+
+/**
  * Change the role somebody holds inside a target — in that target, not just here.
  *
  * Distinct from granting. A grant is this portal deciding somebody may go

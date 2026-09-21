@@ -6,6 +6,7 @@ import {
   grant, provision, revoke, setRole,
   targetRoles, describePerson, setRoleInTarget, grantMany,
   setStatus, deletePerson, setStatusMany, deleteMany,
+  peoplePresence,
 } from "../controllers/accessController.js";
 
 const router = Router();
@@ -24,6 +25,12 @@ router.get("/people", listPeople);
 router.get("/targets", listTargets);
 router.get("/targets/:code/roles", targetRoles);
 router.get("/person/:userId", describePerson);
+/*
+ * POST for a read, deliberately: it carries a page of addresses, and those do
+ * not belong in a query string where every proxy in front of this would log
+ * them.
+ */
+router.post("/presence", peoplePresence);
 router.get("/hrms-directory", hrmsDirectory);
 router.post("/import", importFromHrms);
 router.get("/role-map", listRoleMap);
