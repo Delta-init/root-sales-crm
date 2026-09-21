@@ -20,6 +20,21 @@ const envSchema = z.object({
 
   CLIENT_URL: z.string().default("http://localhost:3100"),
 
+  /*
+   * Sending mail, for the sign-in codes.
+   *
+   * All defaulted to empty rather than required, on purpose: an unconfigured
+   * mailer must be a feature that politely does not work, never a portal that
+   * refuses to boot. Password sign-in carries on regardless, and the code
+   * endpoint says it is unavailable rather than pretending to send.
+   */
+  SMTP_HOST: z.string().default(""),
+  SMTP_PORT: z.string().default("587"),
+  SMTP_USER: z.string().default(""),
+  SMTP_PASS: z.string().default(""),
+  /** Full From header, e.g. `ERP - DELTA <support@example.com>`. */
+  SMTP_EMAIL_FROM: z.string().default(""),
+
   ROOT_ADMIN_NAME: z.string().default("Root Admin"),
   ROOT_ADMIN_EMAIL: z.email().default("root@deltainstitutions.com"),
   ROOT_ADMIN_PASSWORD: z.string().min(8).default("ChangeMe@12345"),

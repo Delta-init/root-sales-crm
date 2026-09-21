@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { motion } from "framer-motion";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { Eye, EyeOff, Loader2, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,6 +47,61 @@ export function LoginForm() {
     resolver: zodResolver(loginSchema),
     defaultValues: { email: "", password: "" },
   });
+
+  /*
+   * Signing in with a code instead of a password.
+   *
+   * Kept beside the password form rather than replacing it. Mail is a moving
+   * part this portal did not have until now, and a sign-in method that depends
+   * on a working SMTP host should never be the only way in.
+   *
+   * Its own state rather than another field on the form above: the two are
+   * validated differently and half of this one is a second step, and bending
+   * one schema around both would make each harder to read than either.
+   */
+  const [mode, setMode] = useState<"password" | "code">("password");
+  const [codeEmail, setCodeEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [codeSent, setCodeSent] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  const askForCode = async () => {
+    if (!codeEmail.trim()) {
+      toast.error("Enter your email address first");
+      return;
+    }
+    setSending(true);
+    try {
+      await api.post("/auth/request-code", { email: codeEmail.trim() });
+      setCodeSent(true);
+      /*
+       * Worded to match what the server will admit to. It answers the same way
+       * for an address that has no account, so promising "we have sent you a
+       * code" would be a claim the portal cannot actually make.
+       */
+      toast.success("If that address has an account, a code is on its way");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Could not send a code"));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const submitCode = async () => {
+    setSending(true);
+    try {
+      const { data } = await api.post("/auth/code-login", {
+        email: codeEmail.trim(),
+        code: code.trim(),
+      });
+      login(data.data.accessToken, data.data.refreshToken, data.data.admin);
+      router.replace("/dashboard");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "That code did not work"));
+    } finally {
+      setSending(false);
+    }
+  };
 
   const onSubmit = async (values: LoginFormValues) => {
     setIsPending(true);
@@ -94,6 +149,7 @@ export function LoginForm() {
           </CardHeader>
 
           <CardContent>
+            {mode === "password" && (
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
               <div className="space-y-2">
                 <Label htmlFor="email">Email Address</Label>
@@ -159,6 +215,90 @@ export function LoginForm() {
                 )}
               </Button>
             </form>
+            )}
+
+            {mode === "code" && (
+              <div className="space-y-5">
+                <div className="space-y-2">
+                  <Label htmlFor="code-email">Email Address</Label>
+                  <Input
+                    id="code-email"
+                    type="email"
+                    placeholder="email"
+                    autoComplete="email"
+                    autoFocus
+                    value={codeEmail}
+                    disabled={codeSent}
+                    onChange={(e) => setCodeEmail(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !codeSent) void askForCode(); }}
+                  />
+                </div>
+
+                {codeSent && (
+                  <div className="space-y-2">
+                    <Label htmlFor="code">Six-digit code</Label>
+                    <Input
+                      id="code"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      placeholder="000000"
+                      maxLength={6}
+                      autoFocus
+                      value={code}
+                      onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                      onKeyDown={(e) => { if (e.key === "Enter" && code.length === 6) void submitCode(); }}
+                      className="text-center text-lg tracking-[0.4em]"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Sent to {codeEmail}. It works once and expires in ten minutes.
+                    </p>
+                  </div>
+                )}
+
+                <Button
+                  type="button"
+                  className="w-full"
+                  disabled={sending || (codeSent && code.length !== 6)}
+                  onClick={() => (codeSent ? void submitCode() : void askForCode())}
+                >
+                  {sending ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      {codeSent ? "Signing in..." : "Sending..."}
+                    </>
+                  ) : codeSent ? (
+                    "Sign In"
+                  ) : (
+                    "Email me a code"
+                  )}
+                </Button>
+
+                {/* A code that never arrived is the ordinary failure here, so
+                    the way back is on the screen rather than needing a reload. */}
+                {codeSent && (
+                  <button
+                    type="button"
+                    onClick={() => { setCodeSent(false); setCode(""); }}
+                    className="w-full text-center text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Use a different address, or send another code
+                  </button>
+                )}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                setMode((m) => (m === "password" ? "code" : "password"));
+                setCodeSent(false);
+                setCode("");
+              }}
+              className="mt-5 flex w-full items-center justify-center gap-1.5 text-xs text-primary hover:underline"
+            >
+              <Mail className="h-3.5 w-3.5" />
+              {mode === "password" ? "Sign in with an emailed code instead" : "Sign in with a password instead"}
+            </button>
 
             <p className="mt-6 text-center text-xs text-muted-foreground">
               Every sign-in and CRM launch from this portal is recorded.

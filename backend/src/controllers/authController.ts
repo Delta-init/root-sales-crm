@@ -32,6 +32,75 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
   }
 };
 
+const requestCodeSchema = z.object({ email: z.email("A valid email is required") });
+const codeLoginSchema = z.object({
+  email: z.email("A valid email is required"),
+  code: z.string().regex(/^\d{6}$/, "Enter the six digits from the email"),
+});
+
+const clientIp = (req: Request): string => {
+  const fwd = req.headers["x-forwarded-for"];
+  if (typeof fwd === "string" && fwd.length) return fwd.split(",")[0].trim();
+  return req.socket.remoteAddress ?? "";
+};
+
+/**
+ * Ask for a sign-in code.
+ *
+ * Answers the same whether or not the address belongs to anybody. This is
+ * reachable without signing in, so an honest answer would turn it into a way
+ * to ask who works here, one address at a time. The only failure it will admit
+ * to is the server having no mailer, which is about this server rather than
+ * about the person.
+ */
+export const requestLoginCode = async (req: Request, res: Response, next: NextFunction) => {
+  const parsed = requestCodeSchema.safeParse(req.body);
+  if (!parsed.success) {
+    sendError(res, "Validation failed", 400, z.treeifyError(parsed.error));
+    return;
+  }
+
+  try {
+    await authService.requestLoginCode(parsed.data.email, clientIp(req));
+    sendSuccess(res, "If that address has an account, a code is on its way", {});
+  } catch (error) {
+    // A missing mailer is worth saying out loud; anything else is swallowed
+    // into the same reassuring sentence, for the reason above.
+    if ((error as { statusCode?: number }).statusCode === 503) {
+      next(error);
+      return;
+    }
+    sendSuccess(res, "If that address has an account, a code is on its way", {});
+  }
+};
+
+/** Exchange the code for the same session a password would have given. */
+export const loginWithCode = async (req: Request, res: Response, next: NextFunction) => {
+  const parsed = codeLoginSchema.safeParse(req.body);
+  if (!parsed.success) {
+    sendError(res, "Validation failed", 400, z.treeifyError(parsed.error));
+    return;
+  }
+
+  const { email, code } = parsed.data;
+
+  try {
+    const result = await authService.loginWithCode(email, code);
+    await record(req, "login", {
+      adminId: result.admin._id?.toString(),
+      adminEmail: result.admin.email,
+      detail: "Signed in with an emailed code",
+    });
+    sendSuccess(res, "Logged in successfully", result);
+  } catch (error) {
+    await record(req, "login_failed", {
+      adminEmail: email,
+      detail: "Emailed code was wrong or expired",
+    });
+    next(error);
+  }
+};
+
 export const refresh = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { refreshToken } = req.body ?? {};
