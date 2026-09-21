@@ -46,6 +46,8 @@ const auditLogSchema = new Schema<IAuditLog>(
         "task_created",
         "task_approved",
         "task_returned",
+        "task_verified",
+        "task_rejected",
       ],
       required: true,
     },

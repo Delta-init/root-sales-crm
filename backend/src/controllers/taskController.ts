@@ -1,4 +1,5 @@
 import type { Response, NextFunction } from "express";
+import { AdminUser } from "../models/AdminUser.js";
 import { taskService } from "../services/taskService.js";
 import { record } from "../services/auditService.js";
 import { sendError, sendSuccess } from "../utils/response.js";
@@ -42,8 +43,17 @@ export const createTask = async (req: AuthenticatedRequest, res: Response, next:
     if (!assignedTo) { sendError(res, "Choose who it is for", 400); return; }
     if (!dueDate) { sendError(res, "Set a due date", 400); return; }
 
+    /* Their real name, because Media ERP may be about to create an account
+       with it. Without this the account ends up called "abshar" — whatever is
+       in front of the @ — which is what somebody over there would then see
+       against every task they raise. */
+    const raiser = await AdminUser.findById(
+      req.admin!.impersonatedBy?.id ?? req.admin!.adminId,
+    ).select("name");
+
     const result = await taskService.create({
       actorEmail: actorEmail(req),
+      actorName: raiser?.name ?? "",
       title,
       description: String(b["description"] ?? ""),
       priority: String(b["priority"] ?? "medium"),
@@ -56,41 +66,62 @@ export const createTask = async (req: AuthenticatedRequest, res: Response, next:
       adminId: req.admin!.impersonatedBy?.id ?? req.admin!.adminId,
       adminEmail: actorEmail(req),
       org: "media-erp",
-      detail: `Raised "${title}"${result.stoodIn ? ` (recorded in Media ERP as ${result.createdAs})` : ""}`,
+      detail: `Raised "${title}" as ${result.createdAs}`,
     });
 
     sendSuccess(res, "Task created", result);
   } catch (error) { next(error); }
 };
 
-/** What is waiting on the signed-in person to approve. */
-export const taskApprovals = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+/** One task in full — where it is, how it got there, what is attached. */
+export const taskDetail = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    sendSuccess(res, "Approvals", await taskService.approvals(actorEmail(req)));
+    const { taskId } = req.params as { taskId: string };
+    sendSuccess(res, "Task", await taskService.detail(taskId, actorEmail(req)));
   } catch (error) { next(error); }
 };
 
-/** Approve a task, or send it back. */
-export const decideTask = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+/** What this person has asked for, whatever became of it. */
+export const tasksRaised = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    sendSuccess(res, "Raised", await taskService.raised(actorEmail(req)));
+  } catch (error) { next(error); }
+};
+
+/** What is waiting on this person to verify. */
+export const verifications = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    sendSuccess(res, "Verifications", await taskService.verifications(actorEmail(req)));
+  } catch (error) { next(error); }
+};
+
+/**
+ * Pass a task, or say what is wrong with it.
+ *
+ * Verifying is not approving, and the audit line says which: this records that
+ * somebody looked at what came back and judged it, which is a different act
+ * from a leader signing the work off.
+ */
+export const verifyTask = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const { taskId } = req.params as { taskId: string };
     const b = (req.body ?? {}) as Record<string, unknown>;
-    const approve = b["approve"] === true;
+    const passed = b["passed"] === true;
 
-    const result = await taskService.decide({
+    const result = await taskService.verify({
       taskId,
       actorEmail: actorEmail(req),
-      approve,
-      note: b["note"] ? String(b["note"]) : undefined,
+      passed,
+      reason: b["reason"] ? String(b["reason"]) : undefined,
     });
 
-    await record(req, approve ? "task_approved" : "task_returned", {
+    await record(req, passed ? "task_verified" : "task_rejected", {
       adminId: req.admin!.impersonatedBy?.id ?? req.admin!.adminId,
       adminEmail: actorEmail(req),
       org: "media-erp",
-      detail: `${approve ? "Approved" : "Sent back"} task ${taskId}`,
+      detail: `${passed ? "Verified" : "Sent back"} task ${taskId}`,
     });
 
-    sendSuccess(res, approve ? "Approved" : "Sent back", result);
+    sendSuccess(res, passed ? "Verified" : "Sent back", result);
   } catch (error) { next(error); }
 };

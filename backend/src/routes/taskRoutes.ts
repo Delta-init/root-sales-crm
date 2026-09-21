@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { authenticate } from "../middleware/auth.js";
 import {
-  taskTeams, createTask, taskApprovals, decideTask,
+  taskTeams, createTask, taskDetail, tasksRaised, verifications, verifyTask,
 } from "../controllers/taskController.js";
 
 const router = Router();
@@ -18,7 +18,15 @@ router.use(authenticate);
 
 router.get("/teams", taskTeams);
 router.post("/", createTask);
-router.get("/approvals", taskApprovals);
-router.post("/:taskId/decide", decideTask);
+
+/*
+ * Before "/:taskId", so a task called "raised" or "verifications" cannot
+ * shadow them — the same ordering trap the access routes carry a note about.
+ */
+router.get("/raised", tasksRaised);
+router.get("/verifications", verifications);
+router.post("/verifications/:taskId", verifyTask);
+
+router.get("/:taskId", taskDetail);
 
 export default router;

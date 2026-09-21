@@ -164,6 +164,8 @@ export type AuditAction =
   | "task_created"
   | "task_approved"
   | "task_returned"
+  | "task_verified"
+  | "task_rejected"
   | "target_registered"
   | "target_updated"
   | "account_provisioned"

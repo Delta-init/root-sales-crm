@@ -1,5 +1,4 @@
-import { callTarget, resolveTarget, httpError } from "../lib/targetClient.js";
-import { targetConfig } from "../config/targets.js";
+import { callTarget, resolveTarget } from "../lib/targetClient.js";
 
 /**
  * Work raised in Media ERP, from here.
@@ -33,15 +32,6 @@ export interface PendingTask {
   teamName?: string;
 }
 
-/**
- * The account Media ERP falls back to when the person has none of their own.
- *
- * Read from the registry rather than named here: it is the same address the
- * portal already signs in as when a root admin launches into Media ERP, and
- * having two settings for one identity is how they end up disagreeing.
- */
-const standIn = () => targetConfig("media-erp").serviceEmail;
-
 export const taskService = {
   /** The teams work can be put on, and who is in them. */
   async teams(): Promise<{ teams: TaskTeam[] }> {
@@ -55,63 +45,82 @@ export const taskService = {
   /**
    * Raise work on somebody's plate.
    *
-   * The stand-in address travels with the request rather than being configured
-   * on the far side, so which account speaks for the portal is decided in one
-   * place — here, where the rest of what this portal is to Media ERP is set.
+   * The raiser's name travels with the request so Media ERP can make them an
+   * account if they have none — which is what lets the work come back to them
+   * to verify rather than stranding it with nobody able to sign it off.
    */
   async create(input: {
     actorEmail: string;
+    actorName: string;
     title: string;
     description?: string;
     priority?: string;
     teamId: string;
     assignedTo: string;
     dueDate: string;
-  }): Promise<{ createdAs: string; stoodIn: boolean; task: unknown }> {
+  }): Promise<{ createdAs: string; verifierNote: string; task: unknown }> {
     const target = await resolveTarget("media-erp");
-    const fallbackEmail = standIn();
-    if (!fallbackEmail) {
-      throw httpError(
-        "Media ERP has no service account configured here — set MEDIA_ERP_SERVICE_EMAIL",
-        503,
-      );
-    }
-
+    /* No stand-in address any more. Media ERP makes the person an account the
+       first time they raise something, so they are themselves from then on —
+       which is what lets the work come back to them to verify. */
     return callTarget(target, "/tasks", {
       method: "POST",
       verb: "create that task",
-      body: { ...input, fallbackEmail },
+      body: input,
     });
   },
 
   /**
-   * What is waiting on this person to approve.
+   * One task in full: where it is, how it got there, what is attached.
    *
-   * Only works for somebody with a Media ERP account, and that refusal comes
-   * from there: approving turns on leading a team, which the portal has no way
-   * of knowing and no business guessing.
+   * Media ERP decides who may see it — elevated roles, the assignee, somebody
+   * on the team. Asking that question again on this side could only ever
+   * produce a second answer, and the one further from the data would be wrong.
    */
-  async approvals(actorEmail: string): Promise<{ reviewerEmail: string; tasks: PendingTask[] }> {
+  async detail(taskId: string, actorEmail: string) {
     const target = await resolveTarget("media-erp");
     const params = new URLSearchParams({ actorEmail });
-    return callTarget(target, `/task-approvals?${params.toString()}`, {
+    return callTarget<Record<string, unknown>>(
+      target, `/tasks/${encodeURIComponent(taskId)}?${params.toString()}`,
+      { method: "GET", verb: "describe that task" },
+    );
+  },
+
+  /** What this person has asked for, whatever became of it. */
+  async raised(actorEmail: string): Promise<{ tasks: PendingTask[] }> {
+    const target = await resolveTarget("media-erp");
+    const params = new URLSearchParams({ actorEmail });
+    return callTarget(target, `/tasks-raised?${params.toString()}`, {
+      method: "GET",
+      verb: "list what you have raised",
+    });
+  },
+
+  /**
+   * What is waiting on this person to verify.
+   *
+   * Verification rather than approval, deliberately. Approving is a leader's
+   * job and this portal has no standing to do it; verifying is the question
+   * whoever asked for the work is best placed to answer — is this what I
+   * wanted — and Media ERP lets any role be named to it.
+   */
+  async verifications(actorEmail: string): Promise<unknown> {
+    const target = await resolveTarget("media-erp");
+    const params = new URLSearchParams({ actorEmail });
+    return callTarget(target, `/verifications?${params.toString()}`, {
       method: "GET",
       verb: "list what is waiting on you",
     });
   },
 
-  /** Approve a task, or send it back for another pass. */
-  async decide(input: {
-    taskId: string;
-    actorEmail: string;
-    approve: boolean;
-    note?: string;
-  }): Promise<{ decidedAs: string; approved: boolean }> {
+  /** Pass it, or say what is wrong with it. */
+  async verify(input: { taskId: string; actorEmail: string; passed: boolean; reason?: string }) {
     const target = await resolveTarget("media-erp");
-    return callTarget(target, `/tasks/${encodeURIComponent(input.taskId)}/decide`, {
-      method: "POST",
-      verb: "record that decision",
-      body: { actorEmail: input.actorEmail, approve: input.approve, note: input.note },
-    });
+    return callTarget<{ verifiedAs: string; passed: boolean }>(
+      target, `/verifications/${encodeURIComponent(input.taskId)}`,
+      { method: "POST", verb: "record that", body: {
+        actorEmail: input.actorEmail, passed: input.passed, reason: input.reason,
+      } },
+    );
   },
 };
