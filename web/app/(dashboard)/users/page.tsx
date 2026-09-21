@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
-  BookOpen, Building2, ChevronRight, Clapperboard, Download, GraduationCap,
+  BookOpen, Building2, Check, ChevronRight, Clapperboard, Download, GraduationCap,
   Loader2, Plus, Power, PowerOff, Search, ShieldCheck, Trash2, Users2, Wallet, X,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -16,11 +16,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuLabel, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
 import type {
-  DirectoryPerson, ImportResult, Person, PortalRole, Target, TargetCode, TargetKind, TargetRole,
+  DirectoryPerson, ImportResult, Person, Target, TargetCode, TargetKind, TargetRole,
 } from "@/lib/types";
 
 /**
@@ -43,6 +47,12 @@ const KIND_STYLE: Record<TargetKind, { icon: typeof Building2; className: string
 
 const PAGE_SIZE = 25;
 
+/** As many addresses as the systems accept in one question. */
+const PRESENCE_CHUNK = 500;
+
+/** Not a system — the answer "on none of them at all". */
+const ON_NOTHING = "__nothing__";
+
 /** One system's answer about one person. */
 interface PresenceEntry {
   roleKey: string | null;
@@ -62,12 +72,6 @@ interface PresenceResponse {
   platforms: { target: TargetCode; targetName: string; kind: TargetKind; unreachable: string | null }[];
   presence: Record<string, Record<string, PresenceEntry>>;
 }
-
-const ROLE_LABEL: Record<PortalRole, string> = {
-  root_admin: "Root admin",
-  member: "Member",
-  viewer: "Viewer",
-};
 
 export default function UsersPage() {
   const { admin } = useAuth();
@@ -123,12 +127,6 @@ export default function UsersPage() {
   const revoke = useMutation({
     mutationFn: async (v: { userId: string; target: TargetCode }) =>
       api.delete(`/access/${v.userId}/${v.target}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["access", "people"] }),
-  });
-
-  const setRole = useMutation({
-    mutationFn: async (v: { userId: string; role: PortalRole }) =>
-      api.patch(`/access/${v.userId}/role`, { role: v.role }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["access", "people"] }),
   });
 
@@ -192,7 +190,7 @@ export default function UsersPage() {
    * "page 1 of 7" and three matches on it, which is the sort of thing that
    * makes somebody conclude the search is broken.
    */
-  const matching = useMemo(() => {
+  const byDepartment = useMemo(() => {
     if (!dept) return all;
     return all.filter((p) => {
       const d = hrms.get(p.email.toLowerCase());
@@ -201,6 +199,120 @@ export default function UsersPage() {
       return d?.department === dept;
     });
   }, [all, dept, hrms]);
+
+  /*
+   * Which systems these people are really on.
+   *
+   * The "Can open" column shows what this portal granted. This shows what
+   * those systems say about themselves, which is not the same thing and is
+   * the whole reason it exists: a grant nobody ever acted on, and an account
+   * nobody granted, both look like an ordinary row until something asks.
+   *
+   * Asked about everybody matching, not only the page being looked at. It
+   * used to be the page, which was cheaper and quietly wrong once this became
+   * something you can filter by: ticking a system would have searched the
+   * twenty-five rows in front of you while looking like it searched the lot,
+   * and there is no worse kind of filter than one that finds three of eleven
+   * and says nothing.
+   *
+   * Affordable because each system is asked once for the whole set rather
+   * than once per person — five hundred people is seven requests, not three
+   * and a half thousand. Beyond five hundred it splits into further rounds,
+   * which is the limit the systems themselves accept.
+   *
+   * Still its own query, so a system that cannot be reached costs this column
+   * and nothing else.
+   */
+  const allEmails = useMemo(
+    () => byDepartment.map((p) => p.email.toLowerCase()).sort(),
+    [byDepartment],
+  );
+
+  const presence = useQuery({
+    queryKey: ["access", "presence", allEmails],
+    enabled: allEmails.length > 0,
+    retry: false,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const chunks: string[][] = [];
+      for (let i = 0; i < allEmails.length; i += PRESENCE_CHUNK) {
+        chunks.push(allEmails.slice(i, i + PRESENCE_CHUNK));
+      }
+
+      const parts = await Promise.all(
+        chunks.map(async (emails) =>
+          (await api.post<{ data: PresenceResponse }>("/access/presence", { emails })).data.data,
+        ),
+      );
+
+      /*
+       * A system counts as silent if it failed in any round. Half an answer
+       * is not an answer: if finance went down between the first five hundred
+       * and the second, the people in that second round would otherwise read
+       * as having no finance account, which is exactly the lie this column is
+       * built to avoid.
+       */
+      const platforms = (parts[0]?.platforms ?? []).map((p) => {
+        const failure = parts.find((part) =>
+          part.platforms.find((q) => q.target === p.target)?.unreachable,
+        );
+        const why = failure?.platforms.find((q) => q.target === p.target)?.unreachable ?? null;
+        return { ...p, unreachable: why };
+      });
+
+      const presence: PresenceResponse["presence"] = {};
+      for (const part of parts) Object.assign(presence, part.presence);
+      return { platforms, presence };
+    },
+  });
+
+  /*
+   * The systems that did not answer, kept apart from the ones that did.
+   *
+   * Everything below depends on this distinction. A system that could not be
+   * asked knows nothing about anybody, and letting that read as "no account
+   * here" would turn an outage into a statement about a person.
+   */
+  const silent = (presence.data?.platforms ?? []).filter((t) => t.unreachable);
+  const answered = (presence.data?.platforms ?? []).filter((t) => !t.unreachable);
+
+  /*
+   * Narrowing by where people actually are.
+   *
+   * Ticking two systems means both, not either. "Who is in finance and also
+   * in the Draw CRM" is a question somebody asks on purpose; "who is in one
+   * or the other" is nearly the whole company and answers nothing.
+   *
+   * ON_NOTHING is its own answer rather than a system, and it is exclusive —
+   * combined with a system under "both" it would always be empty, so picking
+   * it clears the rest and picking a system clears it. It finds the people a
+   * grant was recorded for and never acted on, which is the most useful
+   * question this screen can be asked.
+   */
+  const [onSystems, setOnSystems] = useState<Set<string>>(new Set());
+
+  const toggleSystem = (code: string) =>
+    setOnSystems((s) => {
+      const next = new Set(s);
+      if (next.has(code)) next.delete(code);
+      else if (code === ON_NOTHING) return new Set([ON_NOTHING]);
+      else { next.delete(ON_NOTHING); next.add(code); }
+      return next;
+    });
+
+  /*
+   * Filtered first, then paged. Paging a list before filtering it would show
+   * "page 1 of 7" and three matches on it, which is the sort of thing that
+   * makes somebody conclude the search is broken.
+   */
+  const matching = useMemo(() => {
+    if (onSystems.size === 0) return byDepartment;
+    return byDepartment.filter((p) => {
+      const on = presence.data?.presence?.[p.email.toLowerCase()] ?? {};
+      if (onSystems.has(ON_NOTHING)) return Object.keys(on).length === 0;
+      return Array.from(onSystems).every((code) => Boolean(on[code]));
+    });
+  }, [byDepartment, onSystems, presence.data]);
 
   const pageCount = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
   const current = Math.min(page, pageCount);
@@ -217,40 +329,6 @@ export default function UsersPage() {
    */
   const selectable = rows.filter((p) => p.role !== "root_admin");
   const allPicked = selectable.length > 0 && selectable.every((p) => picked.has(p.id));
-
-  /*
-   * Which systems the people on this page are really on.
-   *
-   * The column beside this one shows what this portal granted. This one shows
-   * what those systems say about themselves, which is not the same thing and
-   * is the whole reason it exists: a grant nobody ever acted on, and an
-   * account nobody granted, both look like an ordinary row until something
-   * asks.
-   *
-   * Only the page being looked at is asked about — twenty-five people, one
-   * request to each system rather than one per person — and in its own query,
-   * so a system that cannot be reached costs this column and nothing else.
-   */
-  const pageEmails = useMemo(() => rows.map((p) => p.email.toLowerCase()).sort(), [rows]);
-
-  const presence = useQuery({
-    queryKey: ["access", "presence", pageEmails],
-    enabled: pageEmails.length > 0,
-    retry: false,
-    staleTime: 60_000,
-    queryFn: async () =>
-      (await api.post<{ data: PresenceResponse }>("/access/presence", { emails: pageEmails })).data.data,
-  });
-
-  /*
-   * The systems that did not answer, kept apart from the ones that did.
-   *
-   * Everything below depends on this distinction. A system that could not be
-   * asked knows nothing about anybody, and letting that read as "no account
-   * here" would turn an outage into a statement about a person.
-   */
-  const silent = (presence.data?.platforms ?? []).filter((t) => t.unreachable);
-  const answered = (presence.data?.platforms ?? []).filter((t) => !t.unreachable);
 
   const toggle = (id: string) =>
     setPicked((s) => {
@@ -299,6 +377,80 @@ export default function UsersPage() {
           <option value="__none__">No department set</option>
           <option value="__missing__">Not in HRMS</option>
         </select>
+
+        {/*
+          Disabled until the answers are in, rather than filtering on what has
+          arrived so far: a filter that quietly searches half the estate is
+          worse than one you have to wait two seconds for.
+        */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="outline"
+              disabled={presence.isPending || presence.isError || answered.length === 0}
+              className="gap-1.5"
+            >
+              {presence.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              {onSystems.size === 0
+                ? "Actually on: anywhere"
+                : onSystems.has(ON_NOTHING)
+                  ? "Actually on: nothing"
+                  : `Actually on: ${onSystems.size} selected`}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-64">
+            <DropdownMenuLabel>
+              On all of the ticked systems
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {answered.map((t) => {
+              const ticked = onSystems.has(t.target);
+              return (
+                <DropdownMenuItem
+                  key={t.target}
+                  onSelect={(e) => { e.preventDefault(); toggleSystem(t.target); setPage(1); }}
+                  className="gap-2"
+                >
+                  <Check className={cn("h-3.5 w-3.5", !ticked && "opacity-0")} />
+                  {t.targetName}
+                </DropdownMenuItem>
+              );
+            })}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={(e) => { e.preventDefault(); toggleSystem(ON_NOTHING); setPage(1); }}
+              className="gap-2"
+            >
+              <Check className={cn("h-3.5 w-3.5", !onSystems.has(ON_NOTHING) && "opacity-0")} />
+              On nothing at all
+            </DropdownMenuItem>
+            {onSystems.size > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={(e) => { e.preventDefault(); setOnSystems(new Set()); setPage(1); }}
+                  className="gap-2 text-muted-foreground"
+                >
+                  <X className="h-3.5 w-3.5" /> Clear
+                </DropdownMenuItem>
+              </>
+            )}
+            {/*
+              Named rather than left out silently: a system that could not be
+              asked is not a system nobody is on, and somebody filtering by
+              the rest deserves to know the answer is partial.
+            */}
+            {silent.length > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-[11px] font-normal text-amber-400">
+                  {silent.map((t) => t.targetName).join(", ")} could not be asked
+                </DropdownMenuLabel>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
         <Button variant="outline" className="gap-1.5" onClick={() => setImporting(true)}>
           <Download className="h-4 w-4" /> Import from HRMS
         </Button>
@@ -357,14 +509,30 @@ export default function UsersPage() {
           <CardContent className="py-16 text-center">
             <Users2 className="mx-auto h-8 w-8 text-muted-foreground/50" />
             <p className="mt-3 text-sm font-medium">Nobody matches that</p>
-            {dept && (
-              <button
-                onClick={() => { setDept(""); setPage(1); }}
-                className="mt-2 text-xs text-primary hover:underline"
-              >
-                Clear the department filter
-              </button>
-            )}
+            {/*
+              Whichever filter is narrowing, offered by name. "Nobody matches
+              that" with no way back is how somebody concludes the list is
+              broken when they have simply asked for finance and the LMS at
+              once.
+            */}
+            <div className="mt-2 flex items-center justify-center gap-3">
+              {dept && (
+                <button
+                  onClick={() => { setDept(""); setPage(1); }}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Clear the department filter
+                </button>
+              )}
+              {onSystems.size > 0 && (
+                <button
+                  onClick={() => { setOnSystems(new Set()); setPage(1); }}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Clear the systems filter
+                </button>
+              )}
+            </div>
           </CardContent>
         </Card>
       ) : (
@@ -386,7 +554,6 @@ export default function UsersPage() {
                   </th>
                   <th className="px-3 py-2.5 font-medium">Person</th>
                   <th className="px-3 py-2.5 font-medium">Department</th>
-                  <th className="px-3 py-2.5 font-medium">Here</th>
                   <th className="px-3 py-2.5 font-medium">Can open</th>
                   <th className="px-3 py-2.5 font-medium">
                     Actually on
@@ -458,24 +625,6 @@ export default function UsersPage() {
                       </td>
 
                       <td className="px-3 py-2.5 align-top">
-                        <select
-                          value={p.role}
-                          disabled={isSelf || setRole.isPending}
-                          onChange={(e) =>
-                            setRole.mutate({ userId: p.id, role: e.target.value as PortalRole })
-                          }
-                          className="h-8 rounded-md border border-border bg-background px-2 text-xs disabled:opacity-50"
-                        >
-                          {(Object.keys(ROLE_LABEL) as PortalRole[]).map((r) => (
-                            <option key={r} value={r}>{ROLE_LABEL[r]}</option>
-                          ))}
-                        </select>
-                        {isSelf && (
-                          <p className="pt-0.5 text-[10px] text-muted-foreground">Your own</p>
-                        )}
-                      </td>
-
-                      <td className="px-3 py-2.5 align-top">
                         {isRoot ? (
                           <span className="text-xs text-muted-foreground">
                             Every system, without a grant
@@ -516,7 +665,7 @@ export default function UsersPage() {
 
                       <td className="px-3 py-2.5 align-top">
                         {(() => {
-                          if (presence.isPending && pageEmails.length > 0) {
+                          if (presence.isPending && allEmails.length > 0) {
                             return <Skeleton className="h-4 w-20" />;
                           }
                           /*

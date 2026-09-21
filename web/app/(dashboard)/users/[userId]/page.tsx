@@ -12,7 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/axios";
-import type { PersonDetail, TargetRole, TargetView } from "@/lib/types";
+import { useAuth } from "@/providers/AuthProvider";
+import type { PersonDetail, PortalRole, TargetRole, TargetView } from "@/lib/types";
 
 /**
  * One person, as every system actually sees them.
@@ -31,15 +32,50 @@ import type { PersonDetail, TargetRole, TargetView } from "@/lib/types";
 const fmt = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "—";
 
+/**
+ * What somebody is in this portal, as opposed to in any system it fronts.
+ *
+ * Two different things share the word "role" here and confusing them is easy:
+ * this one decides whether they administer the portal, may launch into what
+ * they have been granted, or may only read the group report. The roles on the
+ * cards below are what they become inside another system once they arrive.
+ */
+const PORTAL_ROLE_LABEL: Record<PortalRole, string> = {
+  root_admin: "Root admin",
+  member: "Member",
+  viewer: "Viewer",
+};
+
 export default function PersonAccessPage() {
   const { userId } = useParams<{ userId: string }>();
   const router = useRouter();
   const qc = useQueryClient();
+  const { admin } = useAuth();
 
   const { data, isLoading } = useQuery({
     queryKey: ["person-access", userId],
     queryFn: async () =>
       (await api.get<{ data: PersonDetail }>(`/access/person/${userId}`)).data.data,
+  });
+
+  /*
+   * What they are in the portal itself.
+   *
+   * This used to be a dropdown in a column of the user list, which put the
+   * portal's own roles beside the roles people hold in other systems and
+   * invited reading them as the same kind of thing. It belongs here, with
+   * everything else that is true of one person.
+   *
+   * The user list is invalidated too: it shows this role, and leaving it
+   * stale would have the two screens disagreeing about the same person.
+   */
+  const setPortalRole = useMutation({
+    mutationFn: async (role: PortalRole) =>
+      api.patch(`/access/${userId}/role`, { role }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["person-access", userId] });
+      void qc.invalidateQueries({ queryKey: ["access", "people"] });
+    },
   });
 
   if (isLoading) {
@@ -54,6 +90,7 @@ export default function PersonAccessPage() {
   if (!data) return <div className="p-6 text-sm text-muted-foreground">No such person.</div>;
 
   const { person, targets } = data;
+  const isSelf = admin?._id === person.id;
   const withAccount = targets.filter((t) => t.account?.inOrganization || t.granted);
   const drifting = targets.filter((t) => t.drift);
 
@@ -71,7 +108,31 @@ export default function PersonAccessPage() {
           <Badge variant={person.status === "active" ? "default" : "secondary"}>
             {person.status}
           </Badge>
-          <Badge variant="outline">{person.role.replace("_", " ")}</Badge>
+          {/*
+            Nobody changes their own, deliberately: a root admin who makes
+            themselves a viewer by accident has locked themselves out of the
+            screen that would put it back.
+          */}
+          {isSelf ? (
+            <div className="text-right">
+              <Badge variant="outline">{PORTAL_ROLE_LABEL[person.role as PortalRole] ?? person.role}</Badge>
+              <p className="pt-0.5 text-[10px] text-muted-foreground">Your own</p>
+            </div>
+          ) : (
+            <label className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">In the portal</span>
+              <select
+                value={person.role}
+                disabled={setPortalRole.isPending}
+                onChange={(e) => setPortalRole.mutate(e.target.value as PortalRole)}
+                className="h-8 rounded-md border border-border bg-background px-2 text-xs disabled:opacity-50"
+              >
+                {(Object.keys(PORTAL_ROLE_LABEL) as PortalRole[]).map((r) => (
+                  <option key={r} value={r}>{PORTAL_ROLE_LABEL[r]}</option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
       </div>
 
