@@ -41,6 +41,8 @@ const KIND_STYLE: Record<TargetKind, { icon: typeof Building2; className: string
   erp: { icon: Clapperboard, className: "text-pink-400 bg-pink-500/10 border-pink-500/20" },
 };
 
+const PAGE_SIZE = 25;
+
 const ROLE_LABEL: Record<PortalRole, string> = {
   root_admin: "Root admin",
   member: "Member",
@@ -51,6 +53,8 @@ export default function UsersPage() {
   const { admin } = useAuth();
   const qc = useQueryClient();
   const [q, setQ] = useState("");
+  const [dept, setDept] = useState("");
+  const [page, setPage] = useState(1);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [granting, setGranting] = useState<Person[] | null>(null);
   const [importing, setImporting] = useState(false);
@@ -65,6 +69,29 @@ export default function UsersPage() {
     queryKey: ["access", "targets"],
     queryFn: async () => (await api.get<{ data: Target[] }>("/access/targets")).data.data,
   });
+
+  /*
+   * Departments, from HRMS rather than from here.
+   *
+   * This portal stores no department — HR owns that, and a copy taken at
+   * import time would say the wrong thing the moment somebody moved teams.
+   * So it is read live and joined on email, in its own query: the table is
+   * useful without it, and a directory that cannot be reached should cost the
+   * department column rather than the whole screen.
+   */
+  const directory = useQuery({
+    queryKey: ["access", "hrms-directory"],
+    retry: false,
+    staleTime: 5 * 60_000,
+    queryFn: async () =>
+      (await api.get<{ data: DirectoryPerson[] }>("/access/hrms-directory")).data.data,
+  });
+
+  const hrms = useMemo(() => {
+    const m = new Map<string, DirectoryPerson>();
+    for (const d of directory.data ?? []) m.set(d.email.toLowerCase(), d);
+    return m;
+  }, [directory.data]);
 
   const byCode = useMemo(
     () => new Map((targets.data ?? []).map((t) => [t.code, t])),
@@ -83,11 +110,41 @@ export default function UsersPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["access", "people"] }),
   });
 
-  const rows = people.data ?? [];
+  const all = people.data ?? [];
+
+  const departments = useMemo(() => {
+    const names = new Set<string>();
+    for (const d of directory.data ?? []) if (d.department) names.add(d.department);
+    return Array.from(names).sort();
+  }, [directory.data]);
+
+  /*
+   * Filtered first, then paged. Paging a list before filtering it would show
+   * "page 1 of 7" and three matches on it, which is the sort of thing that
+   * makes somebody conclude the search is broken.
+   */
+  const matching = useMemo(() => {
+    if (!dept) return all;
+    return all.filter((p) => {
+      const d = hrms.get(p.email.toLowerCase());
+      if (dept === "__none__") return Boolean(d) && !d!.department;
+      if (dept === "__missing__") return !d;
+      return d?.department === dept;
+    });
+  }, [all, dept, hrms]);
+
+  const pageCount = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
+  const current = Math.min(page, pageCount);
+  const rows = matching.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
   /*
    * Root admins are not selectable. They already open everything without a
    * grant, so including them in a bulk action would record permissions they
    * did not gain and cannot lose.
+   */
+  /*
+   * Selection is per page, deliberately. A header tick that silently reached
+   * six other pages would be one click away from granting a hundred and sixty
+   * people access to a production system.
    */
   const selectable = rows.filter((p) => p.role !== "root_admin");
   const allPicked = selectable.length > 0 && selectable.every((p) => picked.has(p.id));
@@ -118,17 +175,37 @@ export default function UsersPage() {
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => { setQ(e.target.value); setPage(1); }}
             placeholder="Search by name or email…"
             className="pl-9"
           />
         </div>
         {/* HRMS is where a person first exists, so they are brought in from
             there rather than typed here a second time. */}
+        <select
+          value={dept}
+          onChange={(e) => { setDept(e.target.value); setPage(1); }}
+          disabled={departments.length === 0}
+          className="h-9 rounded-md border border-border bg-background px-2 text-sm disabled:opacity-50"
+        >
+          <option value="">Every department</option>
+          {departments.map((d) => <option key={d} value={d}>{d}</option>)}
+          {/* Both named, because "no department" and "not in HRMS at all" are
+              different facts and somebody auditing access needs to tell them
+              apart. Roughly half the staff have no department set. */}
+          <option value="__none__">No department set</option>
+          <option value="__missing__">Not in HRMS</option>
+        </select>
         <Button variant="outline" className="gap-1.5" onClick={() => setImporting(true)}>
           <Download className="h-4 w-4" /> Import from HRMS
         </Button>
       </div>
+
+      {directory.error && (
+        <p className="text-xs text-amber-400">
+          HRMS could not be read, so departments are unavailable. Everything else still works.
+        </p>
+      )}
 
       {/* Only once something is selected, so it does not sit there empty. */}
       {picked.size > 0 && (
@@ -155,6 +232,14 @@ export default function UsersPage() {
           <CardContent className="py-16 text-center">
             <Users2 className="mx-auto h-8 w-8 text-muted-foreground/50" />
             <p className="mt-3 text-sm font-medium">Nobody matches that</p>
+            {dept && (
+              <button
+                onClick={() => { setDept(""); setPage(1); }}
+                className="mt-2 text-xs text-primary hover:underline"
+              >
+                Clear the department filter
+              </button>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -175,6 +260,7 @@ export default function UsersPage() {
                     />
                   </th>
                   <th className="px-3 py-2.5 font-medium">Person</th>
+                  <th className="px-3 py-2.5 font-medium">Department</th>
                   <th className="px-3 py-2.5 font-medium">Here</th>
                   <th className="px-3 py-2.5 font-medium">Can open</th>
                   <th className="w-40 px-3 py-2.5" />
@@ -216,6 +302,23 @@ export default function UsersPage() {
                           {p.status === "inactive" && <Badge variant="outline">Deactivated</Badge>}
                         </div>
                         <p className="text-xs text-muted-foreground">{p.email}</p>
+                      </td>
+
+                      <td className="px-3 py-2.5 align-top">
+                        {(() => {
+                          const d = hrms.get(p.email.toLowerCase());
+                          if (directory.isLoading) return <Skeleton className="h-4 w-20" />;
+                          if (!d) {
+                            return (
+                              <span className="text-xs text-muted-foreground/60" title="No HRMS employee has this address">
+                                not in HRMS
+                              </span>
+                            );
+                          }
+                          return d.department
+                            ? <span className="text-xs text-muted-foreground">{d.department}</span>
+                            : <span className="text-xs text-muted-foreground/60">—</span>;
+                        })()}
                       </td>
 
                       <td className="px-3 py-2.5 align-top">
@@ -299,6 +402,46 @@ export default function UsersPage() {
             </table>
           </div>
         </Card>
+      )}
+
+      {/* Only when there is more than one page — a pager under a short list is
+          furniture that says nothing. */}
+      {!people.isLoading && matching.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+          <p className="text-muted-foreground">
+            {matching.length === all.length
+              ? `${all.length} ${all.length === 1 ? "person" : "people"}`
+              : `${matching.length} of ${all.length} people`}
+            {pageCount > 1 && (
+              <span className="text-muted-foreground/70">
+                {" "}· showing {(current - 1) * PAGE_SIZE + 1}–
+                {Math.min(current * PAGE_SIZE, matching.length)}
+              </span>
+            )}
+          </p>
+
+          {pageCount > 1 && (
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="outline" size="sm"
+                disabled={current <= 1}
+                onClick={() => { setPage(current - 1); setPicked(new Set()); }}
+              >
+                Previous
+              </Button>
+              <span className="px-2 text-xs text-muted-foreground">
+                Page {current} of {pageCount}
+              </span>
+              <Button
+                variant="outline" size="sm"
+                disabled={current >= pageCount}
+                onClick={() => { setPage(current + 1); setPicked(new Set()); }}
+              >
+                Next
+              </Button>
+            </div>
+          )}
+        </div>
       )}
 
       <GrantDialog
