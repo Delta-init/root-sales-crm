@@ -1269,7 +1269,7 @@ function GrantDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
-      <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
+      <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle>
             {many ? `Give ${people!.length} people access` : `Give ${people?.[0]?.name} access`}
@@ -1439,7 +1439,7 @@ function ImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
-      <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle>Import from HRMS</DialogTitle>
           <DialogDescription>

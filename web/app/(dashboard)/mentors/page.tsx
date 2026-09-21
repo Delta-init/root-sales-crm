@@ -1013,7 +1013,7 @@ export default function MentorsPage() {
       {/* One class, as the LMS has it. Read-only: the portal says what is
           happening, and a course's session is changed where the course lives. */}
       <Dialog open={Boolean(viewingClass)} onOpenChange={(o) => { if (!o) setViewingClass(null); }}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
+        <DialogContent className="sm:max-w-md">
           {classDetail.isPending && <Skeleton className="h-40 w-full" />}
           {classDetail.isError && (
             <p className="py-6 text-sm text-muted-foreground">

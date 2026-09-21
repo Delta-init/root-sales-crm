@@ -203,7 +203,10 @@ export default function TasksPage() {
             Raise work for the Media ERP team. Whatever you raise comes back to you to check.
           </p>
         </div>
-        <Button className="gap-1.5" onClick={() => setRaising(true)}>
+        {/* Full width on a phone. Wrapped under the heading it was a short
+            button adrift on the left of an empty line; this is the only thing
+            to do on this screen, so it may as well look like it. */}
+        <Button className="w-full gap-1.5 sm:w-auto" onClick={() => setRaising(true)}>
           <Plus className="h-4 w-4" /> Raise work
         </Button>
       </div>
@@ -354,7 +357,7 @@ export default function TasksPage() {
 
       {/* ── One task, in full ──────────────────────────────────────────────── */}
       <Dialog open={Boolean(openTask)} onOpenChange={(o) => { if (!o) { setOpenTask(null); setReason(""); } }}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg">
           {detail.isPending && <Skeleton className="h-52 w-full" />}
           {detail.isError && (
             <p className="py-6 text-sm text-muted-foreground">
@@ -412,8 +415,11 @@ export default function TasksPage() {
                       <p className="text-xs text-muted-foreground">Attachments</p>
                       {(d.attachments ?? []).map((a, i) => (
                         <a key={i} href={a.url} target="_blank" rel="noreferrer"
-                          className="flex items-center gap-1.5 text-primary hover:underline">
-                          <Paperclip className="h-3 w-3" /> {a.filename}
+                          className="flex items-start gap-1.5 text-primary hover:underline">
+                          <Paperclip className="mt-1 h-3 w-3 shrink-0" />
+                          {/* Filenames have no spaces to break at, so left to
+                              itself one runs off the side of a phone. */}
+                          <span className="min-w-0 break-all">{a.filename}</span>
                         </a>
                       ))}
                     </div>
