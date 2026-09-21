@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
+import { MobileNav } from "@/components/layout/MobileNav";
 import { ImpersonationBanner } from "@/components/shared/ImpersonationBanner";
 import { useAuth } from "@/providers/AuthProvider";
 
@@ -30,7 +31,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           be told once. */}
       <ImpersonationBanner />
       <Header />
-      <main className="mx-auto max-w-6xl px-4 py-8 md:px-6">{children}</main>
+      {/* The bottom bar is fixed, so the page needs room to end above it —
+          otherwise the last thing on every screen sits underneath the nav. */}
+      <main className="mx-auto max-w-6xl px-4 pb-28 pt-6 md:px-6 md:pb-8 md:pt-8">{children}</main>
+      <MobileNav />
     </div>
   );
 }

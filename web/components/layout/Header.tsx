@@ -2,10 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  BarChart3, CalendarDays, ChevronDown, ClipboardCheck, ClipboardList, KeyRound, LayoutGrid, LogOut, User, Users2,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { ChevronDown, KeyRound, LogOut, User } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -19,69 +16,7 @@ import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { Logo } from "@/components/shared/Logo";
 import { useAuth } from "@/providers/AuthProvider";
 import { cn, getInitials } from "@/lib/utils";
-
-interface NavLink {
-  href: string;
-  label: string;
-  icon: LucideIcon;
-}
-
-interface NavItem extends Partial<NavLink> {
-  label: string;
-  icon: LucideIcon;
-  rootOnly?: boolean;
-  /** Present instead of an href: this opens rather than goes anywhere. */
-  children?: NavLink[];
-}
-
-const NAV: NavItem[] = [
-  { href: "/dashboard", label: "Organisations", icon: LayoutGrid },
-  /*
-   * Sales, root admins only.
-   *
-   * Two permanent tabs for reports that are read now and then, next to the
-   * ones used all day. Folded into one that opens, which also puts the two of
-   * them where they belong — both answer the same question about the same
-   * three CRMs, and neither means anything for the rest of the estate.
-   *
-   * rootOnly hides it. The API refuses it as well, which is the part that
-   * actually decides: a menu that leaves something out is tidy, and an
-   * endpoint that answers anybody who types its address is open regardless.
-   */
-  {
-    label: "Sales",
-    icon: BarChart3,
-    rootOnly: true,
-    children: [
-      { href: "/reports", label: "Group report", icon: BarChart3 },
-      { href: "/tracker", label: "Daily tracker", icon: ClipboardList },
-    ],
-  },
-  // Root admins only: deciding who may open which production system is the
-  // portal's most consequential act, and the API refuses anybody else anyway.
-  { href: "/users", label: "Users", icon: Users2, rootOnly: true },
-  /* Not root-only. It began that way, on the reasoning that a staff timetable
-     is nobody's business by default — booking changed that. The people who
-     need an hour with a mentor are the people doing the work, and a calendar
-     only they cannot see is one they have to ask somebody else to read. */
-  { href: "/mentors", label: "Mentors", icon: CalendarDays },
-  /* Also open to everybody: raising work and clearing approvals are jobs the
-     people doing the work do, and Media ERP decides who may actually do
-     either. */
-  { href: "/tasks", label: "Tasks", icon: ClipboardCheck },
-  /*
-   * Registry and Role map are not in the navigation.
-   *
-   * Both are still there and still work — /registry reports which systems are
-   * configured and names the variables any of them is missing, and /role-map
-   * edits the rules that make a role in one system imply a role in another.
-   * They are just not things anybody needs weekly, and two permanent links to
-   * them crowded out the ones that are used daily.
-   *
-   * Reachable by address. Put them back here the moment that becomes a
-   * nuisance rather than a tidy-up.
-   */
-];
+import { NAV } from "./nav";
 
 export function Header() {
   const { admin, logout } = useAuth();
@@ -98,9 +33,11 @@ export function Header() {
           <div className="text-xs text-muted-foreground">Delta · Banglore · Draw</div>
         </div>
 
-        <div className="hidden h-8 w-px bg-border sm:block" />
+        <div className="hidden h-8 w-px bg-border md:block" />
 
-        <nav className="flex items-center gap-1">
+        {/* Wide screens only. On a phone these live in the bar along the
+            bottom, where a thumb reaches — see MobileNav. */}
+        <nav className="hidden items-center gap-1 md:flex">
           {NAV.filter((item) => !item.rootOnly || admin?.role === "root_admin").map((item) => {
             // startsWith so a drill-down like /tracker/delta keeps the tab lit
             const lit = (href: string) =>
@@ -121,7 +58,7 @@ export function Header() {
                 <DropdownMenu key={item.label}>
                   <DropdownMenuTrigger className={tab}>
                     <item.icon className="h-4 w-4" />
-                    <span className="hidden sm:inline">{item.label}</span>
+                    <span>{item.label}</span>
                     <ChevronDown className="h-3.5 w-3.5 opacity-60" />
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="w-52">
@@ -144,7 +81,7 @@ export function Header() {
             return (
               <Link key={item.href} href={item.href ?? "#"} className={tab}>
                 <item.icon className="h-4 w-4" />
-                <span className="hidden sm:inline">{item.label}</span>
+                <span>{item.label}</span>
               </Link>
             );
           })}
