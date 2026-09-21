@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { authenticate } from "../middleware/auth.js";
 import {
-  mentorSchedule, scheduleMeeting, meetingDetail, updateMeeting, cancelMeeting,
+  mentorSchedule, scheduleMeeting, meetingDetail, updateMeeting, cancelMeeting, classDetail,
 } from "../controllers/mentorController.js";
 
 const router = Router();
@@ -30,6 +30,7 @@ router.post("/meetings", scheduleMeeting);
  * on the far side, where the meeting is, and it is the same one either way:
  * the person who arranged it, or somebody who administers the portal.
  */
+router.get("/classes/:classId", classDetail);
 router.get("/meetings/:meetingId", meetingDetail);
 router.patch("/meetings/:meetingId", updateMeeting);
 router.post("/meetings/:meetingId/cancel", cancelMeeting);

@@ -167,3 +167,17 @@ export const cancelMeeting = async (
     next(error);
   }
 };
+
+/** One live class in full, for the calendar's detail panel. */
+export const classDetail = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { classId } = req.params as { classId: string };
+    sendSuccess(res, "Class", await mentorService.classDetail(classId));
+  } catch (error) {
+    next(error);
+  }
+};

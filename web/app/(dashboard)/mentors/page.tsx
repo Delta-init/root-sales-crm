@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarDays, ChevronLeft, ChevronRight, Loader2, Plus, Search, Users2, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -181,6 +181,7 @@ export default function MentorsPage() {
    * The cell around it still books, so the empty space keeps its old meaning.
    */
   const [viewing, setViewing] = useState<string | null>(null);
+  const [viewingClass, setViewingClass] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
 
@@ -197,6 +198,16 @@ export default function MentorsPage() {
           attendees: { name: string; email: string }[];
         } }>(`/mentors/meetings/${viewing}`)
       ).data.data,
+  });
+
+  /* A class, read-only. The portal shows what is happening; a course's own
+     session is edited where the course is. */
+  const classDetail = useQuery({
+    queryKey: ["mentors", "class", viewingClass],
+    enabled: Boolean(viewingClass),
+    retry: false,
+    queryFn: async () =>
+      (await api.get<{ data: Record<string, unknown> }>(`/mentors/classes/${viewingClass}`)).data.data,
   });
 
   const cancelMeeting = useMutation({
@@ -238,6 +249,94 @@ export default function MentorsPage() {
     setEditingId(d.id);
     setViewing(null);
   };
+
+
+  /*
+   * The half-hours of the chosen day, and what is already in each.
+   *
+   * Built from the week the calendar is already holding — nothing is fetched to
+   * answer this. Every class and meeting that mentor has on that day is turned
+   * into a span of minutes, and a slot is taken when the meeting being booked
+   * would run into one of them. Which is why the duration matters: a
+   * half-hour fits where ninety minutes does not, so changing it re-reads the
+   * whole list.
+   *
+   * Taken slots say what is in the way rather than going quietly grey. "14:00
+   * · SEO 2" tells somebody whether it is worth asking for that hour anyway;
+   * a disabled row tells them nothing.
+   *
+   * Outside the mentor's stated hours is marked, never disabled. Those hours
+   * are a pattern somebody set, not a contract — the same reasoning the LMS
+   * applies when it refuses to enforce them.
+   */
+  const SLOT_MINUTES = 30;
+
+  const minutesInZone = (iso: string) => {
+    const hhmm = new Date(iso).toLocaleTimeString("en-GB", {
+      hour: "2-digit", minute: "2-digit", hour12: false, timeZone: tz,
+    });
+    const [h, m] = hhmm.split(":").map(Number);
+    return (h ?? 0) * 60 + (m ?? 0);
+  };
+
+  const slotList = useMemo(() => {
+    if (!booking) return [];
+    const { mentor, day } = booking;
+    const duration = Number(form.durationMins) || SLOT_MINUTES;
+
+    const busy: { from: number; to: number; what: string }[] = [
+      ...mentor.classes
+        .filter((c) => sameDay(c.startsAt, day) && c.status !== "cancelled")
+        .map((c) => {
+          const from = minutesInZone(c.startsAt);
+          return { from, to: from + (c.durationMins || 0), what: c.mine ? (c.title || "a class") : "another academy" };
+        }),
+      ...mentor.meetings
+        .filter((v) => sameDay(v.startsAt, day))
+        .map((v) => {
+          const from = minutesInZone(v.startsAt);
+          return { from, to: from + (v.durationMins || 0), what: v.attendeeNames.join(", ") || v.title };
+        }),
+    ];
+
+    const free = mentor.slots.filter((sl) => sl.dayOfWeek === day.getDay());
+    const inHours = (start: number) =>
+      free.length === 0 ||
+      free.some((sl) => {
+        const [fh, fm] = sl.startTime.split(":").map(Number);
+        const [th, tm] = sl.endTime.split(":").map(Number);
+        return start >= (fh ?? 0) * 60 + (fm ?? 0) && start + duration <= (th ?? 0) * 60 + (tm ?? 0);
+      });
+
+    const out: { value: string; label: string; taken: string; outside: boolean }[] = [];
+    for (let m = 0; m < 24 * 60; m += SLOT_MINUTES) {
+      const value = `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+      const clash = busy.find((b) => m < b.to && b.from < m + duration);
+      out.push({
+        value,
+        label: value,
+        taken: clash ? clash.what : "",
+        outside: !inHours(m),
+      });
+    }
+    return out;
+  }, [booking, form.durationMins, tz, schedule.data]);
+
+  /*
+   * Stretching a meeting can take away the hour it was going to start in.
+   *
+   * The select would then sit on a row it will not let you choose again, and
+   * the only sign would be the LMS refusing it at the end. So when the chosen
+   * slot stops being free, the next free one is picked — moving the booking is
+   * a smaller surprise than a refusal after filling the rest of the form in.
+   */
+  useEffect(() => {
+    if (!booking || slotList.length === 0) return;
+    const current = slotList.find((sl) => sl.value === form.time);
+    if (current && !current.taken) return;
+    const next = slotList.find((sl) => !sl.taken);
+    if (next) setForm((f) => ({ ...f, time: next.value }));
+  }, [slotList, booking, form.time]);
 
   const book = useMutation({
     mutationFn: async () => {
@@ -475,15 +574,19 @@ export default function MentorsPage() {
 
                               {/* What is actually in the diary. */}
                               {booked.map((c) => (
-                                <div
+                                <button
+                                  type="button"
                                   key={c.id}
+                                  disabled={!c.mine}
+                                  onClick={(e) => { e.stopPropagation(); if (c.mine) setViewingClass(c.id); }}
                                   title={
                                     c.mine
                                       ? `${c.title ?? "Class"} · ${c.booked}/${c.capacity} booked · ${c.status}`
                                       : "A class for the other academy — the time is taken, the subject is not shown"
                                   }
                                   className={cn(
-                                    "rounded border px-1.5 py-0.5 text-[11px]",
+                                    "w-full rounded border px-1.5 py-0.5 text-left text-[11px]",
+                                    c.mine && "transition-colors hover:brightness-125",
                                     c.status === "cancelled"
                                       ? "border-border/60 bg-muted/40 text-muted-foreground line-through"
                                       : c.mine
@@ -493,7 +596,7 @@ export default function MentorsPage() {
                                 >
                                   <span className="tabular-nums">{at(c.startsAt)}</span>{" "}
                                   {c.mine ? (c.title || "Class") : "Booked elsewhere"}
-                                </div>
+                                </button>
                               ))}
 
                               {/* Meetings, which are nobody's class. Named by
@@ -576,10 +679,19 @@ export default function MentorsPage() {
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1.5">
                 <Label htmlFor="mtime">Start</Label>
-                <Input
-                  id="mtime" type="time" value={form.time}
+                <select
+                  id="mtime"
+                  value={form.time}
                   onChange={(e) => setForm((f) => ({ ...f, time: e.target.value }))}
-                />
+                  className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
+                >
+                  {slotList.map((sl) => (
+                    <option key={sl.value} value={sl.value} disabled={Boolean(sl.taken)}>
+                      {sl.label}
+                      {sl.taken ? ` · ${sl.taken}` : sl.outside ? " · outside their hours" : ""}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="mdur">Minutes</Label>
@@ -801,6 +913,81 @@ export default function MentorsPage() {
                     </p>
                   )}
                 </DialogFooter>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
+
+      {/* One class, as the LMS has it. Read-only: the portal says what is
+          happening, and a course's session is changed where the course lives. */}
+      <Dialog open={Boolean(viewingClass)} onOpenChange={(o) => { if (!o) setViewingClass(null); }}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
+          {classDetail.isPending && <Skeleton className="h-40 w-full" />}
+          {classDetail.isError && (
+            <p className="py-6 text-sm text-muted-foreground">
+              {apiErrorMessage(classDetail.error, "That class could not be opened.")}
+            </p>
+          )}
+          {classDetail.data && (() => {
+            const c = classDetail.data as Record<string, string | number | boolean>;
+            const line = (label: string, value: unknown) =>
+              value ? (
+                <div>
+                  <p className="text-xs text-muted-foreground">{label}</p>
+                  <p className="text-foreground">{String(value)}</p>
+                </div>
+              ) : null;
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle>{String(c.title || "Class")}</DialogTitle>
+                  <DialogDescription>
+                    {String(c.courseTitle || "")}
+                    {c.instructorName ? ` · ${c.instructorName}` : ""}
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-3 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge>{String(c.status || "")}</Badge>
+                    {c.language ? <Badge variant="outline">{String(c.language)}</Badge> : null}
+                    <Badge variant="outline">{c.inPerson ? "In person" : "Online"}</Badge>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-muted-foreground">When</p>
+                    <p className="font-medium text-foreground">
+                      {new Date(String(c.startsAt)).toLocaleString(undefined, {
+                        weekday: "long", day: "numeric", month: "long",
+                        hour: "2-digit", minute: "2-digit", timeZone: tz, hour12: false,
+                      })} ({tz.replace("_", " ")}) · {String(c.durationMins)} minutes
+                    </p>
+                  </div>
+
+                  {line("Description", c.description)}
+                  <div>
+                    <p className="text-xs text-muted-foreground">Seats</p>
+                    <p className="text-foreground">{String(c.booked)} of {String(c.capacity)} booked</p>
+                  </div>
+                  {c.inPerson ? line("Where", [c.location, c.room].filter(Boolean).join(" · ")) : null}
+                  {!c.inPerson && c.meetingUrl ? (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Joining link</p>
+                      <a href={String(c.meetingUrl)} target="_blank" rel="noreferrer"
+                        className="break-all text-primary hover:underline">{String(c.meetingUrl)}</a>
+                    </div>
+                  ) : null}
+                  {line("Mentor's notes", c.mentorNotes)}
+                  {c.recordingUrl ? (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Recording</p>
+                      <a href={String(c.recordingUrl)} target="_blank" rel="noreferrer"
+                        className="break-all text-primary hover:underline">Watch it back</a>
+                    </div>
+                  ) : null}
+                </div>
               </>
             );
           })()}

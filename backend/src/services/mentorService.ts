@@ -105,6 +105,26 @@ export const mentorService = {
   },
 
   /**
+   * One live class in full.
+   *
+   * The academy's own only — the LMS refuses anybody else's, and the calendar
+   * already shows those as an hour that is taken rather than a subject anybody
+   * may read. Asking again here would be a second opinion on somebody else's
+   * privacy.
+   */
+  async classDetail(classId: string) {
+    const target = await resolveTarget("lms");
+    const params = new URLSearchParams();
+    if (target.remoteOrgId) params.set("remoteOrgId", target.remoteOrgId);
+    const q = params.toString();
+    return callTarget<Record<string, unknown>>(
+      target,
+      `/classes/${encodeURIComponent(classId)}${q ? `?${q}` : ""}`,
+      { method: "GET", verb: "describe that class" },
+    );
+  },
+
+  /**
    * Book time with a mentor.
    *
    * Passed through rather than decided here. Whether the hour is free, whether
