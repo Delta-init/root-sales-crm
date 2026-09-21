@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  BarChart3, CalendarDays, ClipboardList, KeyRound, LayoutGrid, LogOut, User, Users2,
+  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, KeyRound, LayoutGrid, LogOut, User, Users2,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -31,6 +31,10 @@ const NAV = [
      need an hour with a mentor are the people doing the work, and a calendar
      only they cannot see is one they have to ask somebody else to read. */
   { href: "/mentors", label: "Mentors", icon: CalendarDays },
+  /* Also open to everybody: raising work and clearing approvals are jobs the
+     people doing the work do, and Media ERP decides who may actually do
+     either. */
+  { href: "/tasks", label: "Tasks", icon: ClipboardCheck },
   /*
    * Registry and Role map are not in the navigation.
    *

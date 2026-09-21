@@ -160,6 +160,10 @@ export type AuditAction =
   | "mentor_meeting_booked"
   | "mentor_meeting_changed"
   | "mentor_meeting_cancelled"
+  // Work raised in another system, from here.
+  | "task_created"
+  | "task_approved"
+  | "task_returned"
   | "target_registered"
   | "target_updated"
   | "account_provisioned"

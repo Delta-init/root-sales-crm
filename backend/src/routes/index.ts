@@ -8,6 +8,7 @@ import trackerRoutes from "./trackerRoutes.js";
 import repRoutes from "./repRoutes.js";
 import serviceRoutes from "./serviceRoutes.js";
 import mentorRoutes from "./mentorRoutes.js";
+import taskRoutes from "./taskRoutes.js";
 
 const router = Router();
 
@@ -20,6 +21,7 @@ router.use("/tracker", trackerRoutes);
 router.use("/rep", repRoutes);
 router.use("/service", serviceRoutes);
 router.use("/mentors", mentorRoutes);
+router.use("/tasks", taskRoutes);
 
 router.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
