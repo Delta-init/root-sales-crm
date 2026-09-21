@@ -187,10 +187,14 @@ export default function OrgWorkspacePage() {
               ))}
 
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => router.push("/reports")} className="gap-2">
-                <BarChart3 className="h-4 w-4" />
-                Group report
-              </DropdownMenuItem>
+              {/* Root admins only — the report is theirs now, and offering it
+                  to anybody else only sends them to a refusal. */}
+              {admin?.role === "root_admin" && (
+                <DropdownMenuItem onClick={() => router.push("/reports")} className="gap-2">
+                  <BarChart3 className="h-4 w-4" />
+                  Group report
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={() => router.push("/dashboard")} className="gap-2">
                 <ArrowLeft className="h-4 w-4" />
                 Root home

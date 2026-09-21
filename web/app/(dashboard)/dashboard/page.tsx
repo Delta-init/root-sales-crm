@@ -271,7 +271,10 @@ export default function DashboardPage() {
         </motion.div>
       )}
 
-      {/* Group report */}
+      {/* Group report — root admins only, like the Sales menu it belongs to.
+          A card promising every CRM's revenue, leading to a page the API now
+          refuses, would be a worse thing to show a member than nothing. */}
+      {admin?.role === "root_admin" && (
       <motion.div
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
@@ -303,6 +306,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </motion.div>
+      )}
     </div>
   );
 }

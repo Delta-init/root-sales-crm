@@ -32,7 +32,21 @@ const openConnection = async (uri: string): Promise<Connection> => {
 };
 
 /**
- * Resolve every active org to a live connection.
+ * Resolve every active sales CRM to a live connection.
+ *
+ * Sales CRMs and nothing else. This asked for every active org, which was
+ * right while the registry held nothing but CRMs and quietly wrong once it
+ * held Finance, HRMS, the LMS and Media ERP: the group report and the daily
+ * tracker were opening connections to all four and asking them for leads and
+ * calls. The lucky answer was an empty column and a line in `failures`; the
+ * unlucky one was a collection whose name happened to match.
+ *
+ * It matters twice over, because rep sign-in resolves its sources the same
+ * way — so a rep's password was being offered to the HRMS and LMS databases
+ * on its way to finding the CRM the rep actually works in.
+ *
+ * `kind` is the registry's own word for what a system is, and the bootstrap
+ * seed sets it on every run, so this needs no second list to be kept in step.
  *
  * A failure is returned, not thrown: if Banglore's host is down, the report
  * should still show Delta and Draw with an explicit note, rather than 500 and
@@ -42,7 +56,7 @@ export const getSources = async (): Promise<{
   sources: CrmSource[];
   failures: { code: string; name: string; error: string }[];
 }> => {
-  const orgs = await Organization.find({ isActive: true }).sort({ sortOrder: 1 });
+  const orgs = await Organization.find({ isActive: true, kind: "crm" }).sort({ sortOrder: 1 });
 
   const sources: CrmSource[] = [];
   const failures: { code: string; name: string; error: string }[] = [];

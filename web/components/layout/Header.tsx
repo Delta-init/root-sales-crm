@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, KeyRound, LayoutGrid, LogOut, User, Users2,
+  BarChart3, CalendarDays, ChevronDown, ClipboardCheck, ClipboardList, KeyRound, LayoutGrid, LogOut, User, Users2,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -19,10 +20,43 @@ import { Logo } from "@/components/shared/Logo";
 import { useAuth } from "@/providers/AuthProvider";
 import { cn, getInitials } from "@/lib/utils";
 
-const NAV = [
+interface NavLink {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+interface NavItem extends Partial<NavLink> {
+  label: string;
+  icon: LucideIcon;
+  rootOnly?: boolean;
+  /** Present instead of an href: this opens rather than goes anywhere. */
+  children?: NavLink[];
+}
+
+const NAV: NavItem[] = [
   { href: "/dashboard", label: "Organisations", icon: LayoutGrid },
-  { href: "/reports", label: "Group report", icon: BarChart3 },
-  { href: "/tracker", label: "Daily tracker", icon: ClipboardList },
+  /*
+   * Sales, root admins only.
+   *
+   * Two permanent tabs for reports that are read now and then, next to the
+   * ones used all day. Folded into one that opens, which also puts the two of
+   * them where they belong — both answer the same question about the same
+   * three CRMs, and neither means anything for the rest of the estate.
+   *
+   * rootOnly hides it. The API refuses it as well, which is the part that
+   * actually decides: a menu that leaves something out is tidy, and an
+   * endpoint that answers anybody who types its address is open regardless.
+   */
+  {
+    label: "Sales",
+    icon: BarChart3,
+    rootOnly: true,
+    children: [
+      { href: "/reports", label: "Group report", icon: BarChart3 },
+      { href: "/tracker", label: "Daily tracker", icon: ClipboardList },
+    ],
+  },
   // Root admins only: deciding who may open which production system is the
   // portal's most consequential act, and the API refuses anybody else anyway.
   { href: "/users", label: "Users", icon: Users2, rootOnly: true },
@@ -68,20 +102,47 @@ export function Header() {
 
         <nav className="flex items-center gap-1">
           {NAV.filter((item) => !item.rootOnly || admin?.role === "root_admin").map((item) => {
-            // startsWith so a drill-down like /reports/sources keeps the tab lit
-            const active =
-              pathname === item.href || pathname.startsWith(item.href + "/");
+            // startsWith so a drill-down like /tracker/delta keeps the tab lit
+            const lit = (href: string) =>
+              pathname === href || pathname.startsWith(href + "/");
+            const active = item.children
+              ? item.children.some((c) => lit(c.href))
+              : lit(item.href ?? "");
+
+            const tab = cn(
+              "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors",
+              active
+                ? "bg-accent font-medium text-foreground"
+                : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+            );
+
+            if (item.children) {
+              return (
+                <DropdownMenu key={item.label}>
+                  <DropdownMenuTrigger className={tab}>
+                    <item.icon className="h-4 w-4" />
+                    <span className="hidden sm:inline">{item.label}</span>
+                    <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-52">
+                    {item.children.map((c) => (
+                      <DropdownMenuItem key={c.href} asChild>
+                        <Link
+                          href={c.href}
+                          className={cn("gap-2", lit(c.href) && "font-medium text-foreground")}
+                        >
+                          <c.icon className="h-4 w-4" />
+                          {c.label}
+                        </Link>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              );
+            }
+
             return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors",
-                  active
-                    ? "bg-accent font-medium text-foreground"
-                    : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                )}
-              >
+              <Link key={item.href} href={item.href ?? "#"} className={tab}>
                 <item.icon className="h-4 w-4" />
                 <span className="hidden sm:inline">{item.label}</span>
               </Link>
