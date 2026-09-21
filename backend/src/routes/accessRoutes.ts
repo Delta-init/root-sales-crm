@@ -5,7 +5,7 @@ import {
   listRoleMap, addRoleMap, removeRoleMap,
   grant, provision, revoke, setRole,
   targetRoles, describePerson, setRoleInTarget, grantMany,
-  setStatus, deletePerson,
+  setStatus, deletePerson, setStatusMany, deleteMany,
 } from "../controllers/accessController.js";
 
 const router = Router();
@@ -31,6 +31,8 @@ router.post("/role-map", addRoleMap);
 router.delete("/role-map/:id", removeRoleMap);
 router.post("/grant", grant);
 router.post("/grant-many", grantMany);
+router.post("/status-many", setStatusMany);
+router.post("/delete-many", deleteMany);
 router.post("/provision", provision);
 /*
  * Before the two-segment routes below, and that ordering is load-bearing.

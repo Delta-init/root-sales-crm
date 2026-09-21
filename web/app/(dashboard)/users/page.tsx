@@ -59,6 +59,7 @@ export default function UsersPage() {
   const [granting, setGranting] = useState<Person[] | null>(null);
   const [importing, setImporting] = useState(false);
   const [confirming, setConfirming] = useState<Person | null>(null);
+  const [confirmingBulk, setConfirmingBulk] = useState(false);
 
   const people = useQuery({
     queryKey: ["access", "people", q],
@@ -122,6 +123,29 @@ export default function UsersPage() {
       api.patch(`/access/${v.userId}/status`, { status: v.status }),
     onSuccess: () => { setProblem(""); void qc.invalidateQueries({ queryKey: ["access", "people"] }); },
     onError: (e) => complain(e, "That could not be changed"),
+  });
+
+  type BulkResult = { done?: string[]; skipped?: { email: string; why: string }[]; grantsRemoved?: number };
+  const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
+
+  const statusMany = useMutation({
+    mutationFn: async (v: { userIds: string[]; status: "active" | "inactive" }) =>
+      (await api.post<{ data: BulkResult }>("/access/status-many", v)).data.data,
+    onSuccess: (d) => {
+      setProblem(""); setBulkResult(d); setPicked(new Set());
+      void qc.invalidateQueries({ queryKey: ["access", "people"] });
+    },
+    onError: (e) => complain(e, "That could not be changed"),
+  });
+
+  const removeMany = useMutation({
+    mutationFn: async (userIds: string[]) =>
+      (await api.post<{ data: BulkResult }>("/access/delete-many", { userIds })).data.data,
+    onSuccess: (d) => {
+      setProblem(""); setBulkResult(d); setConfirmingBulk(false); setPicked(new Set());
+      void qc.invalidateQueries({ queryKey: ["access", "people"] });
+    },
+    onError: (e) => complain(e, "Those could not be removed"),
   });
 
   const remove = useMutation({
@@ -246,6 +270,24 @@ export default function UsersPage() {
             </p>
             <Button size="sm" className="gap-1.5" onClick={() => setGranting(chosen)}>
               <Plus className="h-3.5 w-3.5" /> Give access
+            </Button>
+            <Button
+              size="sm" variant="outline" className="gap-1.5"
+              disabled={statusMany.isPending}
+              onClick={() =>
+                statusMany.mutate({ userIds: chosen.map((p) => p.id), status: "inactive" })
+              }
+            >
+              {statusMany.isPending
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <PowerOff className="h-3.5 w-3.5" />}
+              Deactivate
+            </Button>
+            <Button
+              size="sm" variant="outline" className="gap-1.5 text-red-400 hover:text-red-300"
+              onClick={() => { setProblem(""); setConfirmingBulk(true); }}
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Remove
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setPicked(new Set())}>Clear</Button>
           </CardContent>
@@ -501,6 +543,84 @@ export default function UsersPage() {
           )}
         </div>
       )}
+
+      {/* Bulk removal, behind the same confirmation as one — more so, since
+          the mistake is larger. */}
+      <Dialog open={confirmingBulk} onOpenChange={(o) => !o && setConfirmingBulk(false)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Remove {chosen.length} people?</DialogTitle>
+            <DialogDescription>
+              They will no longer be able to sign in here, and their grants go with them.
+              This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-40 overflow-y-auto rounded-lg border border-border bg-muted/20 p-2.5 text-xs">
+            {chosen.map((p) => (
+              <p key={p.id} className="truncate text-muted-foreground">{p.name} — {p.email}</p>
+            ))}
+          </div>
+
+          <p className="text-xs text-muted-foreground">
+            Their accounts in other systems are <span className="text-foreground">not</span>{" "}
+            touched. Anyone who is the last root admin, or you yourself, will be skipped and
+            named.
+          </p>
+
+          {problem && <p className="text-sm text-red-400">{problem}</p>}
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirmingBulk(false)}>Cancel</Button>
+            <Button
+              variant="outline"
+              disabled={statusMany.isPending}
+              onClick={() => {
+                statusMany.mutate({ userIds: chosen.map((p) => p.id), status: "inactive" });
+                setConfirmingBulk(false);
+              }}
+            >
+              Deactivate instead
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={removeMany.isPending}
+              onClick={() => removeMany.mutate(chosen.map((p) => p.id))}
+              className="gap-1.5"
+            >
+              {removeMany.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              Remove {chosen.length}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* What actually happened, per person. A bulk action that reports only
+          a count leaves somebody wondering which of the twenty did not go
+          through, and why. */}
+      <Dialog open={Boolean(bulkResult)} onOpenChange={(o) => !o && setBulkResult(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {bulkResult?.done?.length ?? 0} done
+              {(bulkResult?.skipped?.length ?? 0) > 0 && `, ${bulkResult?.skipped?.length} skipped`}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1 text-xs">
+            {bulkResult?.grantsRemoved ? (
+              <p className="text-muted-foreground">
+                {bulkResult.grantsRemoved} grant{bulkResult.grantsRemoved === 1 ? "" : "s"} removed with them.
+              </p>
+            ) : null}
+            {bulkResult?.skipped?.map((x) => (
+              <p key={x.email} className="text-amber-400">✗ {x.email} — {x.why}</p>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setBulkResult(null)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Deleting is not undoable, so it is not one click. The dialog names
           the person and what goes with them rather than asking "are you

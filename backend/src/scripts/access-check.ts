@@ -339,6 +339,99 @@ step("Switching somebody off, and removing them");
     (await AdminUser.findById(victim._id)) === null);
 }
 
+step("Doing it to several people at once");
+{
+  const { setStatusMany, deleteMany } = await import("../controllers/accessController.js");
+
+  /* The controllers want an Express request and response. Only the few
+     fields they actually touch are supplied — enough to exercise the
+     decisions, which is the part worth testing. */
+  /* A member, not a root admin, so the self-guard cannot quietly satisfy the
+     last-root-admin check on its behalf. The route requires a root admin;
+     these calls go straight to the controller, which is the part under test. */
+  const actor = await AdminUser.create({
+    name: "Acting Admin", email: "acting@example.com",
+    password: "Password123!", role: "member", status: "active",
+  });
+  const run = async (fn: unknown, body: Record<string, unknown>) => {
+    let payload: Record<string, unknown> = {};
+    const req = {
+      body,
+      admin: { adminId: String(actor._id), email: actor.email, role: "root_admin" },
+      headers: {}, ip: "1.2.3.4", get: () => undefined,
+      // record() reads the client address off the socket.
+      socket: { remoteAddress: "1.2.3.4" },
+    };
+    const res = {
+      status: () => res,
+      json: (b: Record<string, unknown>) => { payload = b; return res; },
+    };
+    await (fn as (a: unknown, b: unknown, c: unknown) => Promise<void>)(req, res, (e: unknown) => { throw e; });
+    return payload;
+  };
+
+  /*
+   * The case this exists for: deactivating every root admin in one action.
+   *
+   * Counting once before the loop would pass — each of them has a colleague
+   * at the moment the request arrives — and would end with nobody able to
+   * administer access at all.
+   */
+  const a = await AdminUser.create({
+    name: "Root A", email: "root-a@example.com",
+    password: "Password123!", role: "root_admin", status: "active",
+  });
+  const b = await AdminUser.create({
+    name: "Root B", email: "root-b@example.com",
+    password: "Password123!", role: "root_admin", status: "active",
+  });
+
+  /* A and B are now the only root admins. Switching both off in one action
+     must leave one standing: the first passes because the second is still
+     active, and the second must then be refused — which only happens if the
+     count is taken again rather than once before the loop. */
+  /* Earlier steps left root admins of their own behind; park them so A and B
+     really are the only two and the scenario is the one being described. */
+  await AdminUser.updateMany(
+    { role: "root_admin", _id: { $nin: [a._id, b._id] } },
+    { $set: { status: "inactive" } },
+  );
+
+  const beforeCount = await AdminUser.countDocuments({ role: "root_admin", status: "active" });
+  check("the two of them are the only root admins", beforeCount === 2, `${beforeCount}`);
+
+  const bulk = await run(setStatusMany, {
+    userIds: [String(a._id), String(b._id)], status: "inactive",
+  }) as { data?: { done?: string[]; skipped?: { why: string }[] } };
+
+  const stillOn = await AdminUser.countDocuments({ role: "root_admin", status: "active" });
+  check("bulk deactivation cannot switch off every root admin", stillOn === 1, `${stillOn} left active`);
+  check("...and says which one it would not touch",
+    bulk.data?.skipped?.some((x) => /last active root admin/i.test(x.why)) === true,
+    JSON.stringify(bulk.data?.skipped));
+
+  await run(setStatusMany, { userIds: [String(actor._id)], status: "inactive" });
+  check("...and never the person doing it",
+    (await AdminUser.findById(actor._id))?.status === "active");
+
+  /* Ordinary members go through, and their grants with them. */
+  const { Access } = await import("../models/Access.js");
+  const m1 = await AdminUser.create({ name: "M1", email: "m1@example.com", password: "Password123!", role: "member", status: "active" });
+  const m2 = await AdminUser.create({ name: "M2", email: "m2@example.com", password: "Password123!", role: "member", status: "active" });
+  await Access.create({ user: m1._id, target: "banglore", roleInTarget: "BDE", grantedBy: actor._id });
+
+  const out = await run(deleteMany, { userIds: [String(m1._id), String(m2._id), String(actor._id)] }) as
+    { data?: { done?: string[]; skipped?: { why: string }[]; grantsRemoved?: number } };
+  check("bulk delete removes the ones it may", out.data?.done?.length === 2, `removed ${out.data?.done?.length}`);
+  check("...takes their grants with them", out.data?.grantsRemoved === 1, `${out.data?.grantsRemoved}`);
+  check("...and refuses the person doing it, with a reason",
+    out.data?.skipped?.some((x) => /your own/i.test(x.why)) === true);
+  check("...leaving nothing behind",
+    (await Access.countDocuments({ user: m1._id })) === 0);
+
+  await AdminUser.deleteMany({ email: /@example\.com$/ });
+}
+
 step("Knowing about every system it claims to know about");
 {
   /*

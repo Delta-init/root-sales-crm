@@ -705,3 +705,108 @@ export const deletePerson = async (req: AuthenticatedRequest, res: Response, nex
     sendSuccess(res, `${person.name} removed from the portal`, { grantsRemoved: grants });
   } catch (err) { next(err); }
 };
+
+/**
+ * Switch several people off, or back on.
+ *
+ * Each is decided on its own and reported on its own, as with granting: one
+ * refusal must not silently drop the other nineteen, and an administrator
+ * needs to know which of the twenty did not happen rather than being told
+ * that some errors occurred.
+ *
+ * The last-root-admin rule is re-checked against the database on every pass
+ * rather than counted once at the start. Deactivating four root admins in one
+ * action would otherwise pass a check taken before any of them had been
+ * deactivated, and lock everybody out of the thing that administers access.
+ */
+export const setStatusMany = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { userIds, status } = req.body as { userIds?: string[]; status?: string };
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      sendError(res, "Choose at least one person", 400); return;
+    }
+    if (status !== "active" && status !== "inactive") {
+      sendError(res, "status must be active or inactive", 400); return;
+    }
+
+    const done: string[] = [];
+    const skipped: { email: string; why: string }[] = [];
+
+    for (const id of userIds) {
+      const person = await AdminUser.findById(id).select("name email role status");
+      if (!person) { skipped.push({ email: id, why: "No such person" }); continue; }
+      if (String(person._id) === req.admin!.adminId && status === "inactive") {
+        skipped.push({ email: person.email, why: "This is your own account" }); continue;
+      }
+      if (status === "inactive" && person.role === "root_admin") {
+        const others = await AdminUser.countDocuments({
+          role: "root_admin", status: "active", _id: { $ne: person._id },
+        });
+        if (others === 0) {
+          skipped.push({ email: person.email, why: "The last active root admin" }); continue;
+        }
+      }
+      if (person.status === status) { continue; }
+
+      person.status = status;
+      await person.save();
+      done.push(person.email);
+      await record(req, "account_deactivated", {
+        adminId: req.admin!.adminId, adminEmail: req.admin!.email, org: null,
+        detail: `${status === "inactive" ? "Deactivated" : "Reactivated"} ${person.email}`,
+      });
+    }
+
+    const verb = status === "inactive" ? "Deactivated" : "Reactivated";
+    sendSuccess(res, `${verb} ${done.length}`, { done, skipped });
+  } catch (err) { next(err); }
+};
+
+/**
+ * Remove several people from the portal.
+ *
+ * Same shape and the same re-check: whether somebody is the last root admin
+ * is asked again for each one, against the database as it stands after the
+ * previous deletions, not against how it looked when the request arrived.
+ */
+export const deleteMany = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { userIds } = req.body as { userIds?: string[] };
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      sendError(res, "Choose at least one person", 400); return;
+    }
+
+    const done: string[] = [];
+    const skipped: { email: string; why: string }[] = [];
+    let grantsRemoved = 0;
+
+    for (const id of userIds) {
+      const person = await AdminUser.findById(id).select("name email role");
+      if (!person) { skipped.push({ email: id, why: "No such person" }); continue; }
+      if (String(person._id) === req.admin!.adminId) {
+        skipped.push({ email: person.email, why: "This is your own account" }); continue;
+      }
+      if (person.role === "root_admin") {
+        const others = await AdminUser.countDocuments({
+          role: "root_admin", _id: { $ne: person._id },
+        });
+        if (others === 0) {
+          skipped.push({ email: person.email, why: "The last root admin" }); continue;
+        }
+      }
+
+      const n = await Access.countDocuments({ user: person._id });
+      await Access.deleteMany({ user: person._id });
+      await AdminUser.deleteOne({ _id: person._id });
+      grantsRemoved += n;
+      done.push(person.email);
+
+      await record(req, "account_deleted", {
+        adminId: req.admin!.adminId, adminEmail: req.admin!.email, org: null,
+        detail: `Deleted ${person.email} from the portal${n ? `, with ${n} grant${n === 1 ? "" : "s"}` : ""}`,
+      });
+    }
+
+    sendSuccess(res, `${done.length} removed`, { done, skipped, grantsRemoved });
+  } catch (err) { next(err); }
+};
