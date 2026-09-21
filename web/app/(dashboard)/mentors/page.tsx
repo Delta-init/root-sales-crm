@@ -88,6 +88,11 @@ export default function MentorsPage() {
   const { admin } = useAuth();
   const qc = useQueryClient();
   const [offset, setOffset] = useState(0);
+  /* Which day the phone is showing. Seven columns do not fit on a phone and
+     shrinking them to where they do makes every one of them unreadable, so the
+     narrow view is one day at a time and this is which. Index into `days`, so
+     stepping the week keeps it pointing at the same weekday. */
+  const [dayIndex, setDayIndex] = useState(() => (new Date().getDay() + 6) % 7);
 
   const { from, to, days } = useMemo(() => {
     const start = weekStart(new Date());
@@ -424,6 +429,80 @@ export default function MentorsPage() {
    * them in whatever zone the viewer happens to sit in would put the two
    * halves of one row hours apart, both looking perfectly reasonable.
    */
+  /*
+   * One mentor's day: the pattern they set, the classes in it, the meetings
+   * booked into it.
+   *
+   * Written once and rendered twice — a column of a week on a wide screen, a
+   * card on a phone. The two views differ in how a day is *reached*, never in
+   * what a day contains, and keeping that honest is worth a function.
+   */
+  const dayCell = (m: Mentor, day: Date) => {
+    const slots = m.slots.filter((s) => s.dayOfWeek === day.getDay());
+    const booked = m.classes.filter((c) => sameDay(c.startsAt, day));
+    const meetings = m.meetings.filter((v) => sameDay(v.startsAt, day));
+    const empty = slots.length === 0 && booked.length === 0 && meetings.length === 0;
+
+    if (empty) return null;
+    return (
+      <div className="space-y-1">
+        {/* The pattern, behind everything else. */}
+        {slots.map((s, i) => (
+          <div
+            key={`${s.startTime}-${i}`}
+            className="rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[11px] text-emerald-500"
+          >
+            {s.startTime}–{s.endTime}
+          </div>
+        ))}
+
+        {/* What is actually in the diary. */}
+        {booked.map((c) => (
+          <button
+            type="button"
+            key={c.id}
+            disabled={!c.mine}
+            onClick={(e) => { e.stopPropagation(); if (c.mine) setViewingClass(c.id); }}
+            title={
+              c.mine
+                ? `${c.title ?? "Class"} · ${c.booked}/${c.capacity} booked · ${c.status}`
+                : "A class for the other academy — the time is taken, the subject is not shown"
+            }
+            className={cn(
+              "w-full rounded border px-1.5 py-0.5 text-left text-[11px]",
+              c.mine && "transition-colors hover:brightness-125",
+              c.status === "cancelled"
+                ? "border-border/60 bg-muted/40 text-muted-foreground line-through"
+                : c.mine
+                  ? "border-blue-500/30 bg-blue-500/15 text-blue-400"
+                  : "border-border/60 bg-muted/60 text-muted-foreground",
+            )}
+          >
+            <span className="tabular-nums">{at(c.startsAt)}</span>{" "}
+            {c.mine ? (c.title || "Class") : "Booked elsewhere"}
+          </button>
+        ))}
+
+        {/* Meetings, which are nobody's class. Named by
+            kind and attendee rather than by title alone:
+            "Intro call" tells you nothing, "Client ·
+            Rahul Menon" tells you whether it can move. */}
+        {meetings.map((v) => (
+          <button
+            type="button"
+            key={v.id}
+            onClick={(e) => { e.stopPropagation(); setViewing(v.id); }}
+            title={`${v.title} · with ${v.attendeeNames.join(", ")} · ${v.durationMins} minutes`}
+            className="w-full rounded border border-violet-500/30 bg-violet-500/15 px-1.5 py-0.5 text-left text-[11px] text-violet-300 transition-colors hover:bg-violet-500/25"
+          >
+            <span className="tabular-nums">{at(v.startsAt)}</span>{" "}
+            {KIND_LABEL[v.kind] ?? v.kind} · {v.attendeeNames.join(", ")}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
   const at = (iso: string) =>
     new Date(iso).toLocaleTimeString("en-GB", {
       hour: "2-digit", minute: "2-digit", timeZone: tz,
@@ -516,8 +595,81 @@ export default function MentorsPage() {
         </CardContent></Card>
       )}
 
+      {/*
+        * A phone gets one day at a time.
+        *
+        * The week table below is the same information and simply will not fit:
+        * at 375px each of its seven columns is forty pixels, which is narrower
+        * than the times written in them. Sideways scrolling was the cheap
+        * answer and the wrong one — finding Thursday meant dragging a table
+        * whose only landmark, the mentor's name, scrolls away with it.
+        */}
       {schedule.data && shown.length > 0 && (
-        <Card className="overflow-hidden">
+        <div className="space-y-3 md:hidden">
+          <div className="flex items-center justify-between rounded-lg border border-border/60 bg-card px-2 py-1.5">
+            <Button
+              variant="ghost" size="sm" className="h-8 px-2"
+              aria-label="Previous day"
+              onClick={() => {
+                if (dayIndex > 0) setDayIndex(dayIndex - 1);
+                else { setOffset(offset - 1); setDayIndex(6); }
+              }}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <p className="text-sm font-medium">
+              {days[dayIndex]?.toLocaleDateString(undefined, {
+                weekday: "long", day: "numeric", month: "short",
+              })}
+            </p>
+            <Button
+              variant="ghost" size="sm" className="h-8 px-2"
+              aria-label="Next day"
+              onClick={() => {
+                if (dayIndex < 6) setDayIndex(dayIndex + 1);
+                else { setOffset(offset + 1); setDayIndex(0); }
+              }}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+
+          {shown.map((m) => {
+            const day = days[dayIndex];
+            if (!day) return null;
+            const cell = dayCell(m, day);
+            return (
+              <Card key={m.id} className="overflow-hidden">
+                <div className="flex items-start justify-between gap-2 border-b border-border/40 px-3 py-2.5">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">{m.name || m.email}</p>
+                    <p className="truncate text-xs text-muted-foreground">{m.email}</p>
+                  </div>
+                  {m.shared && <Badge variant="outline" className="shrink-0 text-[10px]">Shared</Badge>}
+                </div>
+                <div className="space-y-2 px-3 py-2.5">
+                  {cell ?? (
+                    <p className="text-xs text-muted-foreground/60">Nothing on this day.</p>
+                  )}
+                  {/* An explicit button, not a tappable cell. There is no hover
+                      on a phone to reveal that the day is a target, and a card
+                      that books a meeting when you meant to read it is worse
+                      than a button that takes up a line. */}
+                  <Button
+                    variant="outline" size="sm" className="w-full gap-1.5"
+                    onClick={() => openBooking(m, day)}
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Book time
+                  </Button>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {schedule.data && shown.length > 0 && (
+        <Card className="hidden overflow-hidden md:block">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[56rem] text-left text-sm">
               <thead>
@@ -546,84 +698,21 @@ export default function MentorsPage() {
                       )}
                     </td>
 
-                    {days.map((day) => {
-                      const slots = m.slots.filter((s) => s.dayOfWeek === day.getDay());
-                      const booked = m.classes.filter((c) => sameDay(c.startsAt, day));
-                      const meetings = m.meetings.filter((v) => sameDay(v.startsAt, day));
-                      const empty = slots.length === 0 && booked.length === 0 && meetings.length === 0;
-
-                      return (
-                        <td
-                          key={day.toISOString()}
-                          className="group/cell cursor-pointer px-2 py-2.5 transition-colors hover:bg-accent/40"
-                          title={`Book time with ${m.name || m.email}`}
-                          onClick={() => openBooking(m, day)}
-                        >
-                          {empty ? (
-                            <span className="text-xs text-muted-foreground/40 group-hover/cell:hidden">—</span>
-                          ) : (
-                            <div className="space-y-1">
-                              {/* The pattern, behind everything else. */}
-                              {slots.map((s, i) => (
-                                <div
-                                  key={`${s.startTime}-${i}`}
-                                  className="rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[11px] text-emerald-500"
-                                >
-                                  {s.startTime}–{s.endTime}
-                                </div>
-                              ))}
-
-                              {/* What is actually in the diary. */}
-                              {booked.map((c) => (
-                                <button
-                                  type="button"
-                                  key={c.id}
-                                  disabled={!c.mine}
-                                  onClick={(e) => { e.stopPropagation(); if (c.mine) setViewingClass(c.id); }}
-                                  title={
-                                    c.mine
-                                      ? `${c.title ?? "Class"} · ${c.booked}/${c.capacity} booked · ${c.status}`
-                                      : "A class for the other academy — the time is taken, the subject is not shown"
-                                  }
-                                  className={cn(
-                                    "w-full rounded border px-1.5 py-0.5 text-left text-[11px]",
-                                    c.mine && "transition-colors hover:brightness-125",
-                                    c.status === "cancelled"
-                                      ? "border-border/60 bg-muted/40 text-muted-foreground line-through"
-                                      : c.mine
-                                        ? "border-blue-500/30 bg-blue-500/15 text-blue-400"
-                                        : "border-border/60 bg-muted/60 text-muted-foreground",
-                                  )}
-                                >
-                                  <span className="tabular-nums">{at(c.startsAt)}</span>{" "}
-                                  {c.mine ? (c.title || "Class") : "Booked elsewhere"}
-                                </button>
-                              ))}
-
-                              {/* Meetings, which are nobody's class. Named by
-                                  kind and attendee rather than by title alone:
-                                  "Intro call" tells you nothing, "Client ·
-                                  Rahul Menon" tells you whether it can move. */}
-                              {meetings.map((v) => (
-                                <button
-                                  type="button"
-                                  key={v.id}
-                                  onClick={(e) => { e.stopPropagation(); setViewing(v.id); }}
-                                  title={`${v.title} · with ${v.attendeeNames.join(", ")} · ${v.durationMins} minutes`}
-                                  className="w-full rounded border border-violet-500/30 bg-violet-500/15 px-1.5 py-0.5 text-left text-[11px] text-violet-300 transition-colors hover:bg-violet-500/25"
-                                >
-                                  <span className="tabular-nums">{at(v.startsAt)}</span>{" "}
-                                  {KIND_LABEL[v.kind] ?? v.kind} · {v.attendeeNames.join(", ")}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                          <span className="mt-1 hidden text-[11px] text-primary group-hover/cell:block">
-                            + Book
-                          </span>
-                        </td>
-                      );
-                    })}
+                    {days.map((day) => (
+                      <td
+                        key={day.toISOString()}
+                        className="group/cell cursor-pointer px-2 py-2.5 transition-colors hover:bg-accent/40"
+                        title={`Book time with ${m.name || m.email}`}
+                        onClick={() => openBooking(m, day)}
+                      >
+                        {dayCell(m, day) ?? (
+                          <span className="text-xs text-muted-foreground/40 group-hover/cell:hidden">—</span>
+                        )}
+                        <span className="mt-1 hidden text-[11px] text-primary group-hover/cell:block">
+                          + Book
+                        </span>
+                      </td>
+                    ))}
                   </tr>
                 ))}
               </tbody>

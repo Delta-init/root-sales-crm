@@ -374,6 +374,243 @@ export default function UsersPage() {
 
   const chosen = rows.filter((p) => picked.has(p.id));
 
+  /*
+   * One person, cell by cell.
+   *
+   * Built once and laid out twice: a row of a table on a wide screen, a
+   * stacked card on a phone. Six columns need 820px to be readable and a
+   * phone has 375, so the narrow view stacks them under their own headings
+   * instead of asking somebody to drag a table sideways past the name that
+   * told them whose row it was.
+   */
+  const cellsFor = (p: Person) => {
+    const isRoot = p.role === "root_admin";
+    const isSelf = admin?._id === p.id;
+    return {
+      pick: (
+        <>
+          {!isRoot && (
+            <input
+              type="checkbox"
+              aria-label={`Select ${p.name}`}
+              className="mt-1 h-4 w-4 accent-primary"
+              checked={picked.has(p.id)}
+              onChange={() => toggle(p.id)}
+            />
+          )}
+        </>
+      ),
+      person: (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">{p.name}</span>
+            {isRoot && (
+              <Badge variant="outline" className="gap-1 border-emerald-500/30 text-emerald-400">
+                <ShieldCheck className="h-3 w-3" /> Root admin
+              </Badge>
+            )}
+            {p.status === "inactive" && <Badge variant="outline">Deactivated</Badge>}
+          </div>
+          <p className="text-xs text-muted-foreground">{p.email}</p>
+        </>
+      ),
+      dept: (
+        <>
+          {(() => {
+            const d = hrms.get(p.email.toLowerCase());
+            if (directory.isLoading) return <Skeleton className="h-4 w-20" />;
+            if (!d) {
+              return (
+                <span className="text-xs text-muted-foreground/60" title="No HRMS employee has this address">
+                  not in HRMS
+                </span>
+              );
+            }
+            return d.department
+              ? <span className="text-xs text-muted-foreground">{d.department}</span>
+              : <span className="text-xs text-muted-foreground/60">—</span>;
+          })()}
+        </>
+      ),
+      canOpen: (
+        <>
+          {isRoot ? (
+            <span className="text-xs text-muted-foreground">
+              Every system, without a grant
+            </span>
+          ) : p.access.length === 0 ? (
+            <span className="text-xs text-muted-foreground">Nothing yet</span>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {p.access.map((a) => {
+                const t = byCode.get(a.target);
+                const k = KIND_STYLE[t?.kind ?? "crm"] ?? KIND_STYLE.crm;
+                const Icon = k.icon;
+                return (
+                  <span
+                    key={a.target}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px]",
+                      k.className,
+                    )}
+                  >
+                    <Icon className="h-3 w-3" />
+                    {t?.name ?? a.target}
+                    <span className="opacity-70">· {a.roleInTarget}</span>
+                    <button
+                      type="button"
+                      title="Take this away"
+                      className="ml-0.5 opacity-60 hover:opacity-100"
+                      onClick={() => revoke.mutate({ userId: p.id, target: a.target })}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+        </>
+      ),
+      actuallyOn: (
+        <>
+          {(() => {
+            if (presence.isPending && allEmails.length > 0) {
+              return <Skeleton className="h-4 w-20" />;
+            }
+            /*
+             * Nothing answered at all — which says nothing about
+             * this person, and must not be written as though it
+             * did.
+             */
+            if (presence.isError || answered.length === 0) {
+              return (
+                <span className="text-xs text-muted-foreground">
+                  Could not ask
+                </span>
+              );
+            }
+
+            const on = presence.data?.presence?.[p.email.toLowerCase()] ?? {};
+            const codes = Object.keys(on);
+
+            if (codes.length === 0) {
+              return (
+                <span className="text-xs text-muted-foreground">
+                  {silent.length > 0
+                    ? `None of the ${answered.length} that answered`
+                    : "No account anywhere"}
+                </span>
+              );
+            }
+
+            return (
+              <div className="flex flex-wrap gap-1.5">
+                {codes.map((code) => {
+                  const t = byCode.get(code as TargetCode);
+                  const k = KIND_STYLE[t?.kind ?? "crm"] ?? KIND_STYLE.crm;
+                  const Icon = k.icon;
+                  const entry = on[code]!;
+                  const inactive = entry.status === "inactive";
+                  return (
+                    <span
+                      key={code}
+                      title={
+                        `${t?.name ?? code}: ${entry.roleName ?? entry.roleKey ?? "unknown role"}` +
+                        (entry.status ? ` · ${entry.status}` : "")
+                      }
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px]",
+                        k.className,
+                        inactive && "opacity-50",
+                      )}
+                    >
+                      <Icon className="h-3 w-3" />
+                      {t?.name ?? code}
+                      {(entry.roleName || entry.roleKey) && (
+                        <span className="opacity-70">
+                          · {entry.roleName ?? entry.roleKey}
+                        </span>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </>
+      ),
+      actions: (
+        <>
+          <div className="flex justify-end gap-1.5">
+            {/*
+              On the row, because the question it answers — "what
+              does this person actually see?" — is usually asked
+              while scanning the list rather than after opening
+              somebody. The banner and the thirty-minute clock
+              are what make it safe to be one click.
+            */}
+            {canImpersonate(p) && (
+              <Button
+                variant="ghost" size="sm" className="gap-1"
+                title={`Open the portal as ${p.email} for thirty minutes`}
+                disabled={impersonate.isPending}
+                onClick={() => impersonate.mutate(p.id)}
+              >
+                {impersonate.isPending && impersonate.variables === p.id
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <Eye className="h-3.5 w-3.5" />}
+                View as
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" asChild className="gap-1">
+              <Link href={`/users/${p.id}`}>
+                Manage <ChevronRight className="h-3.5 w-3.5" />
+              </Link>
+            </Button>
+            {!isRoot && (
+              <Button
+                variant="outline" size="sm" className="gap-1"
+                onClick={() => setGranting([p])}
+              >
+                <Plus className="h-3.5 w-3.5" /> Add
+              </Button>
+            )}
+            {!isSelf && (
+              <>
+                {/* Deactivating first, and deleting behind a
+                    confirmation: one is the ordinary answer when
+                    somebody leaves, the other cannot be undone. */}
+                <Button
+                  variant="ghost" size="sm"
+                  title={p.status === "active" ? "Switch this account off" : "Switch it back on"}
+                  disabled={setStatus.isPending}
+                  onClick={() =>
+                    setStatus.mutate({
+                      userId: p.id,
+                      status: p.status === "active" ? "inactive" : "active",
+                    })
+                  }
+                >
+                  {p.status === "active"
+                    ? <PowerOff className="h-3.5 w-3.5" />
+                    : <Power className="h-3.5 w-3.5 text-emerald-400" />}
+                </Button>
+                <Button
+                  variant="ghost" size="icon"
+                  title="Remove from the portal"
+                  onClick={() => { setProblem(""); setConfirming(p); }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </>
+            )}
+          </div>
+        </>
+      ),
+    };
+  };
+
   return (
     <div className="space-y-6">
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
@@ -571,7 +808,60 @@ export default function UsersPage() {
           </CardContent>
         </Card>
       ) : (
-        <Card className="overflow-hidden">
+        <>
+        {/*
+          * Phones get a card each.
+          *
+          * The same six cells, stacked under their own headings. This table
+          * needs 820px to be legible and scrolled sideways below that, which
+          * carried the person's name — the only thing identifying the row —
+          * off the left edge exactly when you reached the columns you were
+          * scrolling to read.
+          */}
+        <div className="space-y-2 md:hidden">
+          {rows.map((p) => {
+            const c = cellsFor(p);
+            return (
+              <Card
+                key={p.id}
+                className={cn(
+                  "overflow-hidden",
+                  p.status === "inactive" && "opacity-60",
+                  picked.has(p.id) && "border-primary/40 bg-primary/5",
+                )}
+              >
+                <div className="flex items-start gap-2.5 border-b border-border/40 px-3 py-2.5">
+                  <div className="pt-0.5">{c.pick}</div>
+                  <div className="min-w-0 flex-1">{c.person}</div>
+                </div>
+
+                <div className="space-y-2.5 px-3 py-2.5 text-sm">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground/70">Department</p>
+                    <div className="mt-0.5">{c.dept}</div>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground/70">Can open</p>
+                    <div className="mt-1">{c.canOpen}</div>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-muted-foreground/70">Actually on</p>
+                    <div className="mt-1">{c.actuallyOn}</div>
+                  </div>
+                </div>
+
+                {/* The row's buttons, wrapping rather than squeezed into a
+                    corner — there are up to five and no phone has room for
+                    them on one line. */}
+                <div className="border-t border-border/40 px-1.5 py-1.5 [&_.justify-end]:flex-wrap [&_.justify-end]:justify-start">
+                  {c.actions}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+
+        <Card className="hidden overflow-hidden md:block">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[820px] text-sm">
               <thead>
@@ -606,8 +896,7 @@ export default function UsersPage() {
               </thead>
               <tbody>
                 {rows.map((p) => {
-                  const isRoot = p.role === "root_admin";
-                  const isSelf = admin?._id === p.id;
+                  const c = cellsFor(p);
                   return (
                     <tr
                       key={p.id}
@@ -617,220 +906,12 @@ export default function UsersPage() {
                         picked.has(p.id) && "bg-primary/5",
                       )}
                     >
-                      <td className="px-3 py-2.5 align-top">
-                        {!isRoot && (
-                          <input
-                            type="checkbox"
-                            aria-label={`Select ${p.name}`}
-                            className="mt-1 h-4 w-4 accent-primary"
-                            checked={picked.has(p.id)}
-                            onChange={() => toggle(p.id)}
-                          />
-                        )}
-                      </td>
-
-                      <td className="px-3 py-2.5 align-top">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium">{p.name}</span>
-                          {isRoot && (
-                            <Badge variant="outline" className="gap-1 border-emerald-500/30 text-emerald-400">
-                              <ShieldCheck className="h-3 w-3" /> Root admin
-                            </Badge>
-                          )}
-                          {p.status === "inactive" && <Badge variant="outline">Deactivated</Badge>}
-                        </div>
-                        <p className="text-xs text-muted-foreground">{p.email}</p>
-                      </td>
-
-                      <td className="px-3 py-2.5 align-top">
-                        {(() => {
-                          const d = hrms.get(p.email.toLowerCase());
-                          if (directory.isLoading) return <Skeleton className="h-4 w-20" />;
-                          if (!d) {
-                            return (
-                              <span className="text-xs text-muted-foreground/60" title="No HRMS employee has this address">
-                                not in HRMS
-                              </span>
-                            );
-                          }
-                          return d.department
-                            ? <span className="text-xs text-muted-foreground">{d.department}</span>
-                            : <span className="text-xs text-muted-foreground/60">—</span>;
-                        })()}
-                      </td>
-
-                      <td className="px-3 py-2.5 align-top">
-                        {isRoot ? (
-                          <span className="text-xs text-muted-foreground">
-                            Every system, without a grant
-                          </span>
-                        ) : p.access.length === 0 ? (
-                          <span className="text-xs text-muted-foreground">Nothing yet</span>
-                        ) : (
-                          <div className="flex flex-wrap gap-1.5">
-                            {p.access.map((a) => {
-                              const t = byCode.get(a.target);
-                              const k = KIND_STYLE[t?.kind ?? "crm"] ?? KIND_STYLE.crm;
-                              const Icon = k.icon;
-                              return (
-                                <span
-                                  key={a.target}
-                                  className={cn(
-                                    "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px]",
-                                    k.className,
-                                  )}
-                                >
-                                  <Icon className="h-3 w-3" />
-                                  {t?.name ?? a.target}
-                                  <span className="opacity-70">· {a.roleInTarget}</span>
-                                  <button
-                                    type="button"
-                                    title="Take this away"
-                                    className="ml-0.5 opacity-60 hover:opacity-100"
-                                    onClick={() => revoke.mutate({ userId: p.id, target: a.target })}
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </button>
-                                </span>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </td>
-
-                      <td className="px-3 py-2.5 align-top">
-                        {(() => {
-                          if (presence.isPending && allEmails.length > 0) {
-                            return <Skeleton className="h-4 w-20" />;
-                          }
-                          /*
-                           * Nothing answered at all — which says nothing about
-                           * this person, and must not be written as though it
-                           * did.
-                           */
-                          if (presence.isError || answered.length === 0) {
-                            return (
-                              <span className="text-xs text-muted-foreground">
-                                Could not ask
-                              </span>
-                            );
-                          }
-
-                          const on = presence.data?.presence?.[p.email.toLowerCase()] ?? {};
-                          const codes = Object.keys(on);
-
-                          if (codes.length === 0) {
-                            return (
-                              <span className="text-xs text-muted-foreground">
-                                {silent.length > 0
-                                  ? `None of the ${answered.length} that answered`
-                                  : "No account anywhere"}
-                              </span>
-                            );
-                          }
-
-                          return (
-                            <div className="flex flex-wrap gap-1.5">
-                              {codes.map((code) => {
-                                const t = byCode.get(code as TargetCode);
-                                const k = KIND_STYLE[t?.kind ?? "crm"] ?? KIND_STYLE.crm;
-                                const Icon = k.icon;
-                                const entry = on[code]!;
-                                const inactive = entry.status === "inactive";
-                                return (
-                                  <span
-                                    key={code}
-                                    title={
-                                      `${t?.name ?? code}: ${entry.roleName ?? entry.roleKey ?? "unknown role"}` +
-                                      (entry.status ? ` · ${entry.status}` : "")
-                                    }
-                                    className={cn(
-                                      "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px]",
-                                      k.className,
-                                      inactive && "opacity-50",
-                                    )}
-                                  >
-                                    <Icon className="h-3 w-3" />
-                                    {t?.name ?? code}
-                                    {(entry.roleName || entry.roleKey) && (
-                                      <span className="opacity-70">
-                                        · {entry.roleName ?? entry.roleKey}
-                                      </span>
-                                    )}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          );
-                        })()}
-                      </td>
-
-                      <td className="px-3 py-2.5 align-top">
-                        <div className="flex justify-end gap-1.5">
-                          {/*
-                            On the row, because the question it answers — "what
-                            does this person actually see?" — is usually asked
-                            while scanning the list rather than after opening
-                            somebody. The banner and the thirty-minute clock
-                            are what make it safe to be one click.
-                          */}
-                          {canImpersonate(p) && (
-                            <Button
-                              variant="ghost" size="sm" className="gap-1"
-                              title={`Open the portal as ${p.email} for thirty minutes`}
-                              disabled={impersonate.isPending}
-                              onClick={() => impersonate.mutate(p.id)}
-                            >
-                              {impersonate.isPending && impersonate.variables === p.id
-                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                : <Eye className="h-3.5 w-3.5" />}
-                              View as
-                            </Button>
-                          )}
-                          <Button variant="ghost" size="sm" asChild className="gap-1">
-                            <Link href={`/users/${p.id}`}>
-                              Manage <ChevronRight className="h-3.5 w-3.5" />
-                            </Link>
-                          </Button>
-                          {!isRoot && (
-                            <Button
-                              variant="outline" size="sm" className="gap-1"
-                              onClick={() => setGranting([p])}
-                            >
-                              <Plus className="h-3.5 w-3.5" /> Add
-                            </Button>
-                          )}
-                          {!isSelf && (
-                            <>
-                              {/* Deactivating first, and deleting behind a
-                                  confirmation: one is the ordinary answer when
-                                  somebody leaves, the other cannot be undone. */}
-                              <Button
-                                variant="ghost" size="sm"
-                                title={p.status === "active" ? "Switch this account off" : "Switch it back on"}
-                                disabled={setStatus.isPending}
-                                onClick={() =>
-                                  setStatus.mutate({
-                                    userId: p.id,
-                                    status: p.status === "active" ? "inactive" : "active",
-                                  })
-                                }
-                              >
-                                {p.status === "active"
-                                  ? <PowerOff className="h-3.5 w-3.5" />
-                                  : <Power className="h-3.5 w-3.5 text-emerald-400" />}
-                              </Button>
-                              <Button
-                                variant="ghost" size="icon"
-                                title="Remove from the portal"
-                                onClick={() => { setProblem(""); setConfirming(p); }}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </>
-                          )}
-                        </div>
-                      </td>
+                      <td className="px-3 py-2.5 align-top">{c.pick}</td>
+                      <td className="px-3 py-2.5 align-top">{c.person}</td>
+                      <td className="px-3 py-2.5 align-top">{c.dept}</td>
+                      <td className="px-3 py-2.5 align-top">{c.canOpen}</td>
+                      <td className="px-3 py-2.5 align-top">{c.actuallyOn}</td>
+                      <td className="px-3 py-2.5 align-top">{c.actions}</td>
                     </tr>
                   );
                 })}
@@ -838,6 +919,7 @@ export default function UsersPage() {
             </table>
           </div>
         </Card>
+        </>
       )}
 
       {/* Only when there is more than one page — a pager under a short list is
