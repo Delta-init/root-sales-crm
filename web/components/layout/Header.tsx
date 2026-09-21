@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, ClipboardList, KeyRound, LayoutGrid, LogOut, User, Users2 } from "lucide-react";
+import {
+  BarChart3, CalendarDays, ClipboardList, KeyRound, LayoutGrid, LogOut, User, Users2,
+} from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -24,6 +26,9 @@ const NAV = [
   // Root admins only: deciding who may open which production system is the
   // portal's most consequential act, and the API refuses anybody else anyway.
   { href: "/users", label: "Users", icon: Users2, rootOnly: true },
+  // Also root-only, and for the same reason the API is: a staff timetable is
+  // nobody's business by default.
+  { href: "/mentors", label: "Mentors", icon: CalendarDays, rootOnly: true },
   /*
    * Registry and Role map are not in the navigation.
    *
