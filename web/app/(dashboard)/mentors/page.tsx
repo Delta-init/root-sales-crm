@@ -15,6 +15,7 @@ import {
 import { toast } from "sonner";
 import { api, apiErrorMessage } from "@/lib/axios";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/providers/AuthProvider";
 
 /**
  * When the academy's mentors are free, and what is already booked.
@@ -49,6 +50,7 @@ interface MentorMeeting {
   startsAt: string;
   durationMins: number;
   attendeeNames: string[];
+  bookedByEmail: string;
 }
 
 interface Mentor {
@@ -83,6 +85,7 @@ const weekStart = (d: Date) => {
 };
 
 export default function MentorsPage() {
+  const { admin } = useAuth();
   const qc = useQueryClient();
   const [offset, setOffset] = useState(0);
 
@@ -170,6 +173,43 @@ export default function MentorsPage() {
     { name: "", email: "" },
   ]);
 
+  /*
+   * Looking at one meeting, and changing it.
+   *
+   * The chip opens this rather than the booking form — clicking an hour that
+   * already exists plainly means "what is this", not "put something else here".
+   * The cell around it still books, so the empty space keeps its old meaning.
+   */
+  const [viewing, setViewing] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+
+  const detail = useQuery({
+    queryKey: ["mentors", "meeting", viewing],
+    enabled: Boolean(viewing),
+    retry: false,
+    queryFn: async () =>
+      (
+        await api.get<{ data: {
+          id: string; title: string; kind: string; startsAt: string; durationMins: number;
+          meetingUrl: string; notes: string; bookedByEmail: string;
+          mentorEmail: string; mentorName: string;
+          attendees: { name: string; email: string }[];
+        } }>(`/mentors/meetings/${viewing}`)
+      ).data.data,
+  });
+
+  const cancelMeeting = useMutation({
+    mutationFn: async (id: string) => api.post(`/mentors/meetings/${id}/cancel`),
+    onSuccess: () => {
+      toast.success("Cancelled — everybody has been told");
+      setConfirmCancel(false);
+      setViewing(null);
+      void qc.invalidateQueries({ queryKey: ["mentors", "schedule"] });
+    },
+    onError: (e) => toast.error(apiErrorMessage(e, "Could not cancel that")),
+  });
+
   const openBooking = (mentor: Mentor, day: Date) => {
     setBooking({ mentor, day });
     setForm({
@@ -177,6 +217,26 @@ export default function MentorsPage() {
       meetingUrl: "", notes: "",
     });
     setGuests([{ name: "", email: "" }]);
+    setEditingId(null);
+  };
+
+  /* Edit reuses the booking form, filled in. Two forms for one set of fields
+     would drift apart, and the second one to drift is always the one nobody
+     opens. */
+  const openEdit = (mentor: Mentor, d: NonNullable<typeof detail.data>) => {
+    const when = new Date(d.startsAt);
+    setBooking({ mentor, day: when });
+    setForm({
+      title: d.title,
+      kind: d.kind,
+      time: when.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: tz }),
+      durationMins: String(d.durationMins),
+      meetingUrl: d.meetingUrl,
+      notes: d.notes,
+    });
+    setGuests(d.attendees.length ? d.attendees.map((a) => ({ name: a.name, email: a.email })) : [{ name: "", email: "" }]);
+    setEditingId(d.id);
+    setViewing(null);
   };
 
   const book = useMutation({
@@ -194,8 +254,7 @@ export default function MentorsPage() {
       const drift = local.getTime() - asIfHere.getTime();
       const startsAt = new Date(local.getTime() + drift);
 
-      return (
-        await api.post<{ data: { linkNote: string | null } }>("/mentors/meetings", {
+      const payload = {
           mentorEmail: booking.mentor.email,
           title: form.title.trim(),
           kind: form.kind,
@@ -206,17 +265,27 @@ export default function MentorsPage() {
             .filter((g) => g.name.length > 0),
           meetingUrl: form.meetingUrl.trim() || undefined,
           notes: form.notes.trim() || undefined,
-        })
-      ).data.data;
+      };
+
+      /* The same fields either way. An edit that could only change some of
+         them would send somebody back to the LMS for the rest. */
+      if (editingId) {
+        return (await api.patch<{ data: { linkNote: string | null } }>(
+          `/mentors/meetings/${editingId}`, payload,
+        )).data.data;
+      }
+      return (await api.post<{ data: { linkNote: string | null } }>(
+        "/mentors/meetings", payload,
+      )).data.data;
     },
     onSuccess: (d) => {
       /* Counted rather than written down: it said "both of them" while any
          number of people could be on it. Only the ones with an address are
          emailed, so that is the number worth reporting. */
       const emailed = guests.filter((g) => g.name.trim() && g.email.trim()).length;
+      const who = `the mentor${emailed ? ` and ${emailed} guest${emailed > 1 ? "s" : ""}` : ""}`;
       toast.success(
-        d?.linkNote ??
-          `Booked — the mentor${emailed ? ` and ${emailed} guest${emailed > 1 ? "s" : ""}` : ""} emailed`,
+        d?.linkNote ?? (editingId ? `Updated — ${who} told` : `Booked — ${who} emailed`),
       );
       setBooking(null);
       void qc.invalidateQueries({ queryKey: ["mentors", "schedule"] });
@@ -432,14 +501,16 @@ export default function MentorsPage() {
                                   "Intro call" tells you nothing, "Client ·
                                   Rahul Menon" tells you whether it can move. */}
                               {meetings.map((v) => (
-                                <div
+                                <button
+                                  type="button"
                                   key={v.id}
+                                  onClick={(e) => { e.stopPropagation(); setViewing(v.id); }}
                                   title={`${v.title} · with ${v.attendeeNames.join(", ")} · ${v.durationMins} minutes`}
-                                  className="rounded border border-violet-500/30 bg-violet-500/15 px-1.5 py-0.5 text-[11px] text-violet-300"
+                                  className="w-full rounded border border-violet-500/30 bg-violet-500/15 px-1.5 py-0.5 text-left text-[11px] text-violet-300 transition-colors hover:bg-violet-500/25"
                                 >
                                   <span className="tabular-nums">{at(v.startsAt)}</span>{" "}
                                   {KIND_LABEL[v.kind] ?? v.kind} · {v.attendeeNames.join(", ")}
-                                </div>
+                                </button>
                               ))}
                             </div>
                           )}
@@ -467,7 +538,7 @@ export default function MentorsPage() {
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              Book time with {booking?.mentor.name || booking?.mentor.email}
+              {editingId ? "Change this meeting" : `Book time with ${booking?.mentor.name || booking?.mentor.email}`}
             </DialogTitle>
             <DialogDescription>
               {booking?.day.toLocaleDateString(undefined, {
@@ -602,9 +673,137 @@ export default function MentorsPage() {
               onClick={() => book.mutate()}
             >
               {book.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Book it
+              {editingId ? "Save changes" : "Book it"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+
+      {/*
+        One meeting, in full.
+        
+        Edit and Cancel appear only for the person who arranged it and for a
+        root admin — the same rule the server enforces. Drawing them for
+        everybody and letting the refusal explain itself afterwards would be
+        offering something that is not on offer.
+      */}
+      <Dialog open={Boolean(viewing)} onOpenChange={(o) => { if (!o) { setViewing(null); setConfirmCancel(false); } }}>
+        <DialogContent className="sm:max-w-md">
+          {detail.isPending && <Skeleton className="h-40 w-full" />}
+
+          {detail.isError && (
+            <p className="py-6 text-sm text-muted-foreground">
+              {apiErrorMessage(detail.error, "That meeting could not be opened.")}
+            </p>
+          )}
+
+          {detail.data && (() => {
+            const d = detail.data;
+            const mine = admin?.email?.toLowerCase() === d.bookedByEmail.toLowerCase();
+            const canManage = mine || admin?.role === "root_admin";
+            const mentor = (schedule.data?.mentors ?? []).find((m) => m.email === d.mentorEmail);
+            const when = new Date(d.startsAt);
+
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle>{d.title}</DialogTitle>
+                  <DialogDescription>
+                    {KIND_LABEL[d.kind] ?? d.kind} · {d.durationMins} minutes
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-3 text-sm">
+                  <div>
+                    <p className="text-xs text-muted-foreground">When</p>
+                    <p className="font-medium text-foreground">
+                      {when.toLocaleString(undefined, {
+                        weekday: "long", day: "numeric", month: "long",
+                        hour: "2-digit", minute: "2-digit", timeZone: tz, hour12: false,
+                      })} ({tz.replace("_", " ")})
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-muted-foreground">Mentor</p>
+                    <p className="text-foreground">{d.mentorName || d.mentorEmail}</p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-muted-foreground">
+                      {d.attendees.length === 1 ? "Attendee" : `Attendees (${d.attendees.length})`}
+                    </p>
+                    {d.attendees.map((a, i) => (
+                      <p key={i} className="text-foreground">
+                        {a.name}
+                        {a.email && <span className="text-muted-foreground"> · {a.email}</span>}
+                      </p>
+                    ))}
+                  </div>
+
+                  {d.meetingUrl && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Joining link</p>
+                      <a href={d.meetingUrl} target="_blank" rel="noreferrer"
+                        className="break-all text-primary hover:underline">
+                        {d.meetingUrl}
+                      </a>
+                    </div>
+                  )}
+
+                  {d.notes && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Notes</p>
+                      <p className="text-foreground">{d.notes}</p>
+                    </div>
+                  )}
+
+                  <p className="pt-1 text-xs text-muted-foreground">Booked by {d.bookedByEmail}</p>
+                </div>
+
+                <DialogFooter className="gap-2">
+                  {canManage ? (
+                    confirmCancel ? (
+                      <div className="flex w-full items-center justify-between gap-2">
+                        <span className="text-xs text-muted-foreground">
+                          Cancel it? Everybody will be emailed.
+                        </span>
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => setConfirmCancel(false)}>
+                            No
+                          </Button>
+                          <Button
+                            variant="destructive" size="sm"
+                            disabled={cancelMeeting.isPending}
+                            onClick={() => cancelMeeting.mutate(d.id)}
+                          >
+                            {cancelMeeting.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                            Yes, cancel
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <Button variant="ghost" onClick={() => setConfirmCancel(true)}>Cancel meeting</Button>
+                        <Button
+                          disabled={!mentor}
+                          title={mentor ? undefined : "Reopen the week this meeting is in to edit it"}
+                          onClick={() => mentor && openEdit(mentor, d)}
+                        >
+                          Edit
+                        </Button>
+                      </>
+                    )
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Only {d.bookedByEmail} or a portal administrator can change this.
+                    </p>
+                  )}
+                </DialogFooter>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 

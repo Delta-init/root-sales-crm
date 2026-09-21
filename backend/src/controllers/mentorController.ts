@@ -74,3 +74,96 @@ export const scheduleMeeting = async (
     next(error);
   }
 };
+
+/*
+ * Who is asking, as the LMS needs to be told.
+ *
+ * Taken from the session every time and never from the request. While
+ * impersonating, it is the root admin really at the keyboard — the person
+ * whose name should sit against a moved meeting is the one who moved it.
+ */
+const actorOf = (req: AuthenticatedRequest) => ({
+  actorEmail: req.admin!.impersonatedBy?.email ?? req.admin!.email,
+  actorIsRootAdmin: req.admin!.role === "root_admin",
+});
+
+/** One meeting in full — only for whoever may change it. */
+export const meetingDetail = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { meetingId } = req.params as { meetingId: string };
+    sendSuccess(res, "Meeting", await mentorService.getMeeting({ meetingId, ...actorOf(req) }));
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** Move it, or change who is on it. */
+export const updateMeeting = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { meetingId } = req.params as { meetingId: string };
+    const b = (req.body ?? {}) as Record<string, unknown>;
+
+    const attendees = Array.isArray(b["attendees"])
+      ? (b["attendees"] as unknown[])
+          .map((a) => {
+            const row = (a ?? {}) as { name?: unknown; email?: unknown };
+            return { name: String(row.name ?? "").trim(), email: String(row.email ?? "").trim() };
+          })
+          .filter((a) => a.name.length > 0)
+      : undefined;
+
+    const result = await mentorService.updateMeeting({
+      meetingId,
+      ...actorOf(req),
+      ...(b["title"] !== undefined ? { title: String(b["title"]) } : {}),
+      ...(b["kind"] !== undefined ? { kind: String(b["kind"]) } : {}),
+      ...(b["scheduledStart"] !== undefined ? { scheduledStart: String(b["scheduledStart"]) } : {}),
+      ...(b["durationMins"] !== undefined ? { durationMins: Number(b["durationMins"]) } : {}),
+      ...(b["meetingUrl"] !== undefined ? { meetingUrl: String(b["meetingUrl"]) } : {}),
+      ...(b["notes"] !== undefined ? { notes: String(b["notes"]) } : {}),
+      ...(attendees ? { attendees } : {}),
+    });
+
+    await record(req, "mentor_meeting_changed", {
+      adminId: req.admin!.impersonatedBy?.id ?? req.admin!.adminId,
+      adminEmail: actorOf(req).actorEmail,
+      org: "lms",
+      detail: `Changed meeting ${meetingId}${result.notified ? " and told everybody" : ""}`,
+    });
+
+    sendSuccess(res, "Meeting updated", result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** Call it off. */
+export const cancelMeeting = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+) => {
+  try {
+    const { meetingId } = req.params as { meetingId: string };
+    const result = await mentorService.cancelMeeting({ meetingId, ...actorOf(req) });
+
+    await record(req, "mentor_meeting_cancelled", {
+      adminId: req.admin!.impersonatedBy?.id ?? req.admin!.adminId,
+      adminEmail: actorOf(req).actorEmail,
+      org: "lms",
+      detail: `Cancelled meeting ${meetingId} and told everybody`,
+    });
+
+    sendSuccess(res, "Meeting cancelled", result);
+  } catch (error) {
+    next(error);
+  }
+};

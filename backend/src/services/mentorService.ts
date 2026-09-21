@@ -35,6 +35,8 @@ export interface MentorMeeting {
   durationMins: number;
   /** Names only — the calendar says who, not how to reach them. */
   attendeeNames: string[];
+  /** Who arranged it; the screen decides from this who may change it. */
+  bookedByEmail: string;
 }
 
 export interface Mentor {
@@ -133,5 +135,56 @@ export const mentorService = {
       verb: "book that meeting",
       body: { ...input, remoteOrgId: target.remoteOrgId || undefined },
     });
+  },
+
+  /**
+   * One meeting in full, for whoever may change it.
+   *
+   * Who is asking is sent along, because the LMS has no idea who is signed in
+   * here and the answer depends on it — the person who arranged this hour, or
+   * somebody who administers the portal. Everybody else is told it does not
+   * exist rather than that they may not look, which is the same answer they
+   * would get for a meeting in another academy.
+   */
+  async getMeeting(input: { meetingId: string; actorEmail: string; actorIsRootAdmin: boolean }) {
+    const target = await resolveTarget("lms");
+    const params = new URLSearchParams({
+      actorEmail: input.actorEmail,
+      actorIsRootAdmin: String(input.actorIsRootAdmin),
+    });
+    if (target.remoteOrgId) params.set("remoteOrgId", target.remoteOrgId);
+
+    return callTarget<{
+      id: string; title: string; kind: string; startsAt: string; durationMins: number;
+      meetingUrl: string; notes: string; bookedByEmail: string;
+      mentorEmail: string; mentorName: string; timezone: string;
+      attendees: { name: string; email: string }[];
+    }>(target, `/mentor-meetings/${encodeURIComponent(input.meetingId)}?${params.toString()}`,
+      { method: "GET", verb: "describe that meeting" });
+  },
+
+  /** Move it, or change who is on it. */
+  async updateMeeting(input: Record<string, unknown> & { meetingId: string }) {
+    const target = await resolveTarget("lms");
+    const { meetingId, ...rest } = input;
+    return callTarget<{ id: string; notified: boolean }>(
+      target, `/mentor-meetings/${encodeURIComponent(meetingId)}`,
+      { method: "PATCH", verb: "change that meeting",
+        body: { ...rest, remoteOrgId: target.remoteOrgId || undefined } },
+    );
+  },
+
+  /** Call it off. */
+  async cancelMeeting(input: { meetingId: string; actorEmail: string; actorIsRootAdmin: boolean }) {
+    const target = await resolveTarget("lms");
+    return callTarget<{ id: string; cancelled: boolean }>(
+      target, `/mentor-meetings/${encodeURIComponent(input.meetingId)}/cancel`,
+      { method: "POST", verb: "cancel that meeting",
+        body: {
+          actorEmail: input.actorEmail,
+          actorIsRootAdmin: input.actorIsRootAdmin,
+          remoteOrgId: target.remoteOrgId || undefined,
+        } },
+    );
   },
 };

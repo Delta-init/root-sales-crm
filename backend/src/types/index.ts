@@ -158,6 +158,8 @@ export type AuditAction =
   | "impersonation_launch"
   // An hour taken in somebody else's week, arranged from here.
   | "mentor_meeting_booked"
+  | "mentor_meeting_changed"
+  | "mentor_meeting_cancelled"
   | "target_registered"
   | "target_updated"
   | "account_provisioned"

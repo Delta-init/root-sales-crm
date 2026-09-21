@@ -77,7 +77,10 @@ export async function resolveTarget(code: string): Promise<ResolvedTarget> {
 export async function callTarget<T>(
   target: ResolvedTarget,
   path: string,
-  init: { method: "GET" | "POST"; body?: unknown; verb?: string } = { method: "GET" },
+  // PATCH joined GET and POST when meetings became editable: changing one is
+  // neither asking nor creating, and saying POST for it would have made the
+  // far side's routes lie about what they do.
+  init: { method: "GET" | "POST" | "PATCH"; body?: unknown; verb?: string } = { method: "GET" },
 ): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);

@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { authenticate } from "../middleware/auth.js";
-import { mentorSchedule, scheduleMeeting } from "../controllers/mentorController.js";
+import {
+  mentorSchedule, scheduleMeeting, meetingDetail, updateMeeting, cancelMeeting,
+} from "../controllers/mentorController.js";
 
 const router = Router();
 
@@ -20,5 +22,16 @@ router.use(authenticate);
 
 router.get("/schedule", mentorSchedule);
 router.post("/meetings", scheduleMeeting);
+
+/*
+ * Reading, changing and calling off one meeting.
+ *
+ * Open to anybody signed in, like the rest of this router — the refusal lives
+ * on the far side, where the meeting is, and it is the same one either way:
+ * the person who arranged it, or somebody who administers the portal.
+ */
+router.get("/meetings/:meetingId", meetingDetail);
+router.patch("/meetings/:meetingId", updateMeeting);
+router.post("/meetings/:meetingId/cancel", cancelMeeting);
 
 export default router;
