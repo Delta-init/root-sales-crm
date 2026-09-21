@@ -103,7 +103,15 @@ export function Header() {
             <DropdownMenuSeparator />
             <DropdownMenuItem disabled>
               <User className="mr-2 h-4 w-4" />
-              {admin.role === "root_admin" ? "Root admin" : "Viewer"}
+              {/* All three, named. This read "Viewer" for everybody who was
+                  not a root admin, so a member — most people here now — was
+                  told they were something they are not, on the one screen
+                  that exists to say who you are. */}
+              {admin.role === "root_admin"
+                ? "Root admin"
+                : admin.role === "member"
+                  ? "Member"
+                  : "Viewer"}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={logout} className="text-destructive focus:text-destructive">

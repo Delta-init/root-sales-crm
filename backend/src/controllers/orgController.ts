@@ -4,13 +4,29 @@ import { record } from "../services/auditService.js";
 import { sendSuccess } from "../utils/response.js";
 import type { AuthenticatedRequest } from "../types/index.js";
 
+/**
+ * The systems this person should be shown.
+ *
+ * Answered per signed-in account rather than as one list for everybody: a
+ * member has no use for the systems they are not on, and listing them told
+ * anybody who signed in the shape of the whole estate.
+ */
 export const listOrgs = async (
-  _req: AuthenticatedRequest,
+  req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
 ) => {
   try {
-    sendSuccess(res, "Organizations fetched", await orgService.list());
+    const admin = req.admin!;
+    sendSuccess(
+      res,
+      "Organizations fetched",
+      await orgService.listForAdmin({
+        adminId: admin.adminId,
+        email: admin.email,
+        role: admin.role,
+      }),
+    );
   } catch (error) {
     next(error);
   }

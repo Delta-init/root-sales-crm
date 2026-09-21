@@ -109,7 +109,7 @@ function SystemMark({ org }: { org: Organization }) {
 
 export default function DashboardPage() {
   const { admin } = useAuth();
-  const canLaunch = admin?.role === "root_admin";
+  const isViewer = admin?.role === "viewer";
   const router = useRouter();
 
   /**
@@ -140,10 +140,12 @@ export default function DashboardPage() {
         </h2>
         <p className="mt-1 text-muted-foreground">
           {/* Counted rather than written down: it said "the three CRMs" while
-              seven systems were listed underneath it. */}
-          {canLaunch
-            ? `Open any of the ${orgs?.length ?? ""} systems below, or review the CRMs together in the group report.`.replace("  ", " ")
-            : "Your account can view the group report but cannot open these systems."}
+              seven systems were listed underneath it. And counted from what
+              this person was actually sent, which for anybody but a root
+              admin is the systems they are on rather than all of them. */}
+          {isViewer
+            ? "Your account can read the group report. It does not open any system."
+            : `Open any of the ${orgs?.length ?? ""} systems below, or review the CRMs together in the group report.`.replace("  ", " ")}
         </p>
       </motion.div>
 
@@ -164,7 +166,30 @@ export default function DashboardPage() {
         </Card>
       )}
 
-      {orgs && (
+      {/*
+        Nothing to show is a sentence, not a blank space.
+
+        A member with no systems and a screen with nothing on it will read it
+        as the portal being broken and say so, when the true answer is that
+        nobody has created an account for them anywhere yet — which is
+        somebody's job rather than a fault.
+      */}
+      {orgs && orgs.length === 0 && (
+        <Card className="border-border/50">
+          <CardContent className="py-12 text-center">
+            <p className="text-sm font-medium text-foreground">
+              {isViewer ? "This account opens no systems" : "No systems yet"}
+            </p>
+            <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+              {isViewer
+                ? "Your account is set up to read the group report below."
+                : "Once somebody creates an account for you in one of the group's systems, it will appear here and you can open it from this page."}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {orgs && orgs.length > 0 && (
         <motion.div
           variants={containerVariants}
           initial="hidden"
@@ -174,7 +199,12 @@ export default function DashboardPage() {
           {orgs.map((org) => {
             return (
               <motion.div key={org.id} variants={itemVariants}>
-                <Card className="group h-full border-border/50 transition-colors hover:border-border">
+                <Card
+                  className={cn(
+                    "group h-full border-border/50 transition-colors hover:border-border",
+                    org.reach !== "open" && "opacity-60",
+                  )}
+                >
                   <CardContent className="flex h-full flex-col p-4">
                     <div className="flex items-start gap-3">
                       <SystemMark org={org} />
@@ -202,7 +232,15 @@ export default function DashboardPage() {
                       </span>
                     </div>
 
-                    {canLaunch ? (
+                    {/*
+                      What the card offers follows what the system said, not
+                      what role the person holds. "Not set up yet" and "could
+                      not be reached" are different sentences on purpose: the
+                      first is somebody to ask, the second is somebody to wait
+                      for, and reading one as the other sends the wrong
+                      message to the wrong person.
+                    */}
+                    {org.reach === "open" ? (
                       <button
                         onClick={() => open(org)}
                         className="mt-auto inline-flex items-center gap-1 pt-4 text-xs text-muted-foreground transition-colors hover:text-primary"
@@ -210,9 +248,19 @@ export default function DashboardPage() {
                         Open
                         <ArrowUpRight className="h-3 w-3" />
                       </button>
+                    ) : org.reach === "pending" ? (
+                      <p
+                        className="mt-auto pt-4 text-xs text-muted-foreground/60"
+                        title="An administrator granted this, but no account has been created here yet"
+                      >
+                        Not set up yet
+                      </p>
                     ) : (
-                      <p className="mt-auto pt-4 text-xs text-muted-foreground/60">
-                        Not permitted
+                      <p
+                        className="mt-auto pt-4 text-xs text-amber-500/70"
+                        title={org.note ?? "This system could not be reached"}
+                      >
+                        Could not be reached
                       </p>
                     )}
                   </CardContent>

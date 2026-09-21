@@ -55,13 +55,62 @@ export const ssoService = {
 
     if (!isRootAdmin) {
       /*
-       * Listed, not inferred. A member may open exactly what somebody wrote an
-       * access row for — the rule that keeps a Banglore rep out of Delta's CRM.
+       * A viewer opens nothing, whatever accounts they happen to hold.
+       *
+       * Checked before anything is asked of the target, because this is a
+       * decision about the role somebody was given here, not about what
+       * exists elsewhere. Their definition is the group report and no doors.
        */
-      const { accessService } = await import("./accessService.js");
-      const grant = await accessService.find(admin.adminId, org.code);
-      if (!grant) {
-        throw httpError(`You do not have access to ${org.name}`, 403);
+      if (admin.role === "viewer") {
+        throw httpError("Your account can read the group report but cannot open these systems", 403);
+      }
+
+      /*
+       * The target is asked whether this person has an account, and the
+       * answer is taken live.
+       *
+       * This used to be an access row written in this portal. The rule was
+       * right when a grant was the only thing that could be true, and it
+       * stopped being right once the portal could see the systems themselves:
+       * somebody with an account in a CRM can already sign into that CRM with
+       * their own password, so refusing to send them there protected nothing
+       * and cost them a tab. The grant still decides provisioning, and it is
+       * still what the users screen reports.
+       *
+       * Asked at the moment of launching rather than read from whatever the
+       * dashboard was told. That list is a minute old and cached; this is an
+       * authorization decision, and an account removed in the meantime has to
+       * close the door on the next click rather than the next refresh.
+       *
+       * A target that cannot answer refuses the launch. Not knowing is not
+       * the same as yes, and the alternative — opening the door because the
+       * lock could not be reached — is the wrong way for this to fail.
+       */
+      const { resolveTarget, callTarget } = await import("../lib/targetClient.js");
+      const target = await resolveTarget(org.code);
+
+      const params = new URLSearchParams({ email: admin.email });
+      if (target.remoteOrgId) params.set("remoteOrgId", target.remoteOrgId);
+
+      const account = await callTarget<{
+        exists: boolean;
+        inOrganization: boolean;
+        status: string;
+        membershipStatus: string | null;
+      }>(target, `/user?${params.toString()}`, { method: "GET", verb: "confirm your account" });
+
+      if (!account.exists || !account.inOrganization) {
+        throw httpError(`You do not have an account in ${org.name}`, 403);
+      }
+
+      /*
+       * Refused here as well as there. The target's own sign-in would reject
+       * a deactivated account anyway, but it would do it after the redirect,
+       * as an error on a screen they did not expect to see.
+       */
+      const standing = account.membershipStatus ?? account.status;
+      if (standing && standing !== "active") {
+        throw httpError(`Your account in ${org.name} is ${standing}`, 403);
       }
     }
 

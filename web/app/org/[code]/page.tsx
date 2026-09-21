@@ -119,7 +119,15 @@ export default function OrgWorkspacePage() {
     );
   }
 
-  const others = (orgs ?? []).filter((o) => o.code !== code);
+  /*
+   * Only the ones that would actually open.
+   *
+   * The switcher is a list of places to go next, and a system this person has
+   * no account in yet is not one of them — offering it would hand them a
+   * refusal from the far side of a redirect instead of simply not being
+   * there.
+   */
+  const others = (orgs ?? []).filter((o) => o.code !== code && o.reach === "open");
 
   return (
     <div className="flex h-screen flex-col bg-background">
@@ -160,7 +168,7 @@ export default function OrgWorkspacePage() {
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
 
-              {(orgs ?? []).map((o) => (
+              {(orgs ?? []).filter((o) => o.reach === "open" || o.code === code).map((o) => (
                 <DropdownMenuItem
                   key={o.code}
                   onClick={() => o.code !== code && router.push(`/org/${o.code}`)}

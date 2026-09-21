@@ -134,6 +134,80 @@ export const orgService = {
   },
 
   /**
+   * The systems one person should be shown, and whether they can be opened.
+   *
+   * This used to be `list()` for everybody, which meant a member signing in
+   * saw the whole estate — every system's name, currency and local time,
+   * including the ones they would never open — and an "Open" button on none
+   * of them. The list told them nothing true and the buttons lied.
+   *
+   * A root admin still sees everything: they administer it, and they arrive
+   * as the service account rather than as themselves.
+   *
+   * A viewer sees none. Their whole definition is the group report and no
+   * doors, and an account somewhere else does not change that — the role is
+   * the decision, and it was made deliberately.
+   *
+   * A member sees what they are actually on. Not what was granted: a grant is
+   * a note this portal wrote, and the question a member is asking is "where
+   * can I go", which only the systems themselves can answer. Somebody with an
+   * account in a CRM can already sign into that CRM with their own password,
+   * so a portal that refuses to send them there protects nothing and costs
+   * them a tab.
+   *
+   * `reach` is the honest state of each card, and the three values are three
+   * different facts rather than shades of one:
+   *
+   *   open        — the system says they have an account there
+   *   pending     — granted here, but no account exists yet to arrive at
+   *   unavailable — the system could not be asked, so nobody knows
+   *
+   * A system that could not be asked is shown rather than dropped, but only
+   * where a grant says it belongs to this person. Dropping it would make an
+   * outage look exactly like access being taken away, which is the ticket
+   * nobody wants to answer; showing it to everybody would list the estate to
+   * people who have nothing to do with it every time a server hiccups. The
+   * gap is somebody holding an account nobody granted, on a system that is
+   * down: their card disappears until it answers again.
+   */
+  async listForAdmin(admin: { adminId: string; email: string; role: string }) {
+    const orgs = await Organization.find({ isActive: true }).sort({ sortOrder: 1 });
+
+    if (admin.role === "root_admin") {
+      return orgs.map((o) => ({ ...toPublic(o), reach: "open" as const, note: null as string | null }));
+    }
+    if (admin.role !== "member") return [];
+
+    const email = admin.email.toLowerCase().trim();
+    const { directoryService } = await import("./directoryService.js");
+    const { Access } = await import("../models/Access.js");
+
+    const [{ platforms, presence }, grants] = await Promise.all([
+      directoryService.presenceFor([email]),
+      Access.find({ user: admin.adminId }).select("target").lean(),
+    ]);
+
+    const on = presence[email] ?? {};
+    const granted = new Set(grants.map((g) => String(g.target)));
+    const silent = new Map(
+      platforms.filter((p) => p.unreachable).map((p) => [String(p.target), p.unreachable as string]),
+    );
+
+    const mine: (ReturnType<typeof toPublic> & { reach: "open" | "pending" | "unavailable"; note: string | null })[] = [];
+    for (const org of orgs) {
+      const code = String(org.code);
+      if (on[code]) {
+        mine.push({ ...toPublic(org), reach: "open", note: null });
+      } else if (silent.has(code) && granted.has(code)) {
+        mine.push({ ...toPublic(org), reach: "unavailable", note: silent.get(code) ?? null });
+      } else if (granted.has(code)) {
+        mine.push({ ...toPublic(org), reach: "pending", note: "No account here yet" });
+      }
+    }
+    return mine;
+  },
+
+  /**
    * The record, for internal callers.
    *
    * Kept under its old name so callers do not all change at once, but it no

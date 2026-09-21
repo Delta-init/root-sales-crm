@@ -12,6 +12,18 @@ export interface Organization {
   dataStartsAt: string | null;
   isActive: boolean;
   sortOrder: number;
+  /**
+   * Whether this person can actually walk through this door, and if not, why.
+   *
+   * Three different facts rather than shades of one: `open` means the system
+   * says they have an account, `pending` means this portal granted it but
+   * nothing exists there yet to arrive at, and `unavailable` means the system
+   * could not be asked — which is not the same as no, and must never be shown
+   * as though it were.
+   */
+  reach: "open" | "pending" | "unavailable";
+  /** Why it is not open, in words, when it is not. */
+  note: string | null;
 }
 
 export interface Admin {
