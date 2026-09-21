@@ -1,5 +1,6 @@
 import type { Response, NextFunction } from "express";
 import { randomBytes } from "node:crypto";
+import { signImpersonationToken, IMPERSONATION_TTL_SECONDS } from "../utils/jwt.js";
 import { AdminUser } from "../models/AdminUser.js";
 import { Access } from "../models/Access.js";
 import { Organization } from "../models/Organization.js";
@@ -477,6 +478,89 @@ export const peoplePresence = async (req: AuthenticatedRequest, res: Response, n
     const { emails } = (req.body ?? {}) as { emails?: unknown };
     if (!Array.isArray(emails)) { sendError(res, "emails must be a list of addresses", 400); return; }
     sendSuccess(res, "Presence", await directoryService.presenceFor(emails as string[]));
+  } catch (err) { next(err); }
+};
+
+/**
+ * Look at the portal as somebody else.
+ *
+ * The screen a person sees is built entirely from who they are — their
+ * systems, their roles, their doors — so the only honest way to answer "what
+ * does Abshar see" is to be Abshar for a while. This hands back a session
+ * that is theirs, carrying one claim saying who is really holding it.
+ *
+ * It grants nothing. The token says who to be; the middleware reads standing
+ * and role from that person's own record, so a root admin doing this has
+ * exactly a member's reach and loses their own — they cannot grant access or
+ * remove anybody while wearing somebody else's face. That falls out of the
+ * design rather than being enforced on top of it, which is the reason to
+ * build it this way.
+ *
+ * What it cannot do is follow them into another system. Opening a CRM from
+ * an impersonated session arrives as that person, and the CRM records them
+ * for whatever is done there. This portal knows better and says so in its own
+ * log; the CRM does not. Worth remembering before doing rather than looking.
+ */
+export const impersonate = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = req.params as { userId: string };
+    const actor = req.admin!;
+
+    // No stacking. A face worn over a face makes "who did this" a question
+    // with two answers, and the trail is the whole justification for the
+    // feature.
+    if (actor.impersonatedBy) {
+      sendError(res, "End this impersonation before starting another", 409);
+      return;
+    }
+
+    const person = await AdminUser.findById(userId).select("name email role status");
+    if (!person) { sendError(res, "No such person", 404); return; }
+    if (String(person._id) === actor.adminId) {
+      sendError(res, "That is your own account", 400);
+      return;
+    }
+
+    /*
+     * Never another root admin.
+     *
+     * Every other impersonation narrows what the holder can do. This one
+     * would widen it — a root admin borrowing another root admin's session
+     * gains nothing to look at and everything to hide behind.
+     */
+    if (person.role === "root_admin") {
+      sendError(res, "A root admin cannot be impersonated", 403);
+      return;
+    }
+    if (person.status !== "active") {
+      sendError(res, "That account is deactivated, so there is nothing to look at", 409);
+      return;
+    }
+
+    const token = signImpersonationToken({
+      adminId: String(person._id),
+      email: person.email,
+      role: person.role,
+      impersonatedBy: { id: actor.adminId, email: actor.email },
+    });
+
+    await record(req, "impersonation_started", {
+      adminId: actor.adminId,
+      adminEmail: actor.email,
+      org: null,
+      detail: `Started viewing the portal as ${person.email}`,
+    });
+
+    sendSuccess(res, "Impersonating", {
+      token,
+      expiresInSeconds: IMPERSONATION_TTL_SECONDS,
+      person: {
+        id: String(person._id),
+        name: person.name,
+        email: person.email,
+        role: person.role,
+      },
+    });
   } catch (err) { next(err); }
 };
 

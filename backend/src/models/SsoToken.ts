@@ -30,6 +30,9 @@ const ssoTokenSchema = new Schema<ISsoToken>(
     expiresAt: { type: Date, required: true },
     usedAt: { type: Date, default: null },
     issuedToIp: { type: String, default: "" },
+    /* Empty for an ordinary launch; an address when a root admin was looking
+       at the portal as somebody else at the time. */
+    impersonatedByEmail: { type: String, default: "", lowercase: true, trim: true },
   },
   { timestamps: true, versionKey: false }
 );

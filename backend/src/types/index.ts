@@ -151,6 +151,11 @@ export type AuditAction =
   | "access_granted"
   | "access_revoked"
   | "portal_role_changed"
+  // Looking at the portal as somebody else, and going through a door while
+  // doing it. Two actions rather than one: starting is a decision, and each
+  // launch is a separate thing done while wearing the face.
+  | "impersonation_started"
+  | "impersonation_launch"
   | "target_registered"
   | "target_updated"
   | "account_provisioned"
@@ -180,6 +185,15 @@ export interface ISsoToken extends Document {
   expiresAt: Date;
   usedAt: Date | null;
   issuedToIp: string;
+  /**
+   * Who was really at the keyboard, when it was not the person in `admin`.
+   *
+   * Under impersonation `admin` is the account being looked at, because that
+   * is genuinely whose session opened the door. This is the only field that
+   * remembers it was somebody else's hand, and the row is the portal's own
+   * record — the far side will record the subject and nothing more.
+   */
+  impersonatedByEmail?: string;
 }
 
 // ─── Daily tracker ────────────────────────────────────────────────────────────
@@ -206,6 +220,20 @@ export interface JwtPayload {
   adminId: string;
   email: string;
   role: AdminRole;
+  /**
+   * Set only while a root admin is looking at the portal as somebody else.
+   *
+   * The rest of this payload is the person being impersonated — the whole
+   * point is that everything downstream treats the session as theirs without
+   * being told about impersonation at all. This is the one claim that says
+   * otherwise, and it exists so the audit trail can name who was really at
+   * the keyboard.
+   *
+   * Note what it does NOT do: `role` is re-read from the database on every
+   * request, so this cannot be used to hold powers the impersonated account
+   * does not have. Wearing somebody's face means having only their reach.
+   */
+  impersonatedBy?: { id: string; email: string };
 }
 
 /** A sales rep's session. Distinct from an admin's — `kind` is what stops an

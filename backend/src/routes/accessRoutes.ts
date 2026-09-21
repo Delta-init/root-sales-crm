@@ -6,7 +6,7 @@ import {
   grant, provision, revoke, setRole,
   targetRoles, describePerson, setRoleInTarget, grantMany,
   setStatus, deletePerson, setStatusMany, deleteMany,
-  peoplePresence,
+  peoplePresence, impersonate,
 } from "../controllers/accessController.js";
 
 const router = Router();
@@ -31,6 +31,13 @@ router.get("/person/:userId", describePerson);
  * them.
  */
 router.post("/presence", peoplePresence);
+
+/*
+ * Before the two-segment routes below, like the delete above it: otherwise
+ * "/person/<id>/impersonate" would be read as a target called "impersonate"
+ * belonging to a user called "person".
+ */
+router.post("/person/:userId/impersonate", impersonate);
 router.get("/hrms-directory", hrmsDirectory);
 router.post("/import", importFromHrms);
 router.get("/role-map", listRoleMap);

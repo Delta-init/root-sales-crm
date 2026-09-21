@@ -26,6 +26,19 @@ const auditLogSchema = new Schema<IAuditLog>(
         "role_map_changed",
         "account_deactivated",
         "account_deleted",
+        /*
+         * Looking at the portal as somebody else, and going through a door
+         * while doing it.
+         *
+         * Both are recorded against whoever is really holding the session,
+         * never the account being worn — which is the entire reason these
+         * exist. This list and the AuditAction type have to agree: writes
+         * here are swallowed on purpose so auditing can never break the
+         * request it is recording, so an action missing from this enum is
+         * silently not recorded at all.
+         */
+        "impersonation_started",
+        "impersonation_launch",
       ],
       required: true,
     },

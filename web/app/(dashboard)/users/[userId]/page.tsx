@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Loader2, ShieldCheck, ShieldAlert, ShieldOff,
+  ArrowLeft, Eye, Loader2, ShieldCheck, ShieldAlert, ShieldOff,
   UserPlus, Trash2, Check, AlertTriangle, PlugZap,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -50,7 +50,7 @@ export default function PersonAccessPage() {
   const { userId } = useParams<{ userId: string }>();
   const router = useRouter();
   const qc = useQueryClient();
-  const { admin } = useAuth();
+  const { admin, startImpersonation } = useAuth();
 
   const { data, isLoading } = useQuery({
     queryKey: ["person-access", userId],
@@ -78,6 +78,26 @@ export default function PersonAccessPage() {
     },
   });
 
+  /*
+   * Borrow this person's session.
+   *
+   * Confirmed in two clicks rather than one. The banner makes it obvious
+   * afterwards, but the moment before is the one worth slowing down: it ends
+   * with a real session in somebody else's account, and anything opened from
+   * it lands in the far system under their name.
+   */
+  const [confirmingAs, setConfirmingAs] = useState(false);
+
+  const impersonate = useMutation({
+    mutationFn: async () =>
+      (
+        await api.post<{ data: { token: string; expiresInSeconds: number } }>(
+          `/access/person/${userId}/impersonate`,
+        )
+      ).data.data,
+    onSuccess: (d) => startImpersonation(d.token, d.expiresInSeconds),
+  });
+
   if (isLoading) {
     return (
       <div className="space-y-4 p-6">
@@ -91,6 +111,21 @@ export default function PersonAccessPage() {
 
   const { person, targets } = data;
   const isSelf = admin?._id === person.id;
+  /*
+   * Offered only where it would actually show something.
+   *
+   * Not for yourself, which is just the portal; not for another root admin,
+   * which the server refuses anyway because it would widen reach rather than
+   * reveal a view; and not for a deactivated account, which has nothing to
+   * look at. Better to not offer it than to offer a button that explains
+   * itself only after being pressed.
+   */
+  const canImpersonate =
+    admin?.role === "root_admin" &&
+    !admin?.impersonatedBy &&
+    !isSelf &&
+    person.role !== "root_admin" &&
+    person.status === "active";
   const withAccount = targets.filter((t) => t.account?.inOrganization || t.granted);
   const drifting = targets.filter((t) => t.drift);
 
@@ -105,6 +140,43 @@ export default function PersonAccessPage() {
           <p className="truncate text-sm text-muted-foreground">{person.email}</p>
         </div>
         <div className="flex items-center gap-2">
+          {canImpersonate && (
+            confirmingAs ? (
+              <div className="flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1">
+                <span className="text-xs text-muted-foreground">
+                  Open the portal as them?
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-2 text-xs"
+                  disabled={impersonate.isPending}
+                  onClick={() => impersonate.mutate()}
+                >
+                  {impersonate.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Yes"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-2 text-xs"
+                  onClick={() => setConfirmingAs(false)}
+                >
+                  No
+                </Button>
+              </div>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                title="See the portal as this person sees it, for thirty minutes"
+                onClick={() => setConfirmingAs(true)}
+              >
+                <Eye className="h-3.5 w-3.5" />
+                View as
+              </Button>
+            )
+          )}
           <Badge variant={person.status === "active" ? "default" : "secondary"}>
             {person.status}
           </Badge>

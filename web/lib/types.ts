@@ -27,6 +27,15 @@ export interface Organization {
 }
 
 export interface Admin {
+  /**
+   * Set when this session is somebody else's, borrowed by a root admin.
+   *
+   * Everything else on this object is the person being looked at, because an
+   * impersonated session is deliberately indistinguishable from that person
+   * signing in. This is the only thing that says otherwise, and the banner
+   * that stops somebody forgetting whose account they are in depends on it.
+   */
+  impersonatedBy?: { id: string; email: string } | null;
   _id: string;
   name: string;
   email: string;

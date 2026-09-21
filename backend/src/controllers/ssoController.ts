@@ -26,19 +26,34 @@ export const launch = async (
 
   try {
     const result = await ssoService.launch(admin, orgCode, clientIp(req));
-    await record(req, "sso_launch", {
-      adminId: admin.adminId,
-      adminEmail: admin.email,
+    /*
+     * Recorded against whoever is really holding the session.
+     *
+     * `admin` here is the account the session belongs to, which under
+     * impersonation is the person being looked at — so logging that alone
+     * would file a root admin's launch under somebody else's name, in the one
+     * record that exists to prevent exactly that.
+     */
+    const by = admin.impersonatedBy;
+    await record(req, by ? "impersonation_launch" : "sso_launch", {
+      adminId: by ? by.id : admin.adminId,
+      adminEmail: by ? by.email : admin.email,
       org: result.org.code,
-      detail: `Launched into ${result.org.name}`,
+      detail: by
+        ? `Launched into ${result.org.name} as ${admin.email}, while viewing the portal as them`
+        : `Launched into ${result.org.name}`,
     });
     sendSuccess(res, "SSO launch ready", result);
   } catch (error) {
+    // Attributed the same way as a success. A refusal is as much a thing
+    // somebody did as an opening.
     await record(req, "sso_launch_failed", {
-      adminId: admin.adminId,
-      adminEmail: admin.email,
+      adminId: admin.impersonatedBy?.id ?? admin.adminId,
+      adminEmail: admin.impersonatedBy?.email ?? admin.email,
       org: (orgCode as OrgCode) || null,
-      detail: error instanceof Error ? error.message : "unknown error",
+      detail: admin.impersonatedBy
+        ? `As ${admin.email}: ${error instanceof Error ? error.message : "unknown error"}`
+        : error instanceof Error ? error.message : "unknown error",
     });
     next(error);
   }

@@ -42,10 +42,23 @@ export const authenticate = async (
       return;
     }
 
+    /*
+     * Identity, standing and role all come from the record rather than the
+     * token, which is what makes an impersonation token safe to hand out at
+     * all: it can say who to be, and it cannot say what they may do. A root
+     * admin looking at the portal as a member has exactly a member's reach,
+     * because that is what the member's own row says.
+     *
+     * The one claim carried through untouched is who is really holding it.
+     * Rebuilding this object from the database would otherwise drop it, and
+     * every impersonated action would be recorded as the impersonated person
+     * doing it themselves — which is the one thing this must never do.
+     */
     req.admin = {
       adminId: admin._id.toString(),
       email: admin.email,
       role: admin.role,
+      ...(decoded.impersonatedBy ? { impersonatedBy: decoded.impersonatedBy } : {}),
     };
 
     next();

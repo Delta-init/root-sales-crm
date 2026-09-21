@@ -137,6 +137,14 @@ export const ssoService = {
       subjectName,
       expiresAt: new Date(Date.now() + TOKEN_TTL_MS),
       issuedToIp: ip,
+      /*
+       * Kept because `admin` above is no longer enough to answer who did this.
+       * Under impersonation that field is the account being looked at, which
+       * is true and insufficient: the CRM on the other side will record the
+       * subject and nothing else, so this row is the only place the real hand
+       * is written down.
+       */
+      impersonatedByEmail: admin.impersonatedBy?.email ?? "",
     });
 
     const base = cfg.appUrl.replace(/\/+$/, "");

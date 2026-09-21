@@ -47,7 +47,19 @@ export const refresh = async (req: Request, res: Response, next: NextFunction) =
 
 export const me = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    sendSuccess(res, "Admin fetched", await authService.me(req.admin!.adminId));
+    /*
+     * Who this session is, and — when it is borrowed — who borrowed it.
+     *
+     * The browser cannot work this out for itself: an impersonated session is
+     * indistinguishable from that person signing in, which is the point. It
+     * has to be told, or it cannot show the banner that stops somebody
+     * forgetting whose account they are looking at.
+     */
+    const person = await authService.me(req.admin!.adminId);
+    sendSuccess(res, "Admin fetched", {
+      ...person,
+      impersonatedBy: req.admin!.impersonatedBy ?? null,
+    });
   } catch (error) {
     next(error);
   }

@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
+import { ImpersonationBanner } from "@/components/shared/ImpersonationBanner";
 import { useAuth } from "@/providers/AuthProvider";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -24,6 +25,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Above the header, and on every screen rather than the one where the
+          impersonation started — whose account you are in is not something to
+          be told once. */}
+      <ImpersonationBanner />
       <Header />
       <main className="mx-auto max-w-6xl px-4 py-8 md:px-6">{children}</main>
     </div>
