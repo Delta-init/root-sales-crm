@@ -288,6 +288,57 @@ step("Keeping the registry's secrets out of the screen");
   check("editing something unregistered is refused", /unknown target/i.test(unknown), `"${unknown}"`);
 }
 
+step("Switching somebody off, and removing them");
+{
+  const { Access } = await import("../models/Access.js");
+  const { AuditLog } = await import("../models/AuditLog.js");
+
+  /* The audit actions are a Mongoose enum, invisible to the compiler — the
+     type and the schema are two lists that have to agree, and only one of
+     them complains. */
+  for (const action of ["account_deactivated", "account_deleted"] as const) {
+    let why = "";
+    try {
+      await AuditLog.create({
+        action, adminEmail: "probe@example.com", detail: "probe", org: null,
+      });
+    } catch (e) { why = (e as Error).message; }
+    check(`the audit log accepts ${action}`, why === "", why);
+  }
+  await AuditLog.deleteMany({ detail: "probe" });
+
+  const victim = await AdminUser.create({
+    name: "Leaver", email: "leaver@example.com",
+    password: "Password123!", role: "member", status: "active",
+  });
+  await Access.create({
+    user: victim._id, target: "banglore", roleInTarget: "BDE", grantedBy: victim._id,
+  });
+
+  /* Deactivating is what closing somebody's access means in practice: SSO
+     refuses an inactive account, so every door shuts at once. */
+  victim.status = "inactive";
+  await victim.save();
+  const { ssoService } = await import("../services/ssoService.js");
+  let refused = "";
+  try {
+    await ssoService.launch(
+      { adminId: String(victim._id), email: victim.email, role: "member" },
+      "banglore", "1.2.3.4",
+    );
+  } catch (e) { refused = (e as Error).message; }
+  check("a deactivated person cannot launch anything", refused !== "", refused || "it was allowed");
+
+  /* Deleting takes the grants with it — a grant naming nobody is a row that
+     cannot be read or revoked. */
+  await Access.deleteMany({ user: victim._id });
+  await AdminUser.deleteOne({ _id: victim._id });
+  check("their grants go with them",
+    (await Access.countDocuments({ user: victim._id })) === 0);
+  check("...and so do they",
+    (await AdminUser.findById(victim._id)) === null);
+}
+
 step("Knowing about every system it claims to know about");
 {
   /*

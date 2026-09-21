@@ -24,6 +24,8 @@ const auditLogSchema = new Schema<IAuditLog>(
         "account_provisioned",
         "people_imported",
         "role_map_changed",
+        "account_deactivated",
+        "account_deleted",
       ],
       required: true,
     },

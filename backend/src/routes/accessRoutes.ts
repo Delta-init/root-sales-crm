@@ -5,6 +5,7 @@ import {
   listRoleMap, addRoleMap, removeRoleMap,
   grant, provision, revoke, setRole,
   targetRoles, describePerson, setRoleInTarget, grantMany,
+  setStatus, deletePerson,
 } from "../controllers/accessController.js";
 
 const router = Router();
@@ -31,6 +32,16 @@ router.delete("/role-map/:id", removeRoleMap);
 router.post("/grant", grant);
 router.post("/grant-many", grantMany);
 router.post("/provision", provision);
+/*
+ * Before the two-segment routes below, and that ordering is load-bearing.
+ *
+ * Express matches in order, so `/person/<id>` would otherwise be read as
+ * `/:userId/:target` — a revoke for a user called "person" — and the delete
+ * would never be reached.
+ */
+router.delete("/person/:userId", deletePerson);
+router.patch("/:userId/status", setStatus);
+
 router.delete("/:userId/:target", revoke);
 router.patch("/:userId/role", setRole);
 router.patch("/:userId/:target/role", setRoleInTarget);

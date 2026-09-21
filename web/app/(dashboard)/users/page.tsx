@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
   BookOpen, Building2, ChevronRight, Clapperboard, Download, GraduationCap,
-  Loader2, Plus, Search, ShieldCheck, Trash2, Users2, Wallet, X,
+  Loader2, Plus, Power, PowerOff, Search, ShieldCheck, Trash2, Users2, Wallet, X,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -58,6 +58,7 @@ export default function UsersPage() {
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [granting, setGranting] = useState<Person[] | null>(null);
   const [importing, setImporting] = useState(false);
+  const [confirming, setConfirming] = useState<Person | null>(null);
 
   const people = useQuery({
     queryKey: ["access", "people", q],
@@ -108,6 +109,30 @@ export default function UsersPage() {
     mutationFn: async (v: { userId: string; role: PortalRole }) =>
       api.patch(`/access/${v.userId}/role`, { role: v.role }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["access", "people"] }),
+  });
+
+  const [problem, setProblem] = useState("");
+  const complain = (e: unknown, fallback: string) =>
+    setProblem(
+      (e as { response?: { data?: { message?: string } } })?.response?.data?.message ?? fallback,
+    );
+
+  const setStatus = useMutation({
+    mutationFn: async (v: { userId: string; status: "active" | "inactive" }) =>
+      api.patch(`/access/${v.userId}/status`, { status: v.status }),
+    onSuccess: () => { setProblem(""); void qc.invalidateQueries({ queryKey: ["access", "people"] }); },
+    onError: (e) => complain(e, "That could not be changed"),
+  });
+
+  const remove = useMutation({
+    mutationFn: async (userId: string) => api.delete(`/access/person/${userId}`),
+    onSuccess: () => {
+      setProblem("");
+      setConfirming(null);
+      setPicked(new Set());
+      void qc.invalidateQueries({ queryKey: ["access", "people"] });
+    },
+    onError: (e) => complain(e, "That could not be removed"),
   });
 
   const all = people.data ?? [];
@@ -200,6 +225,10 @@ export default function UsersPage() {
           <Download className="h-4 w-4" /> Import from HRMS
         </Button>
       </div>
+
+      {problem && !confirming && (
+        <p className="text-sm text-red-400">{problem}</p>
+      )}
 
       {directory.error && (
         <p className="text-xs text-amber-400">
@@ -393,6 +422,35 @@ export default function UsersPage() {
                               <Plus className="h-3.5 w-3.5" /> Add
                             </Button>
                           )}
+                          {!isSelf && (
+                            <>
+                              {/* Deactivating first, and deleting behind a
+                                  confirmation: one is the ordinary answer when
+                                  somebody leaves, the other cannot be undone. */}
+                              <Button
+                                variant="ghost" size="sm"
+                                title={p.status === "active" ? "Switch this account off" : "Switch it back on"}
+                                disabled={setStatus.isPending}
+                                onClick={() =>
+                                  setStatus.mutate({
+                                    userId: p.id,
+                                    status: p.status === "active" ? "inactive" : "active",
+                                  })
+                                }
+                              >
+                                {p.status === "active"
+                                  ? <PowerOff className="h-3.5 w-3.5" />
+                                  : <Power className="h-3.5 w-3.5 text-emerald-400" />}
+                              </Button>
+                              <Button
+                                variant="ghost" size="icon"
+                                title="Remove from the portal"
+                                onClick={() => { setProblem(""); setConfirming(p); }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -443,6 +501,63 @@ export default function UsersPage() {
           )}
         </div>
       )}
+
+      {/* Deleting is not undoable, so it is not one click. The dialog names
+          the person and what goes with them rather than asking "are you
+          sure", which tells nobody anything. */}
+      <Dialog open={Boolean(confirming)} onOpenChange={(o) => !o && setConfirming(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Remove {confirming?.name}?</DialogTitle>
+            <DialogDescription>
+              They will no longer be able to sign in here, and their{" "}
+              {confirming?.access.length ?? 0} grant
+              {(confirming?.access.length ?? 0) === 1 ? "" : "s"} will go with them.
+              This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 rounded-lg border border-border bg-muted/20 p-3 text-xs">
+            <p className="text-muted-foreground">
+              Their accounts in other systems are <span className="text-foreground">not</span>{" "}
+              touched. Somebody removed here can still sign in to finance or HRMS directly —
+              closing that is a separate step in each of them.
+            </p>
+            {confirming?.status === "active" && (
+              <p className="text-muted-foreground">
+                To close their access without losing the record, deactivate them instead.
+              </p>
+            )}
+          </div>
+
+          {problem && <p className="text-sm text-red-400">{problem}</p>}
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirming(null)}>Cancel</Button>
+            {confirming?.status === "active" && (
+              <Button
+                variant="outline"
+                disabled={setStatus.isPending}
+                onClick={() => {
+                  setStatus.mutate({ userId: confirming.id, status: "inactive" });
+                  setConfirming(null);
+                }}
+              >
+                Deactivate instead
+              </Button>
+            )}
+            <Button
+              variant="destructive"
+              disabled={remove.isPending}
+              onClick={() => confirming && remove.mutate(confirming.id)}
+              className="gap-1.5"
+            >
+              {remove.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <GrantDialog
         people={granting}

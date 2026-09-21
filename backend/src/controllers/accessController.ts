@@ -608,3 +608,100 @@ export const grantMany = async (req: AuthenticatedRequest, res: Response, next: 
     sendSuccess(res, total === 1 ? "1 grant made" : `${total} grants made`, results);
   } catch (err) { next(err); }
 };
+
+/**
+ * Switch somebody off, or back on.
+ *
+ * The status was displayed from the beginning and nothing could set it, so a
+ * person who left could be seen to be inactive and never actually made so.
+ *
+ * Deactivating is the ordinary answer when somebody leaves, and it is the one
+ * to reach for first: every door closes at once — signing in here, and every
+ * launch from here, because SSO refuses an inactive account — and none of the
+ * record is lost. It is also undoable, which deleting is not.
+ */
+export const setStatus = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = req.params as { userId: string };
+    const { status } = req.body as { status?: string };
+    if (status !== "active" && status !== "inactive") {
+      sendError(res, "status must be active or inactive", 400); return;
+    }
+
+    const person = await AdminUser.findById(userId).select("name email role status");
+    if (!person) { sendError(res, "No such person", 404); return; }
+
+    // Locking yourself out of the portal is not something to discover after
+    // the fact, and there may be nobody else who can undo it.
+    if (String(person._id) === req.admin!.adminId && status === "inactive") {
+      sendError(res, "You cannot deactivate your own account", 409); return;
+    }
+    if (status === "inactive" && person.role === "root_admin") {
+      const others = await AdminUser.countDocuments({
+        role: "root_admin", status: "active", _id: { $ne: person._id },
+      });
+      if (others === 0) {
+        sendError(res, "That is the last active root admin — somebody has to be able to administer this", 409);
+        return;
+      }
+    }
+
+    person.status = status;
+    await person.save();
+
+    await record(req, "account_deactivated", {
+      adminId: req.admin!.adminId, adminEmail: req.admin!.email, org: null,
+      detail: `${status === "inactive" ? "Deactivated" : "Reactivated"} ${person.email}`,
+    });
+
+    sendSuccess(res, status === "inactive" ? "Deactivated" : "Reactivated", { status });
+  } catch (err) { next(err); }
+};
+
+/**
+ * Remove somebody from the portal entirely.
+ *
+ * Deliberately separate from deactivating, and the heavier of the two: this
+ * cannot be undone, and deactivating achieves the same closure while keeping
+ * the record. It is here for people who should never have been imported —
+ * a duplicate, a wrong address — rather than for people who have left.
+ *
+ * Their grants go with them; a grant naming somebody who no longer exists is
+ * a row nobody can read. Audit entries stay: they are the record of what was
+ * done and by whom, and deleting an account should not quietly edit history.
+ *
+ * Nothing is touched in any other system. This says who may use the portal,
+ * not who has an account in finance — somebody removed here can still sign in
+ * to those directly, and closing that is a separate act in each of them.
+ */
+export const deletePerson = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = req.params as { userId: string };
+    const person = await AdminUser.findById(userId).select("name email role");
+    if (!person) { sendError(res, "No such person", 404); return; }
+
+    if (String(person._id) === req.admin!.adminId) {
+      sendError(res, "You cannot delete your own account", 409); return;
+    }
+    if (person.role === "root_admin") {
+      const others = await AdminUser.countDocuments({
+        role: "root_admin", _id: { $ne: person._id },
+      });
+      if (others === 0) {
+        sendError(res, "That is the last root admin — somebody has to be able to administer this", 409);
+        return;
+      }
+    }
+
+    const grants = await Access.countDocuments({ user: person._id });
+    await Access.deleteMany({ user: person._id });
+    await AdminUser.deleteOne({ _id: person._id });
+
+    await record(req, "account_deleted", {
+      adminId: req.admin!.adminId, adminEmail: req.admin!.email, org: null,
+      detail: `Deleted ${person.email} from the portal${grants ? `, with ${grants} grant${grants === 1 ? "" : "s"}` : ""}`,
+    });
+
+    sendSuccess(res, `${person.name} removed from the portal`, { grantsRemoved: grants });
+  } catch (err) { next(err); }
+};

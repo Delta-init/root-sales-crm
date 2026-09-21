@@ -155,7 +155,9 @@ export type AuditAction =
   | "target_updated"
   | "account_provisioned"
   | "people_imported"
-  | "role_map_changed";
+  | "role_map_changed"
+  | "account_deactivated"
+  | "account_deleted";
 
 export interface IAuditLog extends Document {
   admin: Types.ObjectId | null;
