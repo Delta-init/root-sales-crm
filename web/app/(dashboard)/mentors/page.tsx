@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, ChevronLeft, ChevronRight, Loader2, Users2 } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Loader2, Search, Users2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, apiErrorMessage } from "@/lib/axios";
@@ -93,6 +94,27 @@ export default function MentorsPage() {
   const tz = schedule.data?.timezone || "Asia/Dubai";
 
   /*
+   * Finding one person in a long list.
+   *
+   * Filtered here rather than asked of the LMS again: the whole week is
+   * already in hand, and a round trip per keystroke would make the grid flicker
+   * to answer a question the browser can answer instantly.
+   *
+   * Name and address both, because the list shows both and people search by
+   * whichever they happen to know.
+   */
+  const [query, setQuery] = useState("");
+
+  const shown = useMemo(() => {
+    const all = schedule.data?.mentors ?? [];
+    const q = query.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter(
+      (m) => m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q),
+    );
+  }, [schedule.data, query]);
+
+  /*
    * Every time on this page is drawn in the academy's zone, never the
    * browser's.
    *
@@ -121,6 +143,15 @@ export default function MentorsPage() {
             When they are free, and what is already booked.{" "}
             <span className="whitespace-nowrap">All times {tz.replace("_", " ")}.</span>
           </p>
+        </div>
+        <div className="relative w-full sm:w-64">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by name or email…"
+            className="pl-9"
+          />
         </div>
         <div className="flex items-center gap-1">
           <Button variant="outline" size="icon" onClick={() => setOffset((o) => o - 1)}>
@@ -159,17 +190,37 @@ export default function MentorsPage() {
         </Card>
       )}
 
-      {schedule.data && schedule.data.mentors.length === 0 && (
+      {schedule.data && shown.length === 0 && (
         <Card><CardContent className="py-16 text-center">
           <Users2 className="mx-auto h-8 w-8 text-muted-foreground/50" />
-          <p className="mt-3 text-sm font-medium">No mentors in this academy</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Anybody given the instructor role in the LMS appears here.
-          </p>
+          {/*
+            Two different nothings. An academy with no instructors is a fact
+            about the LMS; a search matching none of them is a fact about the
+            box above. Saying the first when the second is true sends somebody
+            off to investigate their own typo.
+          */}
+          {query.trim() ? (
+            <>
+              <p className="mt-3 text-sm font-medium">Nobody matches that</p>
+              <button
+                onClick={() => setQuery("")}
+                className="mt-2 text-xs text-primary hover:underline"
+              >
+                Clear the search
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="mt-3 text-sm font-medium">No mentors in this academy</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Anybody given the instructor role in the LMS appears here.
+              </p>
+            </>
+          )}
         </CardContent></Card>
       )}
 
-      {schedule.data && schedule.data.mentors.length > 0 && (
+      {schedule.data && shown.length > 0 && (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[56rem] text-left text-sm">
@@ -187,7 +238,7 @@ export default function MentorsPage() {
                 </tr>
               </thead>
               <tbody>
-                {schedule.data.mentors.map((m) => (
+                {shown.map((m) => (
                   <tr key={m.id} className="border-b border-border/40 align-top last:border-0">
                     <td className="px-3 py-2.5">
                       <p className="truncate font-medium text-foreground">{m.name || m.email}</p>
