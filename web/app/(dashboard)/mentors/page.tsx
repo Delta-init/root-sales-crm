@@ -130,6 +130,29 @@ export default function MentorsPage() {
   const tz = schedule.data?.timezone || "Asia/Dubai";
 
   /*
+   * Which column an hour belongs in.
+   *
+   * The two sides are asked different questions on purpose, and getting that
+   * wrong put bookings one column to the right for anybody east of Dubai.
+   *
+   * A column is a calendar date — the "23" in its heading — and nothing more.
+   * It has no time and no zone, so it is read straight off the date's own
+   * year, month and day. Converting it into the academy's zone was the bug: a
+   * browser in India builds midnight on the 23rd, which is half past ten on
+   * the 22nd in Dubai, so the column labelled 23 started calling itself the
+   * 22nd while a meeting genuinely on the 23rd called itself the 23rd — and
+   * landed in the cell headed 24.
+   *
+   * A meeting, by contrast, is a real instant, so the only meaningful question
+   * is which day it falls on *there*. That one does need the zone.
+   */
+  const columnKey = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+  const sameDay = (iso: string, day: Date) =>
+    new Date(iso).toLocaleDateString("en-CA", { timeZone: tz }) === columnKey(day);
+
+  /*
    * Finding one person in a long list.
    *
    * Filtered here rather than asked of the LMS again: the whole week is
@@ -406,28 +429,6 @@ export default function MentorsPage() {
       hour: "2-digit", minute: "2-digit", timeZone: tz,
     });
 
-  /*
-   * Which column an hour belongs in.
-   *
-   * The two sides are asked different questions on purpose, and getting that
-   * wrong put bookings one column to the right for anybody east of Dubai.
-   *
-   * A column is a calendar date — the "23" in its heading — and nothing more.
-   * It has no time and no zone, so it is read straight off the date's own
-   * year, month and day. Converting it into the academy's zone was the bug: a
-   * browser in India builds midnight on the 23rd, which is half past ten on
-   * the 22nd in Dubai, so the column labelled 23 started calling itself the
-   * 22nd while a meeting genuinely on the 23rd called itself the 23rd — and
-   * landed in the cell headed 24.
-   *
-   * A meeting, by contrast, is a real instant, so the only meaningful question
-   * is which day it falls on *there*. That one does need the zone.
-   */
-  const columnKey = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
-  const sameDay = (iso: string, day: Date) =>
-    new Date(iso).toLocaleDateString("en-CA", { timeZone: tz }) === columnKey(day);
 
   return (
     <div className="space-y-5">
