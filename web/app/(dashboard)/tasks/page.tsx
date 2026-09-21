@@ -322,12 +322,21 @@ export default function TasksPage() {
                 </select>
               </div>
 
+              {/*
+                A description is rarely one line, and a single-line box asks
+                for one. It went across to Media ERP either way — the field was
+                there — but labelled "Anything else" and sized like a name, it
+                read as a note rather than the brief.
+              */}
               <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="desc">Anything else</Label>
-                <Input
-                  id="desc" value={form.description}
+                <Label htmlFor="desc">Description</Label>
+                <textarea
+                  id="desc"
+                  rows={4}
+                  value={form.description}
                   onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-                  placeholder="Optional"
+                  placeholder="What this involves, anything they need to know, where the source files are…"
+                  className="w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 />
               </div>
             </div>
