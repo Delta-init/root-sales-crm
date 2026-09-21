@@ -1,13 +1,18 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarDays, ChevronLeft, ChevronRight, Loader2, Search, Users2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
+import { toast } from "sonner";
 import { api, apiErrorMessage } from "@/lib/axios";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +42,15 @@ interface MentorClass {
   mine: boolean;
 }
 
+interface MentorMeeting {
+  id: string;
+  title: string;
+  kind: string;
+  startsAt: string;
+  durationMins: number;
+  attendeeName: string;
+}
+
 interface Mentor {
   id: string;
   name: string;
@@ -44,7 +58,14 @@ interface Mentor {
   shared: boolean;
   slots: { dayOfWeek: number; startTime: string; endTime: string }[];
   classes: MentorClass[];
+  meetings: MentorMeeting[];
 }
+
+const KIND_LABEL: Record<string, string> = {
+  staff: "Staff",
+  student: "Student",
+  client: "Client",
+};
 
 interface Schedule {
   timezone: string;
@@ -62,6 +83,7 @@ const weekStart = (d: Date) => {
 };
 
 export default function MentorsPage() {
+  const qc = useQueryClient();
   const [offset, setOffset] = useState(0);
 
   const { from, to, days } = useMemo(() => {
@@ -113,6 +135,68 @@ export default function MentorsPage() {
       (m) => m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q),
     );
   }, [schedule.data, query]);
+
+  /*
+   * Booking an hour.
+   *
+   * Opened from the day it is for, with that mentor already chosen: the
+   * commonest mistake a form like this invites is booking the right hour with
+   * the wrong person, and picking neither of them twice removes it.
+   *
+   * The time is typed in the academy's zone, like everything else here, and
+   * converted on the way out — a form that quietly means the browser's zone
+   * would book an hour nobody agreed to.
+   */
+  const [booking, setBooking] = useState<{ mentor: Mentor; day: Date } | null>(null);
+  const [form, setForm] = useState({
+    title: "", kind: "staff", time: "10:00", durationMins: "30",
+    attendeeName: "", attendeeEmail: "", meetingUrl: "", notes: "",
+  });
+
+  const openBooking = (mentor: Mentor, day: Date) => {
+    setBooking({ mentor, day });
+    setForm({
+      title: "", kind: "staff", time: "10:00", durationMins: "30",
+      attendeeName: "", attendeeEmail: "", meetingUrl: "", notes: "",
+    });
+  };
+
+  const book = useMutation({
+    mutationFn: async () => {
+      if (!booking) throw new Error("Nothing to book");
+      /* The chosen day at the chosen wall-clock time, in the academy's zone.
+         Built by asking what that wall time is worth in UTC rather than by
+         trusting the browser's own offset, which is somebody else's hour. */
+      const [h, min] = form.time.split(":").map(Number);
+      const local = new Date(booking.day);
+      local.setHours(h ?? 0, min ?? 0, 0, 0);
+      const asIfHere = new Date(
+        local.toLocaleString("en-US", { timeZone: tz }),
+      );
+      const drift = local.getTime() - asIfHere.getTime();
+      const startsAt = new Date(local.getTime() + drift);
+
+      return (
+        await api.post<{ data: { linkNote: string | null } }>("/mentors/meetings", {
+          mentorEmail: booking.mentor.email,
+          title: form.title.trim(),
+          kind: form.kind,
+          scheduledStart: startsAt.toISOString(),
+          durationMins: Number(form.durationMins),
+          attendeeName: form.attendeeName.trim(),
+          attendeeEmail: form.attendeeEmail.trim() || undefined,
+          meetingUrl: form.meetingUrl.trim() || undefined,
+          notes: form.notes.trim() || undefined,
+        })
+      ).data.data;
+    },
+    onSuccess: (d) => {
+      toast.success(d?.linkNote ?? "Booked — both of them have been emailed");
+      setBooking(null);
+      void qc.invalidateQueries({ queryKey: ["mentors", "schedule"] });
+    },
+    onError: (e) => toast.error(apiErrorMessage(e, "Could not book that")),
+  });
 
   /*
    * Every time on this page is drawn in the academy's zone, never the
@@ -253,11 +337,18 @@ export default function MentorsPage() {
                     {days.map((day) => {
                       const slots = m.slots.filter((s) => s.dayOfWeek === day.getDay());
                       const booked = m.classes.filter((c) => sameDay(c.startsAt, day));
+                      const meetings = m.meetings.filter((v) => sameDay(v.startsAt, day));
+                      const empty = slots.length === 0 && booked.length === 0 && meetings.length === 0;
 
                       return (
-                        <td key={day.toISOString()} className="px-2 py-2.5">
-                          {slots.length === 0 && booked.length === 0 ? (
-                            <span className="text-xs text-muted-foreground/40">—</span>
+                        <td
+                          key={day.toISOString()}
+                          className="group/cell cursor-pointer px-2 py-2.5 transition-colors hover:bg-accent/40"
+                          title={`Book time with ${m.name || m.email}`}
+                          onClick={() => openBooking(m, day)}
+                        >
+                          {empty ? (
+                            <span className="text-xs text-muted-foreground/40 group-hover/cell:hidden">—</span>
                           ) : (
                             <div className="space-y-1">
                               {/* The pattern, behind everything else. */}
@@ -292,8 +383,26 @@ export default function MentorsPage() {
                                   {c.mine ? (c.title || "Class") : "Booked elsewhere"}
                                 </div>
                               ))}
+
+                              {/* Meetings, which are nobody's class. Named by
+                                  kind and attendee rather than by title alone:
+                                  "Intro call" tells you nothing, "Client ·
+                                  Rahul Menon" tells you whether it can move. */}
+                              {meetings.map((v) => (
+                                <div
+                                  key={v.id}
+                                  title={`${v.title} · with ${v.attendeeName} · ${v.durationMins} minutes`}
+                                  className="rounded border border-violet-500/30 bg-violet-500/15 px-1.5 py-0.5 text-[11px] text-violet-300"
+                                >
+                                  <span className="tabular-nums">{at(v.startsAt)}</span>{" "}
+                                  {KIND_LABEL[v.kind] ?? v.kind} · {v.attendeeName}
+                                </div>
+                              ))}
                             </div>
                           )}
+                          <span className="mt-1 hidden text-[11px] text-primary group-hover/cell:block">
+                            + Book
+                          </span>
                         </td>
                       );
                     })}
@@ -310,6 +419,113 @@ export default function MentorsPage() {
           <Loader2 className="h-3 w-3 animate-spin" /> Refreshing…
         </p>
       )}
+
+      <Dialog open={Boolean(booking)} onOpenChange={(o) => !o && setBooking(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              Book time with {booking?.mentor.name || booking?.mentor.email}
+            </DialogTitle>
+            <DialogDescription>
+              {booking?.day.toLocaleDateString(undefined, {
+                weekday: "long", day: "numeric", month: "long",
+              })}
+              {" · "}times are {tz.replace("_", " ")}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="mtitle">What is it</Label>
+              <Input
+                id="mtitle"
+                value={form.title}
+                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                placeholder="Intro call, weekly catch-up…"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="mkind">Kind</Label>
+              <select
+                id="mkind"
+                value={form.kind}
+                onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value }))}
+                className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm"
+              >
+                <option value="staff">Staff meeting</option>
+                <option value="student">With a student</option>
+                <option value="client">Outside client</option>
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="mtime">Start</Label>
+                <Input
+                  id="mtime" type="time" value={form.time}
+                  onChange={(e) => setForm((f) => ({ ...f, time: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="mdur">Minutes</Label>
+                <Input
+                  id="mdur" type="number" min={5} max={600} step={5}
+                  value={form.durationMins}
+                  onChange={(e) => setForm((f) => ({ ...f, durationMins: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="maname">Who they are meeting</Label>
+              <Input
+                id="maname" value={form.attendeeName}
+                onChange={(e) => setForm((f) => ({ ...f, attendeeName: e.target.value }))}
+                placeholder="Name"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="maemail">Their email</Label>
+              <Input
+                id="maemail" type="email" value={form.attendeeEmail}
+                onChange={(e) => setForm((f) => ({ ...f, attendeeEmail: e.target.value }))}
+                placeholder="So they get the invite too"
+              />
+            </div>
+
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="murl">Joining link</Label>
+              <Input
+                id="murl" value={form.meetingUrl}
+                onChange={(e) => setForm((f) => ({ ...f, meetingUrl: e.target.value }))}
+                placeholder="Paste one, or leave blank for a Google Meet"
+              />
+            </div>
+
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="mnotes">Anything else</Label>
+              <Input
+                id="mnotes" value={form.notes}
+                onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                placeholder="Optional — goes in both emails"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setBooking(null)}>Cancel</Button>
+            <Button
+              disabled={book.isPending || form.title.trim().length < 3 || !form.attendeeName.trim()}
+              onClick={() => book.mutate()}
+            >
+              {book.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Book it
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }

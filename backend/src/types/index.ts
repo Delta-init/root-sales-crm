@@ -156,6 +156,8 @@ export type AuditAction =
   // launch is a separate thing done while wearing the face.
   | "impersonation_started"
   | "impersonation_launch"
+  // An hour taken in somebody else's week, arranged from here.
+  | "mentor_meeting_booked"
   | "target_registered"
   | "target_updated"
   | "account_provisioned"

@@ -27,6 +27,15 @@ export interface MentorClass {
   mine: boolean;
 }
 
+export interface MentorMeeting {
+  id: string;
+  title: string;
+  kind: string;
+  startsAt: string;
+  durationMins: number;
+  attendeeName: string;
+}
+
 export interface Mentor {
   id: string;
   name: string;
@@ -35,6 +44,8 @@ export interface Mentor {
   shared: boolean;
   slots: { dayOfWeek: number; startTime: string; endTime: string }[];
   classes: MentorClass[];
+  /** Time booked with them that is not a class. */
+  meetings: MentorMeeting[];
 }
 
 export interface MentorSchedule {
@@ -86,7 +97,41 @@ export const mentorService = {
       timezone: data.timezone || "",
       from: data.from || from.toISOString(),
       to: data.to || to.toISOString(),
-      mentors: data.mentors ?? [],
+      mentors: (data.mentors ?? []).map((m) => ({ ...m, meetings: m.meetings ?? [] })),
     };
+  },
+
+  /**
+   * Book time with a mentor.
+   *
+   * Passed through rather than decided here. Whether the hour is free, whether
+   * the mentor belongs to this academy, whether a joining link can be made —
+   * all of that is the LMS's to answer, and answering any of it here would be a
+   * second opinion that goes stale the moment somebody books through the LMS
+   * instead.
+   *
+   * Who booked it travels with the request. The LMS has no idea who is signed
+   * in to this portal, and a meeting nobody can be traced to is one nobody can
+   * be asked about.
+   */
+  async scheduleMeeting(input: {
+    mentorEmail: string;
+    title: string;
+    kind: string;
+    scheduledStart: string;
+    durationMins: number;
+    meetingUrl?: string;
+    attendeeName: string;
+    attendeeEmail?: string;
+    notes?: string;
+    bookedByEmail: string;
+  }): Promise<{ meeting: MentorMeeting & { meetingUrl: string }; linkNote: string | null }> {
+    const target = await resolveTarget("lms");
+
+    return callTarget(target, "/mentor-meetings", {
+      method: "POST",
+      verb: "book that meeting",
+      body: { ...input, remoteOrgId: target.remoteOrgId || undefined },
+    });
   },
 };

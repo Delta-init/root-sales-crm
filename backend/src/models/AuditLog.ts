@@ -39,6 +39,8 @@ const auditLogSchema = new Schema<IAuditLog>(
          */
         "impersonation_started",
         "impersonation_launch",
+        // An hour taken in somebody else's week, arranged from here.
+        "mentor_meeting_booked",
       ],
       required: true,
     },

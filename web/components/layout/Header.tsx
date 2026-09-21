@@ -26,9 +26,11 @@ const NAV = [
   // Root admins only: deciding who may open which production system is the
   // portal's most consequential act, and the API refuses anybody else anyway.
   { href: "/users", label: "Users", icon: Users2, rootOnly: true },
-  // Also root-only, and for the same reason the API is: a staff timetable is
-  // nobody's business by default.
-  { href: "/mentors", label: "Mentors", icon: CalendarDays, rootOnly: true },
+  /* Not root-only. It began that way, on the reasoning that a staff timetable
+     is nobody's business by default — booking changed that. The people who
+     need an hour with a mentor are the people doing the work, and a calendar
+     only they cannot see is one they have to ask somebody else to read. */
+  { href: "/mentors", label: "Mentors", icon: CalendarDays },
   /*
    * Registry and Role map are not in the navigation.
    *
