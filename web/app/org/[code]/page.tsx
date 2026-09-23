@@ -28,6 +28,33 @@ import { cn, timeIn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
 import type { Organization } from "@/lib/types";
 
+const EMBEDDED_PATH_PARAM = "appPath";
+const HISTORY_CHANNEL = "root-portal-history-v1";
+
+function safeEmbeddedPath(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > 4096 || !value.startsWith("/") || value.startsWith("//")) return null;
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.origin !== window.location.origin || url.pathname === "/sso" || url.pathname.startsWith("/api/")) return null;
+    for (const key of ["token", "ssoToken", "access_token", "refresh_token", "id_token", "code"]) {
+      url.searchParams.delete(key);
+    }
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return null;
+  }
+}
+
+function readEmbeddedPath(): string | null {
+  return new URL(window.location.href).searchParams.get(EMBEDDED_PATH_PARAM);
+}
+
+function writeEmbeddedPath(path: string) {
+  const url = new URL(window.location.href);
+  url.searchParams.set(EMBEDDED_PATH_PARAM, path);
+  window.history.replaceState(window.history.state, "", url);
+}
+
 /**
  * The CRM is embedded rather than linked out to, so the portal keeps its own
  * chrome — org switcher, back to home — above whichever CRM is open.
@@ -48,6 +75,11 @@ export default function OrgWorkspacePage() {
   const [loaded, setLoaded] = useState(false);
   const [slow, setSlow] = useState(false);
   const frameRef = useRef<HTMLIFrameElement>(null);
+  const frameReadyRef = useRef(false);
+  const frameOrigin = useMemo(() => {
+    if (!src) return null;
+    try { return new URL(src).origin; } catch { return null; }
+  }, [src]);
 
   useEffect(() => {
     if (!authLoading && !admin) router.replace("/login");
@@ -94,6 +126,51 @@ export default function OrgWorkspacePage() {
     const t = setTimeout(() => setSlow(true), 6000);
     return () => clearTimeout(t);
   }, [src, loaded]);
+
+  useEffect(() => {
+    if (!src || !frameOrigin) return;
+
+    const sendNavigation = (path: string) => {
+      frameRef.current?.contentWindow?.postMessage(
+        { channel: HISTORY_CHANNEL, type: "navigate", path },
+        frameOrigin,
+      );
+    };
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== frameOrigin || event.source !== frameRef.current?.contentWindow) return;
+      const message = event.data as { channel?: unknown; type?: unknown; path?: unknown } | null;
+      if (!message || message.channel !== HISTORY_CHANNEL) return;
+
+      const childPath = safeEmbeddedPath(message.path);
+      if (message.type === "ready") {
+        frameReadyRef.current = true;
+        const savedPath = safeEmbeddedPath(readEmbeddedPath());
+        if (savedPath && savedPath !== childPath) sendNavigation(savedPath);
+        else if (childPath) writeEmbeddedPath(childPath);
+        return;
+      }
+      if (message.type === "route" && childPath) {
+        const current = safeEmbeddedPath(readEmbeddedPath());
+        if (current !== childPath) writeEmbeddedPath(childPath);
+      }
+    };
+
+    const onPopState = () => {
+      if (!frameReadyRef.current) return;
+      const path = safeEmbeddedPath(readEmbeddedPath());
+      if (path) sendNavigation(path);
+    };
+
+    frameReadyRef.current = false;
+    window.addEventListener("message", onMessage);
+    window.addEventListener("popstate", onPopState);
+    return () => {
+      frameReadyRef.current = false;
+      window.removeEventListener("message", onMessage);
+      window.removeEventListener("popstate", onPopState);
+    };
+  }, [src, frameOrigin]);
 
   const openInNewTab = async () => {
     const tab = window.open("about:blank", "_blank");
@@ -265,7 +342,7 @@ export default function OrgWorkspacePage() {
                 // would strip its storage and break the sign-in it is about
                 // to perform.
                 allow="clipboard-write; fullscreen"
-                referrerPolicy="no-referrer"
+                referrerPolicy="origin"
               />
             )}
 

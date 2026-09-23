@@ -43,6 +43,20 @@ update filtered on `usedAt: null`, so a replay inside the race window fails.
 The browser URL is scrubbed with `replaceState` the moment the page reads it,
 so it does not survive in history or a Referer header.
 
+### Embedded app navigation
+
+The `/org/[code]` workspace keeps the embedded system's current relative URL in
+the Root portal's `appPath` query parameter. Each embedded frontend sends
+`root-portal-history-v1` `ready` and `route` messages to the parent and accepts
+`navigate` messages. The iframe keeps its own native Back/Forward entries;
+Root mirrors the active route with `replaceState` so one child navigation does
+not create a duplicate browser-history entry. Messages are restricted to the
+active iframe window and its configured origin, and only same-origin relative
+paths are accepted. Never include SSO or authentication tokens in this message.
+
+New systems added to the registry need the same bridge component mounted inside
+their authenticated app layout for route sync and direct-link restoration.
+
 ### Deploying it
 
 Each CRM needs one environment variable, then a restart:
