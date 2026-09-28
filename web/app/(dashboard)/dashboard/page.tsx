@@ -10,7 +10,7 @@ import {
   BarChart3,
   BookOpen,
   Building2,
-  Clapperboard,
+  Clapperboard, BadgePercent,
   Clock,
   Coins,
   Globe2,
@@ -51,6 +51,7 @@ const KIND: Record<TargetKind, { label: string; icon: typeof Building2; color: s
   hrms: { label: "HRMS", icon: GraduationCap, color: "text-violet-400", bg: "bg-violet-500/10" },
   lms: { label: "LMS", icon: BookOpen, color: "text-purple-400", bg: "bg-purple-500/10" },
   erp: { label: "Media ERP", icon: Clapperboard, color: "text-pink-400", bg: "bg-pink-500/10" },
+  commission: { label: "Commission", icon: BadgePercent, color: "text-cyan-400", bg: "bg-cyan-500/10" },
 };
 
 /*

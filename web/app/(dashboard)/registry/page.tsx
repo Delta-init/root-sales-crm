@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { BookOpen, Building2, Check, Clapperboard, GraduationCap, Server, Wallet, X } from "lucide-react";
+import { BookOpen, Building2, Check, Clapperboard, BadgePercent, GraduationCap, Server, Wallet, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -36,6 +36,7 @@ const KIND: Record<TargetKind, { label: string; icon: typeof Building2; classNam
   hrms: { label: "HRMS", icon: GraduationCap, className: "text-violet-400 bg-violet-500/10 border-violet-500/20" },
   lms: { label: "LMS", icon: BookOpen, className: "text-purple-400 bg-purple-500/10 border-purple-500/20" },
   erp: { label: "Media ERP", icon: Clapperboard, className: "text-pink-400 bg-pink-500/10 border-pink-500/20" },
+  commission: { label: "Commission", icon: BadgePercent, className: "text-cyan-400 bg-cyan-500/10 border-cyan-500/20" },
 };
 
 export default function RegistryPage() {

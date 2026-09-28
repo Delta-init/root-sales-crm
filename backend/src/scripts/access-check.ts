@@ -447,7 +447,7 @@ step("Knowing about every system it claims to know about");
 
   const CODES = [
     "delta", "banglore", "draw",
-    "finance-hq", "finance-banglore", "hrms", "lms", "media-erp",
+    "finance-hq", "finance-banglore", "hrms", "lms", "media-erp", "commission",
   ] as const;
 
   const victim = await AdminUser.create({

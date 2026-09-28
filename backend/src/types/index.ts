@@ -44,7 +44,8 @@ export type OrgCode =
   | "finance-banglore"
   | "hrms"
   | "lms"
-  | "media-erp";
+  | "media-erp"
+  | "commission";
 
 /**
  * What kind of system a registered target is.
@@ -56,7 +57,7 @@ export type OrgCode =
  * scoped to the people who work in it, HRMS is somewhere everyone belongs, and
  * finance has no Draw at all.
  */
-export type TargetKind = "crm" | "finance" | "hrms" | "lms" | "erp";
+export type TargetKind = "crm" | "finance" | "hrms" | "lms" | "erp" | "commission";
 
 /**
  * Somewhere a person may be sent.

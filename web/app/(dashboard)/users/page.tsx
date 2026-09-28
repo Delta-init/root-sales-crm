@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import {
-  BookOpen, Building2, Check, ChevronRight, Clapperboard, Download, Eye, GraduationCap,
+  BookOpen, Building2, Check, ChevronRight, Clapperboard, BadgePercent, Download, Eye, GraduationCap,
   Loader2, Plus, Power, PowerOff, Search, ShieldCheck, Trash2, Users2, Wallet, X,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -43,6 +43,7 @@ const KIND_STYLE: Record<TargetKind, { icon: typeof Building2; className: string
   hrms: { icon: GraduationCap, className: "text-violet-400 bg-violet-500/10 border-violet-500/20" },
   lms: { icon: BookOpen, className: "text-purple-400 bg-purple-500/10 border-purple-500/20" },
   erp: { icon: Clapperboard, className: "text-pink-400 bg-pink-500/10 border-pink-500/20" },
+  commission: { icon: BadgePercent, className: "text-cyan-400 bg-cyan-500/10 border-cyan-500/20" },
 };
 
 const PAGE_SIZE = 25;

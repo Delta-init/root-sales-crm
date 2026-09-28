@@ -228,9 +228,9 @@ export interface MyTracker {
 export type TargetCode =
   | "delta" | "banglore" | "draw"
   | "finance-hq" | "finance-banglore" | "hrms"
-  | "lms" | "media-erp";
+  | "lms" | "media-erp" | "commission";
 
-export type TargetKind = "crm" | "finance" | "hrms" | "lms" | "erp";
+export type TargetKind = "crm" | "finance" | "hrms" | "lms" | "erp" | "commission";
 
 export interface Target {
   code: TargetCode;
