@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 #
-# End-to-end check of lead traffic: the lead sheet posting into the portal, the
-# split between the Delta and Draw CRMs, and what reaches each of them.
+# End-to-end check of lead traffic: the lead sheets posting into the portal, the
+# split between teams in the Delta and Draw CRMs, and what reaches each of them.
 #
 # Stands up a throwaway mongod and the real portal backend; the two CRMs are
 # stand-ins the driver serves itself, answering the way their sheet intakes do.
+# The split and leads as they are live go into the scratch database first, so
+# the backend meets them on start-up as it will when deployed over them.
 # Tears everything down afterwards.
 #
 # Nothing here touches a configured database or a real CRM. backend/.env names
@@ -78,6 +80,9 @@ export E2E_API_PORT="$API_PORT" E2E_DELTA_PORT="$DELTA_PORT" E2E_DRAW_PORT="$DRA
 
 # From the scratch directory, so dotenv finds no .env to fill the gaps with.
 cd "$WORK/run"
+echo "Writing the split and leads as they are live, before the backend starts"
+bun --no-env-file "$REPO/src/scripts/traffic-check.ts" seed
+
 echo "Starting the portal backend on :$API_PORT"
 bun --no-env-file "$REPO/src/index.ts" > "$WORK/log/api.log" 2>&1 &
 

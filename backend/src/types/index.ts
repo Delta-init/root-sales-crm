@@ -240,34 +240,47 @@ export interface IDailyEntry extends Document {
 }
 
 // ─── Lead traffic ─────────────────────────────────────────────────────────────
-/**
- * Which part of the sheet a lead belongs to: the UK tab, the Gulf tabs (UAE &
- * Qatar, and the GCC tab), or the Hindi tab. Each is split on its own, so a
- * quiet Hindi day cannot be made up for with UK leads.
- */
-export type TrafficSegment = "uk" | "gcc" | "hindi";
+/** A lead sheet that posts into lead traffic. Each has its own split. */
+export type TrafficSheet = "abhin" | "shoaib";
 
 /** The CRMs a lead can be sent to. Registry codes, so names and addresses come from there. */
 export type TrafficOrg = "delta" | "draw";
 
+/**
+ * One team's share of a segment: where its leads go, and how many of them.
+ *
+ * Named, and counted by `key`, because two teams can sit in the same CRM — the
+ * Delta sales team's pool, and the Dilshad team whose leads go straight to
+ * Nusra in Delta until it has a CRM of its own.
+ */
 export interface TrafficShare {
+  key: string;
+  name: string;
   org: TrafficOrg;
-  /** Whole percent; a segment's shares add up to 100. */
+  /** Percent of the segment, to two decimals; a segment's shares add up to 100. */
   percent: number;
-  /**
-   * Hand every lead of this share to one person in that CRM, instead of
-   * letting the CRM share them out across its teams. Hindi leads in Delta go
-   * to Lubna, for one.
-   */
+  /** One person in that CRM who takes this team's leads; null lets the CRM share them out. */
   assignTo: { id: string; name: string } | null;
 }
 
-export interface ITrafficRule extends Document {
+/**
+ * A part of a sheet split on its own — a tab, or the whole sheet.
+ *
+ * `version` moves on when one of its percentages changes, and its split is
+ * counted within one version, so changing Hindi does not restart UK's count.
+ */
+export interface TrafficSegmentRule {
   key: string;
-  paused: boolean;
-  /** Bumped whenever a percentage changes; the split is counted within one version. */
+  label: string;
   version: number;
-  segments: Record<TrafficSegment, TrafficShare[]>;
+  shares: TrafficShare[];
+}
+
+export interface ITrafficRule extends Document {
+  /** The sheet this is the split for. */
+  key: TrafficSheet;
+  paused: boolean;
+  segments: TrafficSegmentRule[];
   /** The CRM user recorded as having added each lead; blank lets the CRM choose. */
   reporters: { delta: string; draw: string };
   updatedBy: Types.ObjectId | null;
@@ -286,11 +299,14 @@ export type TrafficStatus =
 
 export interface ITrafficLead extends Document {
   _id: Types.ObjectId;
+  /** Which sheet it came from. */
+  sheet: TrafficSheet;
   /** Meta's lead id when the sheet has one; what makes a resend the same lead. */
   sourceKey: string;
   metaId: string;
   tab: string;
-  segment: TrafficSegment;
+  /** Its segment within the sheet (uk, gcc, hindi — or all, for a sheet split as one). */
+  segment: string;
   source: string;
   name: string;
   phone: string;
@@ -300,13 +316,19 @@ export interface ITrafficLead extends Document {
   platform: string;
   campaign: string;
   adName: string;
+  /** The ad set, and the lead's answer to the form's trading-knowledge question, when the sheet has them. */
+  adset: string;
+  knowledge: string;
   isOrganic: boolean;
   createdTime: Date | null;
+  /** The team the split gave it to; blank when it went where the person already was. */
+  share: string;
   destination: TrafficOrg | null;
   /** How the destination was chosen: the split, or where the person already is. */
   reason: "split" | "known" | "invalid";
   /** Whether it took a place in the split; duplicates and rejects do not. */
   counted: boolean;
+  /** The segment's version when it was decided. */
   ruleVersion: number;
   assignTo: { id: string; name: string } | null;
   status: TrafficStatus;

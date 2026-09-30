@@ -2,7 +2,7 @@ import mongoose, { Schema } from "mongoose";
 import type { ITrafficLead } from "../types/index.js";
 
 /**
- * One lead from the sheet, where it was sent, and how that went.
+ * One lead from a lead sheet, where it was sent, and how that went.
  *
  * This is the only copy of a lead the portal keeps — the lead itself lives in
  * whichever CRM it went to. It is kept because the split has to be counted
@@ -16,10 +16,12 @@ const assigneeSchema = new Schema(
 
 const trafficLeadSchema = new Schema<ITrafficLead>(
   {
+    // Leads from before there was more than one sheet were all Abhin's.
+    sheet: { type: String, enum: ["abhin", "shoaib"], default: "abhin" },
     sourceKey: { type: String, required: true, unique: true },
     metaId: { type: String, default: "" },
     tab: { type: String, default: "" },
-    segment: { type: String, enum: ["uk", "gcc", "hindi"], required: true },
+    segment: { type: String, enum: ["uk", "gcc", "hindi", "all"], required: true },
     source: { type: String, default: "" },
     name: { type: String, default: "" },
     phone: { type: String, default: "" },
@@ -28,8 +30,12 @@ const trafficLeadSchema = new Schema<ITrafficLead>(
     platform: { type: String, default: "" },
     campaign: { type: String, default: "" },
     adName: { type: String, default: "" },
+    adset: { type: String, default: "" },
+    knowledge: { type: String, default: "" },
     isOrganic: { type: Boolean, default: false },
     createdTime: { type: Date, default: null },
+    // The team the split chose; blank when the lead went back to where the person already was.
+    share: { type: String, default: "" },
     destination: { type: String, enum: ["delta", "draw", null], default: null },
     reason: { type: String, enum: ["split", "known", "invalid"], required: true },
     counted: { type: Boolean, default: false },
@@ -56,8 +62,10 @@ const trafficLeadSchema = new Schema<ITrafficLead>(
 trafficLeadSchema.index({ phone9: 1, receivedAt: -1 });
 // What the worker looks for.
 trafficLeadSchema.index({ status: 1, nextAttemptAt: 1 });
-// Counting the split.
-trafficLeadSchema.index({ segment: 1, ruleVersion: 1, counted: 1, destination: 1 });
+// Counting the split, team by team.
+trafficLeadSchema.index({ sheet: 1, segment: 1, ruleVersion: 1, counted: 1, share: 1 });
+// One sheet's leads, newest first — the page and its numbers.
+trafficLeadSchema.index({ sheet: 1, receivedAt: -1 });
 trafficLeadSchema.index({ receivedAt: -1 });
 
 export const TrafficLead = mongoose.model<ITrafficLead>("TrafficLead", trafficLeadSchema);

@@ -7,9 +7,9 @@ import { ping, intake, getRules, putRules, summary, leads, retry, crmUsers } fro
 const router = Router();
 
 /*
- * The lead sheet, with its own key.
+ * The lead sheets, with their own key; each says which sheet it is.
  *
- * Rationed, but loosely: the script posts on every change to the sheet and on
+ * Rationed, but loosely: a script posts on every change to its sheet and on
  * a timer, a batch at a time, so a handful of requests a minute is normal and
  * a few hundred is somebody else.
  */
@@ -18,7 +18,7 @@ const sheetLimiter = rateLimit({
   limit: 60,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, message: "Too many requests from the lead sheet. Try again in a minute." },
+  message: { success: false, message: "Too many requests from the lead sheets. Try again in a minute." },
 });
 
 router.get("/intake/ping", sheetLimiter, requireSheetKey, ping);
@@ -35,7 +35,7 @@ router.use(authenticate);
 router.get("/rules", requireTrafficAccess("view"), getRules);
 router.get("/summary", requireTrafficAccess("view"), summary);
 router.get("/leads", requireTrafficAccess("view"), leads);
-router.put("/rules", requireTrafficAccess("manage"), putRules);
+router.put("/rules/:sheet", requireTrafficAccess("manage"), putRules);
 router.post("/leads/:id/retry", requireTrafficAccess("manage"), retry);
 router.get("/crm-users/:code", requireTrafficAccess("manage"), crmUsers);
 

@@ -11,121 +11,236 @@ import type {
   ITrafficLead,
   ITrafficRule,
   TrafficOrg,
-  TrafficSegment,
+  TrafficSegmentRule,
   TrafficShare,
+  TrafficSheet,
   TrafficStatus,
 } from "../types/index.js";
 
 /**
- * Lead traffic: the Meta lead sheet's leads, split between the Delta and Draw
- * CRMs.
+ * Lead traffic: the lead sheets' leads, split between the Delta and Draw CRMs.
  *
- * The sheet posts every new row here instead of into a CRM. Each lead is put
- * in its segment — UK (the UK tab), GCC (the Gulf tabs: UAE & Qatar, and the
- * GCC tab) or Hindi (the Hindi tab) — checked against everyone already sent or
- * already in either CRM, and given
- * to whichever CRM is furthest behind its share of that segment. It is then
- * posted into that CRM's own sheet intake, which shares it out across that
- * CRM's teams exactly as it did when the sheet posted there directly. A CRM
- * that cannot take it right now does not lose it: it waits here and is tried
- * again.
+ * Each sheet posts its new rows here instead of into a CRM, and says which
+ * sheet it is. Every lead is put in its segment of that sheet — Abhin's Meta
+ * sheet is split by tab into UK, GCC and Hindi; Shoaib's Forex sheet is split
+ * as one — checked against everyone already sent or already in either CRM,
+ * and given to whichever team is furthest behind its share of that segment.
+ * It is then posted into that team's CRM through the CRM's own sheet intake,
+ * which shares it out across its teams exactly as it did when the sheet
+ * posted there directly, unless the team hands all its leads to one person.
+ * A CRM that cannot take it right now does not lose it: it waits here and is
+ * tried again.
  */
 
-const RULE_KEY = "sheet";
 export const ORGS: TrafficOrg[] = ["delta", "draw"];
-export const SEGMENTS: TrafficSegment[] = ["uk", "gcc", "hindi"];
-export const SEGMENT_LABEL: Record<TrafficSegment, string> = { uk: "UK", gcc: "GCC", hindi: "Hindi" };
+export const SHEETS: TrafficSheet[] = ["abhin", "shoaib"];
 const SHORT: Record<TrafficOrg, string> = { delta: "Delta", draw: "Draw" };
+
+export const isSheet = (v: unknown): v is TrafficSheet => SHEETS.includes(v as TrafficSheet);
 
 /** Past this many tries a lead stops being retried on its own and waits for a person. */
 const MAX_ATTEMPTS = 48;
 /** A lead claimed for sending this long ago was lost with its process; it is tried again. */
 const STALE_CLAIM_MS = 5 * 60_000;
 
-/**
- * The source each CRM records, by tab — the labels the sheet's own script used,
- * so reports in the CRMs read the same before and after.
- */
-export const SOURCE = {
-  uk: "FOREX LEADS ALPHA UK",
-  gcc: "FOREX LEADS ALPHA GCC",
-  hindi: "FOREX LEADS ALPHA HINDI",
-} as const;
+// ── The sheets ───────────────────────────────────────────────────────────────
 
-export function classifyTab(tab: string): { segment: TrafficSegment; source: string } {
-  const t = tab.toLowerCase();
-  if (t.includes("hindi")) return { segment: "hindi", source: SOURCE.hindi };
-  // "UK" as a word: "Abhin | UK | New" is, "Kuwait" is not.
-  if (/(^|[^a-z])uk([^a-z]|$)/.test(t)) return { segment: "uk", source: SOURCE.uk };
-  // Everything else is a Gulf tab: UAE & Qatar, and the GCC tab.
-  return { segment: "gcc", source: SOURCE.gcc };
+/** The account both sheets' own scripts recorded as adding every lead they put into Delta. Draw records its own. */
+const SHEETS_REPORTER = "69ef14534e41f5008be375d2";
+
+interface SheetConfig {
+  name: string;
+  about: string;
+  /** In the order the page shows them. `source` is what each CRM records as the lead's source. */
+  segments: { key: string; label: string; source: string }[];
+  /** The segment a row from this sheet belongs to, from the tab it is on. */
+  segmentOf: (tab: string) => string;
+  /** What the CRM is told about where the lead came from, in its ad_creative field. */
+  creative: (lead: Pick<ITrafficLead, "adName" | "adset" | "knowledge">) => string;
+  /** The split the first time, before anybody has changed it. */
+  teams: Record<string, TrafficShare[]>;
 }
 
-/**
- * Where things start, the first time.
- *
- * Half and half in each segment. The two people named are the ones the sheet's
- * own script used on 30 September 2026: Hindi leads going into Delta were
- * handed straight to Lubna, and every lead into Delta was recorded as added by
- * the same account. Both are ordinary settings from here on, changed on the
- * Lead traffic page.
- */
-const DEFAULT_RULE = {
-  paused: false,
-  version: 1,
-  segments: {
-    uk: [
-      { org: "delta", percent: 50, assignTo: null },
-      { org: "draw", percent: 50, assignTo: null },
+const team = (
+  key: string,
+  name: string,
+  org: TrafficOrg,
+  percent: number,
+  assignTo: TrafficShare["assignTo"] = null,
+): TrafficShare => ({ key, name, org, percent, assignTo });
+
+/** What a CRM's own team is called, wherever one is made from a CRM alone. */
+const TEAM_NAME: Record<TrafficOrg, string> = { delta: "Delta sales team", draw: "Draw department" };
+
+export const SHEET_CONFIG: Record<TrafficSheet, SheetConfig> = {
+  /*
+   * Abhin's automated Meta lead sheet, a tab per form. The source labels are
+   * the ones its own script used, so reports in the CRMs read the same before
+   * and after. Since 30 September 2026 every Hindi lead goes to Vandana in
+   * Delta; before that, half went to Lubna.
+   */
+  abhin: {
+    name: "Abhin — Meta leads",
+    about: "Split by tab: UK, GCC (UAE & Qatar, and the GCC tab) and Hindi.",
+    segments: [
+      { key: "uk", label: "UK", source: "FOREX LEADS ALPHA UK" },
+      { key: "gcc", label: "GCC", source: "FOREX LEADS ALPHA GCC" },
+      { key: "hindi", label: "Hindi", source: "FOREX LEADS ALPHA HINDI" },
     ],
-    gcc: [
-      { org: "delta", percent: 50, assignTo: null },
-      { org: "draw", percent: 50, assignTo: null },
-    ],
-    hindi: [
-      { org: "delta", percent: 50, assignTo: { id: "6a7d78a7aa93812c05d38466", name: "Lubna" } },
-      { org: "draw", percent: 50, assignTo: null },
-    ],
+    segmentOf: (tab) => {
+      const t = tab.toLowerCase();
+      if (t.includes("hindi")) return "hindi";
+      // "UK" as a word: "Abhin | UK | New" is, "Kuwait" is not.
+      if (/(^|[^a-z])uk([^a-z]|$)/.test(t)) return "uk";
+      // Everything else is a Gulf tab: UAE & Qatar, and the GCC tab.
+      return "gcc";
+    },
+    creative: (lead) => lead.adName,
+    teams: {
+      uk: [team("delta", TEAM_NAME.delta, "delta", 50), team("draw", TEAM_NAME.draw, "draw", 50)],
+      gcc: [team("delta", TEAM_NAME.delta, "delta", 50), team("draw", TEAM_NAME.draw, "draw", 50)],
+      hindi: [
+        team("delta", TEAM_NAME.delta, "delta", 100, { id: "6a5b1786c1b944ae77c10f87", name: "vandanavikraman" }),
+        team("draw", TEAM_NAME.draw, "draw", 0),
+      ],
+    },
   },
-  reporters: { delta: "69ef14534e41f5008be375d2", draw: "" },
+  /*
+   * Shoaib's Forex lead sheet: one tab, split as a whole — 200, 800 and 300 in
+   * every 1,300. The Dilshad team is new and has no CRM of its own yet, so its
+   * share goes into Delta, straight to Nusra. The sheet's own script told the
+   * CRM the lead's trading-knowledge answer and the ad set in place of the ad
+   * name, and so does this.
+   */
+  shoaib: {
+    name: "Shoaib — Forex leads",
+    about: "One split for the whole sheet.",
+    segments: [{ key: "all", label: "All leads", source: "FOREX LEADS SEIRRA" }],
+    segmentOf: () => "all",
+    creative: (lead) =>
+      [lead.knowledge && `Trading knowledge: ${lead.knowledge}`, lead.adset && `Ad set: ${lead.adset}`]
+        .filter(Boolean)
+        .join("\n") || lead.adName,
+    teams: {
+      all: [
+        team("delta", TEAM_NAME.delta, "delta", 15.38),
+        team("draw", TEAM_NAME.draw, "draw", 61.54),
+        team("dilshad", "Dilshad team", "delta", 23.08, { id: "69ecc78e9e1a9d99d1607c95", name: "Nusra" }),
+      ],
+    },
+  },
 };
 
+const configOf = (sheet: string | undefined) => SHEET_CONFIG[isSheet(sheet) ? sheet : "abhin"];
+const segmentLabel = (sheet: string | undefined, segment: string) =>
+  configOf(sheet).segments.find((s) => s.key === segment)?.label ?? segment;
+
+// ── The rules ────────────────────────────────────────────────────────────────
+
+const defaultRule = (sheet: TrafficSheet) => ({
+  key: sheet,
+  paused: false,
+  segments: SHEET_CONFIG[sheet].segments.map((s) => ({
+    key: s.key,
+    label: s.label,
+    version: 1,
+    shares: SHEET_CONFIG[sheet].teams[s.key],
+  })),
+  reporters: { delta: SHEETS_REPORTER, draw: "" },
+});
+
 /**
- * UK and GCC used to be one segment, "UK & GCC".
+ * The split as it was kept before there was more than one sheet.
  *
- * A split saved then is carried over rather than reset: UK and GCC each start
- * with what "UK & GCC" had — the same percentages and the same person, if one
- * was named — and the count starts again, since the two are now split
- * separately. Leads recorded under it are put in UK or GCC by the tab they came
- * from, which is what their source label already says.
+ * One document, "sheet", with a CRM's share of each segment and one version
+ * for all of them. It becomes Abhin's rule: each CRM's share a team, with the
+ * same percentages and the same person, and every segment at the version it
+ * was, so its count carries on exactly where it is. Every lead recorded until
+ * now is Abhin's, and those the split chose are counted by the team of their
+ * CRM.
  *
- * Looked for on every read, not once at start-up: it is one lookup on a unique
- * key, and a rule restored from a backup should not stay half-converted until
- * somebody restarts the server.
+ * The leads go first, so stopping half way leaves the old rule unconverted to
+ * do it all again. Where Abhin's rule already exists it stands — the old one
+ * can only have been written since by the previous version running alongside,
+ * and that would be its own default, not a choice anybody made. The old rule
+ * is kept, marked converted, so the previous version still finds its split if
+ * it is ever put back.
+ *
+ * Looked for on every read, not once at start-up: it is one lookup on a
+ * unique key, and a rule restored from a backup should not stay unconverted
+ * until somebody restarts the server.
  */
-async function splitLegacySegments(): Promise<void> {
-  const legacy = await TrafficRule.collection.findOne(
-    { key: RULE_KEY, "segments.uk_gcc": { $exists: true } },
-    { projection: { "segments.uk_gcc": 1 } },
-  );
+const LEGACY_KEY = "sheet";
+type LegacyShare = { org: TrafficOrg; percent: number; assignTo?: { id: string; name: string } | null };
+
+async function migrateLegacyRule(): Promise<void> {
+  const legacy = await TrafficRule.collection.findOne({ key: LEGACY_KEY, convertedAt: { $exists: false } });
   if (!legacy) return;
-  const shares = (legacy.segments as { uk_gcc: unknown[] }).uk_gcc;
+  const abhin = SHEET_CONFIG.abhin;
+  const old = (legacy.segments ?? {}) as Record<string, LegacyShare[] | undefined>;
+  const version = Number(legacy.version) || 1;
+
+  for (const org of ORGS) {
+    await TrafficLead.collection.updateMany(
+      { sheet: { $exists: false }, reason: "split", destination: org },
+      { $set: { sheet: "abhin", share: org } },
+    );
+  }
+  await TrafficLead.collection.updateMany({ sheet: { $exists: false } }, { $set: { sheet: "abhin", share: "" } });
+
+  const segments = abhin.segments.map((seg) => {
+    const saved = old[seg.key];
+    return {
+      key: seg.key,
+      label: seg.label,
+      version,
+      shares: Array.isArray(saved)
+        ? saved.map((s) => team(s.org, TEAM_NAME[s.org], s.org, s.percent, s.assignTo ?? null))
+        : abhin.teams[seg.key],
+    };
+  });
   await TrafficRule.collection.updateOne(
-    { key: RULE_KEY, "segments.uk_gcc": { $exists: true } },
-    { $set: { "segments.uk": shares, "segments.gcc": shares }, $unset: { "segments.uk_gcc": "" }, $inc: { version: 1 } },
+    { key: "abhin" },
+    {
+      $setOnInsert: {
+        key: "abhin",
+        paused: Boolean(legacy.paused),
+        segments,
+        reporters: legacy.reporters ?? { delta: SHEETS_REPORTER, draw: "" },
+        updatedBy: legacy.updatedBy ?? null,
+        updatedByEmail: legacy.updatedByEmail ?? "",
+        createdAt: legacy.createdAt ?? new Date(),
+        updatedAt: legacy.updatedAt ?? new Date(),
+      },
+    },
+    { upsert: true },
   );
-  await TrafficLead.collection.updateMany({ segment: "uk_gcc", source: SOURCE.uk }, { $set: { segment: "uk" } });
-  await TrafficLead.collection.updateMany({ segment: "uk_gcc" }, { $set: { segment: "gcc" } });
+  await TrafficRule.collection.updateOne({ _id: legacy._id }, { $set: { convertedAt: new Date() } });
 }
 
-export async function getRule(): Promise<ITrafficRule> {
-  await splitLegacySegments();
-  const found = await TrafficRule.findOne({ key: RULE_KEY });
-  if (found) return found;
-  // Upsert rather than create, so two first requests cannot make two rules.
-  await TrafficRule.updateOne({ key: RULE_KEY }, { $setOnInsert: { key: RULE_KEY, ...DEFAULT_RULE } }, { upsert: true });
-  return (await TrafficRule.findOne({ key: RULE_KEY }))!;
+/** Every sheet's rule; a sheet's is made with its first split the first time it is asked for. */
+export async function getRules(): Promise<Map<TrafficSheet, ITrafficRule>> {
+  await migrateLegacyRule();
+  let found = await TrafficRule.find({ key: { $in: SHEETS } });
+  if (found.length < SHEETS.length) {
+    for (const sheet of SHEETS.filter((s) => !found.some((r) => r.key === s))) {
+      // Upsert rather than create, so two first requests cannot make two rules.
+      await TrafficRule.updateOne({ key: sheet }, { $setOnInsert: defaultRule(sheet) }, { upsert: true });
+    }
+    found = await TrafficRule.find({ key: { $in: SHEETS } });
+  }
+  return new Map(found.map((r) => [r.key, r]));
 }
+
+export const getRule = async (sheet: TrafficSheet): Promise<ITrafficRule> => (await getRules()).get(sheet)!;
+
+const plainShare = (s: TrafficShare): TrafficShare => ({
+  key: s.key,
+  name: s.name,
+  org: s.org,
+  percent: s.percent,
+  assignTo: s.assignTo ? { id: s.assignTo.id, name: s.assignTo.name } : null,
+});
 
 // ── One decision at a time ───────────────────────────────────────────────────
 
@@ -133,8 +248,9 @@ export async function getRule(): Promise<ITrafficRule> {
  * Deciding is done one lead after another.
  *
  * The split is "whoever is furthest behind gets the next one", which is only
- * true if nothing else decides in between. The sheet's script already runs one
- * batch at a time; this makes the portal not depend on that.
+ * true if nothing else decides in between. The sheets' scripts already run one
+ * batch at a time; this makes the portal not depend on that — and two sheets
+ * posting at once cannot both claim the same person as new.
  */
 let chain: Promise<unknown> = Promise.resolve();
 function serial<T>(fn: () => Promise<T>): Promise<T> {
@@ -159,7 +275,7 @@ const text = (max: number) =>
   z.union([z.string(), z.number(), z.boolean()]).optional().nullable()
     .transform((v) => (v === undefined || v === null ? "" : String(v).trim().slice(0, max)));
 
-/** A row as the sheet sends it. Everything is text; the sheet decides nothing. */
+/** A row as a sheet sends it. Everything is text; the sheet decides nothing. */
 export const intakeRowSchema = z.object({
   id: text(100),
   tab: text(200),
@@ -170,6 +286,9 @@ export const intakeRowSchema = z.object({
   platform: text(50),
   campaign_name: text(200),
   ad_name: text(300),
+  adset_name: text(300),
+  /** The form's "current level of trading knowledge" answer, where it asks. */
+  knowledge: text(300),
   is_organic: text(10),
 });
 
@@ -177,7 +296,7 @@ interface ParsedRow {
   sourceKey: string;
   metaId: string;
   tab: string;
-  segment: TrafficSegment;
+  segment: string;
   source: string;
   name: string;
   phone: string;
@@ -186,27 +305,36 @@ interface ParsedRow {
   platform: string;
   campaign: string;
   adName: string;
+  adset: string;
+  knowledge: string;
   isOrganic: boolean;
   createdTime: Date | null;
   /** Why the lead cannot be sent, if it cannot. */
   problem: string;
 }
 
-function parseRow(raw: z.output<typeof intakeRowSchema>): ParsedRow {
+/** Meta's test leads: "<test lead: dummy data for full_name>". */
+const isTest = (s: string) => {
+  const t = s.toLowerCase();
+  return t.includes("<test") || t.includes("test lead") || t.includes("dummy data");
+};
+
+function parseRow(raw: z.output<typeof intakeRowSchema>, sheet: TrafficSheet): ParsedRow {
+  const cfg = SHEET_CONFIG[sheet];
   const phone = cleanPhone(raw.phone_number);
-  const { segment, source } = classifyTab(raw.tab);
+  const segment = cfg.segmentOf(raw.tab);
   const created = raw.created_time ? new Date(raw.created_time) : null;
   const createdTime = created && !Number.isNaN(created.getTime()) ? created : null;
-  const email = /^\S+@\S+\.\S+$/.test(raw.email) ? raw.email.toLowerCase() : "";
+  // A test@meta address is Meta's, not the lead's.
+  const email = /^\S+@\S+\.\S+$/.test(raw.email) && !/test@meta/i.test(raw.email) ? raw.email.toLowerCase() : "";
   // Meta's lead id is the lead; without one, the row itself is.
   const sourceKey = raw.id
     ? `meta:${raw.id}`
     : `row:${createHash("sha1").update(`${raw.tab}|${phone}|${raw.created_time}`).digest("hex")}`;
 
-  const joined = `${raw.full_name} ${raw.phone_number}`.toLowerCase();
   let problem = "";
   if (!raw.tab) problem = "No tab name";
-  else if (joined.includes("test lead") || joined.includes("dummy data")) problem = "Meta test lead";
+  else if (isTest(`${raw.full_name} ${raw.phone_number}`)) problem = "Meta test lead";
   else if (!raw.full_name || raw.full_name.toLowerCase() === "nan") problem = "No name";
   else if (phone.replace(/\D/g, "").length < 7) problem = "No usable phone number";
   else if (!createdTime) problem = "No created time";
@@ -216,7 +344,7 @@ function parseRow(raw: z.output<typeof intakeRowSchema>): ParsedRow {
     metaId: raw.id,
     tab: raw.tab,
     segment,
-    source,
+    source: cfg.segments.find((s) => s.key === segment)?.source ?? "",
     name: raw.full_name,
     phone,
     phone9: phoneTail(phone),
@@ -224,6 +352,8 @@ function parseRow(raw: z.output<typeof intakeRowSchema>): ParsedRow {
     platform: mapPlatform(raw.platform),
     campaign: raw.campaign_name,
     adName: raw.ad_name,
+    adset: raw.adset_name,
+    knowledge: isTest(raw.knowledge) ? "" : raw.knowledge,
     isOrganic: raw.is_organic.toLowerCase() === "true",
     createdTime,
     problem,
@@ -242,21 +372,23 @@ export interface RowResult {
   reason?: string;
 }
 
-export function sheetLabel(doc: Pick<ITrafficLead, "status" | "destination" | "note" | "lastError">): string {
-  const who = doc.destination ? SHORT[doc.destination] : "";
+export function sheetLabel(doc: Pick<ITrafficLead, "status" | "destination" | "assignTo" | "note" | "lastError">): string {
+  const crm = doc.destination ? SHORT[doc.destination] : "";
+  // Where the split handed it to one person, the sheet says who.
+  const to = doc.assignTo?.name ? `${crm} → ${doc.assignTo.name}` : crm;
   switch (doc.status) {
     case "sent":
-      return `✅ ${who}`;
+      return `✅ ${to}`;
     case "duplicate":
-      return `⚠️ Duplicate · ${who}`;
+      return `⚠️ Duplicate · ${crm}`;
     case "invalid":
       return `❌ Invalid: ${doc.note || doc.lastError || "rejected"}`.slice(0, 150);
     case "held":
-      return `⏸ Paused · ${who}`;
+      return `⏸ Paused · ${to}`;
     case "failed":
-      return `❌ Failed · ${who} — see Root`;
+      return `❌ Failed · ${to} — see Root`;
     default:
-      return `⏳ Waiting · ${who}`;
+      return `⏳ Waiting · ${to}`;
   }
 }
 
@@ -325,25 +457,24 @@ async function knownInCrms(tails: string[]): Promise<{ known: Map<string, KnownL
 
 // ── The split ────────────────────────────────────────────────────────────────
 
-async function splitCounts(segment: TrafficSegment, version: number): Promise<Record<TrafficOrg, number>> {
-  const rows = await TrafficLead.aggregate<{ _id: TrafficOrg; n: number }>([
-    { $match: { segment, ruleVersion: version, counted: true } },
-    { $group: { _id: "$destination", n: { $sum: 1 } } },
+/** How many leads each team of one segment has had from the split, within its current version. */
+async function splitCounts(sheet: TrafficSheet, segment: string, version: number): Promise<Record<string, number>> {
+  const rows = await TrafficLead.aggregate<{ _id: string; n: number }>([
+    { $match: { sheet, segment, ruleVersion: version, counted: true } },
+    { $group: { _id: "$share", n: { $sum: 1 } } },
   ]);
-  const out: Record<TrafficOrg, number> = { delta: 0, draw: 0 };
-  for (const r of rows) if (r._id in out) out[r._id] = r.n;
-  return out;
+  return Object.fromEntries(rows.map((r) => [r._id, r.n]));
 }
 
 /**
- * Whoever is furthest behind their share gets the next lead.
+ * Whichever team is furthest behind its share gets the next lead.
  *
  * Measured as leads so far divided by percent, lowest first; a tie goes to the
- * larger share, then to the order the shares are listed in. At 50/50 that is
- * simply taking turns, and at 70/30 it never drifts more than a lead from the
- * target, however the day goes.
+ * larger share, then to the order the teams are listed in. At 50/50 that is
+ * simply taking turns, and at 15.38 / 61.54 / 23.08 every 13 leads are 2, 8
+ * and 3 — never more than a lead from the target, however the day goes.
  */
-export function pickShare(shares: TrafficShare[], counts: Record<TrafficOrg, number>): TrafficShare | null {
+export function pickShare(shares: TrafficShare[], counts: Record<string, number>): TrafficShare | null {
   let best: TrafficShare | null = null;
   for (const s of shares) {
     if (s.percent <= 0) continue;
@@ -351,16 +482,19 @@ export function pickShare(shares: TrafficShare[], counts: Record<TrafficOrg, num
       best = s;
       continue;
     }
-    const a = counts[s.org] / s.percent;
-    const b = counts[best.org] / best.percent;
+    const a = (counts[s.key] ?? 0) / s.percent;
+    const b = (counts[best.key] ?? 0) / best.percent;
     if (a < b || (a === b && s.percent > best.percent)) best = s;
   }
   return best;
 }
 
-// ── Taking a batch from the sheet ────────────────────────────────────────────
+// ── Taking a batch from a sheet ──────────────────────────────────────────────
 
-export async function intake(rows: unknown[]): Promise<{ results: RowResult[]; summary: Record<string, number> }> {
+export async function intake(
+  sheet: TrafficSheet,
+  rows: unknown[],
+): Promise<{ results: RowResult[]; summary: Record<string, number> }> {
   const results: RowResult[] = [];
   const toSend: { index: number; doc: ITrafficLead }[] = [];
 
@@ -369,11 +503,11 @@ export async function intake(rows: unknown[]): Promise<{ results: RowResult[]; s
     // Mongoose builds it in the background after start-up. Wait for it (a
     // no-op once built), so the first batch after a deploy cannot slip in twice.
     await TrafficLead.init();
-    const rule = await getRule();
+    const rule = await getRule(sheet);
     const parsed = rows.map((r) => intakeRowSchema.safeParse(r));
     const tails = parsed.flatMap((p) => (p.success ? [phoneTail(cleanPhone(p.data.phone_number))] : []));
     const { known, unreadable } = await knownInCrms(tails);
-    const counts: Partial<Record<TrafficSegment, Record<TrafficOrg, number>>> = {};
+    const counts: Record<string, Record<string, number>> = {};
 
     for (let i = 0; i < parsed.length; i++) {
       const p = parsed[i];
@@ -381,7 +515,7 @@ export async function intake(rows: unknown[]): Promise<{ results: RowResult[]; s
         results.push({ index: i, status: "invalid", destination: null, label: "❌ Invalid: unreadable row", reason: "unreadable row" });
         continue;
       }
-      const row = parseRow(p.data);
+      const row = parseRow(p.data, sheet);
 
       // A lead seen before is answered from what was decided then. The one
       // exception is a row turned away here for missing something: it may
@@ -393,15 +527,19 @@ export async function intake(rows: unknown[]): Promise<{ results: RowResult[]; s
       }
 
       const base = {
-        sourceKey: row.sourceKey, metaId: row.metaId, tab: row.tab, segment: row.segment, source: row.source,
+        sheet, sourceKey: row.sourceKey, metaId: row.metaId, tab: row.tab, segment: row.segment, source: row.source,
         name: row.name, phone: row.phone, phone9: row.phone9, email: row.email, platform: row.platform,
-        campaign: row.campaign, adName: row.adName, isOrganic: row.isOrganic, createdTime: row.createdTime,
+        campaign: row.campaign, adName: row.adName, adset: row.adset, knowledge: row.knowledge,
+        isOrganic: row.isOrganic, createdTime: row.createdTime,
       };
+      // Every field a decision sets, so a row decided again keeps nothing from last time.
+      const none = { share: "", destination: null, assignTo: null, ruleVersion: 0, crmLeadId: "", claimedAt: null };
 
       let decision: Partial<ITrafficLead>;
       if (row.problem) {
-        decision = { destination: null, reason: "invalid", counted: false, status: "invalid", note: row.problem };
+        decision = { ...none, reason: "invalid", counted: false, status: "invalid", note: row.problem };
       } else {
+        // Whichever sheet they came in on before: one person, one CRM.
         const prior = await TrafficLead.findOne({
           phone9: row.phone9,
           destination: { $ne: null },
@@ -412,28 +550,29 @@ export async function intake(rows: unknown[]): Promise<{ results: RowResult[]; s
 
         if (prior?.destination) {
           decision = {
-            destination: prior.destination, reason: "known", counted: false, status: "duplicate",
+            ...none, destination: prior.destination, reason: "known", counted: false, status: "duplicate",
             crmLeadId: prior.crmLeadId,
             note: `Already sent to ${SHORT[prior.destination]} on ${prior.receivedAt.toISOString().slice(0, 10)}`,
           };
         } else if (inCrm) {
           decision = {
-            destination: inCrm.org, reason: "known", counted: false, status: "duplicate",
+            ...none, destination: inCrm.org, reason: "known", counted: false, status: "duplicate",
             crmLeadId: inCrm.leadId, note: `Already in ${SHORT[inCrm.org]}`,
           };
         } else {
-          const shares = rule.segments[row.segment] ?? [];
-          counts[row.segment] ??= await splitCounts(row.segment, rule.version);
-          const share = pickShare(shares, counts[row.segment]!);
-          if (!share) {
+          const seg = rule.segments.find((s) => s.key === row.segment);
+          if (seg && !counts[seg.key]) counts[seg.key] = await splitCounts(sheet, seg.key, seg.version);
+          const share = seg ? pickShare(seg.shares, counts[seg.key]) : null;
+          if (!seg || !share) {
             decision = {
-              destination: null, reason: "invalid", counted: false, status: "invalid",
-              note: `No CRM has a share of ${SEGMENT_LABEL[row.segment]}`,
+              ...none, reason: "invalid", counted: false, status: "invalid",
+              note: `No team has a share of ${segmentLabel(sheet, row.segment)}`,
             };
           } else {
-            counts[row.segment]![share.org] += 1;
+            counts[seg.key][share.key] = (counts[seg.key][share.key] ?? 0) + 1;
             decision = {
-              destination: share.org, reason: "split", counted: true, ruleVersion: rule.version,
+              ...none,
+              share: share.key, destination: share.org, reason: "split", counted: true, ruleVersion: seg.version,
               assignTo: share.assignTo ? { id: share.assignTo.id, name: share.assignTo.name } : null,
               status: rule.paused ? "held" : "sending",
               claimedAt: rule.paused ? null : new Date(),
@@ -476,13 +615,14 @@ export async function intake(rows: unknown[]): Promise<{ results: RowResult[]; s
 const backoffMs = (attempts: number) => Math.min(2 ** Math.max(0, attempts - 1), 60) * 60_000;
 
 function toIntakeRow(doc: ITrafficLead, reporter: string): IntakeRow {
+  const creative = configOf(doc.sheet).creative(doc);
   return {
     full_name: doc.name,
     phone_number: doc.phone,
     platform: doc.platform || "meta",
     source: doc.source,
     ...(doc.email ? { email: doc.email } : {}),
-    ...(doc.adName ? { ad_creative: doc.adName } : {}),
+    ...(creative ? { ad_creative: creative } : {}),
     ...(doc.campaign ? { campaign_name: doc.campaign } : {}),
     ...(doc.createdTime ? { created_time: doc.createdTime.toISOString() } : {}),
     ...(doc.metaId ? { id: doc.metaId } : {}),
@@ -500,7 +640,9 @@ function toIntakeRow(doc: ITrafficLead, reporter: string): IntakeRow {
  * leaves every lead in it waiting to be tried again, later each time.
  */
 export async function sendLeads(docs: ITrafficLead[]): Promise<ITrafficLead[]> {
-  const rule = await getRule();
+  const rules = await getRules();
+  const reporter = (doc: ITrafficLead, org: TrafficOrg) =>
+    rules.get(isSheet(doc.sheet) ? doc.sheet : "abhin")?.reporters?.[org] ?? "";
   const out: ITrafficLead[] = [];
 
   for (const org of ORGS) {
@@ -511,7 +653,7 @@ export async function sendLeads(docs: ITrafficLead[]): Promise<ITrafficLead[]> {
       let results: Awaited<ReturnType<typeof postIntakeBatch>> | null = null;
       let error = "";
       try {
-        results = await postIntakeBatch(org, chunk.map((d) => toIntakeRow(d, rule.reporters?.[org] ?? "")));
+        results = await postIntakeBatch(org, chunk.map((d) => toIntakeRow(d, reporter(d, org))));
       } catch (e) {
         error = `${SHORT[org]} ${(e as Error).message}`;
       }
@@ -563,9 +705,9 @@ const claim = (filter: Record<string, unknown>) =>
 /**
  * One pass: send what is due.
  *
- * Leads whose retry time has come; leads held while routing was paused, once
- * it no longer is; and leads claimed by a process that died before it could
- * say how the send went.
+ * Leads whose retry time has come; leads held while their sheet was paused,
+ * once it no longer is; and leads claimed by a process that died before it
+ * could say how the send went.
  */
 export async function workerTick(): Promise<number> {
   const now = new Date();
@@ -574,10 +716,11 @@ export async function workerTick(): Promise<number> {
     { $set: { status: "retrying", nextAttemptAt: now, claimedAt: null } },
   );
 
-  const rule = await getRule();
+  const rules = await getRules();
+  const running = SHEETS.filter((s) => !rules.get(s)?.paused);
   const claimed: ITrafficLead[] = [];
   const due: Record<string, unknown>[] = [{ status: "retrying", nextAttemptAt: { $lte: now } }];
-  if (!rule.paused) due.push({ status: "held" });
+  if (running.length) due.push({ status: "held", sheet: { $in: running } });
   for (const filter of due) {
     while (claimed.length < 200) {
       const doc = await claim(filter);
@@ -611,10 +754,25 @@ export function startTrafficWorker(intervalMs: number): void {
 
 // ── Settings ─────────────────────────────────────────────────────────────────
 
+export interface ShareInput {
+  /** The team's key; left out for a team being added. */
+  key?: string;
+  name: string;
+  org: TrafficOrg;
+  percent: number;
+  assignToId: string | null;
+}
+
 export interface RuleInput {
   paused: boolean;
-  segments: Record<TrafficSegment, { org: TrafficOrg; percent: number; assignToId: string | null }[]>;
+  segments: Record<string, ShareInput[]>;
 }
+
+const invalid = (message: string) => Object.assign(new Error(message), { statusCode: 400 });
+/** Percentages are kept to two decimals and added up in hundredths, so 15.38 + 61.54 + 23.08 is exactly 100. */
+const hundredths = (percent: number) => Math.round(percent * 100);
+const slug = (name: string) =>
+  name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 36) || "team";
 
 /** An active person in that CRM, read from its database, or null. */
 async function crmUser(org: TrafficOrg, id: string): Promise<{ id: string; name: string } | null> {
@@ -628,48 +786,74 @@ async function crmUser(org: TrafficOrg, id: string): Promise<{ id: string; name:
   return user ? { id, name: String(user.name ?? "") } : null;
 }
 
-export async function saveRule(input: RuleInput, admin: { adminId: string; email: string }): Promise<{ rule: ITrafficRule; changed: string }> {
-  const rule = await getRule();
-  const segments = {} as Record<TrafficSegment, TrafficShare[]>;
-  let percentsChanged = false;
+export async function saveRule(
+  sheet: TrafficSheet,
+  input: RuleInput,
+  admin: { adminId: string; email: string },
+): Promise<{ rule: ITrafficRule; changed: string }> {
+  const cfg = SHEET_CONFIG[sheet];
+  const rule = await getRule(sheet);
+  const stray = Object.keys(input.segments).filter((k) => !cfg.segments.some((s) => s.key === k));
+  if (stray.length) throw invalid(`${cfg.name} has no segment called ${stray.join(", ")}`);
 
-  for (const seg of SEGMENTS) {
-    const shares = input.segments[seg] ?? [];
-    const orgs = shares.map((s) => s.org).sort().join(",");
-    if (orgs !== [...ORGS].sort().join(",")) {
-      throw Object.assign(new Error(`${SEGMENT_LABEL[seg]} needs one share for each of Delta and Draw`), { statusCode: 400 });
+  const segments: TrafficSegmentRule[] = [];
+  for (const { key: segKey, label } of cfg.segments) {
+    const given = input.segments[segKey] ?? [];
+    if (!given.length) throw invalid(`${label} needs at least one team`);
+    if (given.some((s) => Math.abs(s.percent * 100 - hundredths(s.percent)) > 1e-6)) {
+      throw invalid(`${label}: percentages go to two decimal places at most`);
     }
-    const total = shares.reduce((n, s) => n + s.percent, 0);
-    if (total !== 100) {
-      throw Object.assign(new Error(`${SEGMENT_LABEL[seg]} adds up to ${total}%, not 100%`), { statusCode: 400 });
+    const total = given.reduce((n, s) => n + hundredths(s.percent), 0);
+    if (total !== 10_000) throw invalid(`${label} adds up to ${total / 100}%, not 100%`);
+    const names = given.map((s) => s.name.trim().toLowerCase());
+    if (names.some((n) => !n)) throw invalid(`${label}: every team needs a name`);
+    if (new Set(names).size !== names.length) throw invalid(`${label}: two teams have the same name`);
+
+    // Teams already there keep their keys, and their counts with them; a new
+    // one is keyed by its name, clear of every key already taken.
+    const taken = new Set<string>();
+    for (const s of given) {
+      if (!s.key) continue;
+      if (taken.has(s.key)) throw invalid(`${label}: two teams have the same key`);
+      taken.add(s.key);
     }
-    const out: TrafficShare[] = [];
-    for (const org of ORGS) {
-      const s = shares.find((x) => x.org === org)!;
+    const before = rule.segments.find((s) => s.key === segKey);
+    const shares: TrafficShare[] = [];
+    for (const s of given) {
+      let key = s.key;
+      if (!key) {
+        key = slug(s.name);
+        for (let n = 2; taken.has(key); n++) key = `${slug(s.name)}-${n}`;
+        taken.add(key);
+      }
       let assignTo: TrafficShare["assignTo"] = null;
       if (s.assignToId) {
-        const kept = (rule.segments[seg] ?? []).find((x) => x.org === org)?.assignTo;
-        // Checked only when it changes: an unchanged choice needs no second look
-        // at a CRM that might be down.
-        assignTo = kept?.id === s.assignToId ? { id: kept.id, name: kept.name } : await crmUser(org, s.assignToId);
-        if (!assignTo) {
-          throw Object.assign(new Error(`That person is not an active user in ${SHORT[org]}`), { statusCode: 400 });
-        }
+        const kept = before?.shares.find((x) => x.key === key);
+        // Checked only when it changes: an unchanged choice needs no second
+        // look at a CRM that might be down.
+        assignTo = kept?.assignTo?.id === s.assignToId && kept.org === s.org
+          ? { id: kept.assignTo.id, name: kept.assignTo.name }
+          : await crmUser(s.org, s.assignToId);
+        if (!assignTo) throw invalid(`${label}: that person is not an active user in ${SHORT[s.org]}`);
       }
-      const before = (rule.segments[seg] ?? []).find((x) => x.org === org)?.percent;
-      if (before !== s.percent) percentsChanged = true;
-      out.push({ org, percent: s.percent, assignTo });
+      shares.push({ key, name: s.name.trim(), org: s.org, percent: hundredths(s.percent) / 100, assignTo });
     }
-    segments[seg] = out;
+
+    // A new ratio, or a team in or out, starts this segment's count again;
+    // a new name or person does not.
+    const ratio = (list: TrafficShare[]) => list.map((x) => `${x.key}:${hundredths(x.percent)}`).sort().join(",");
+    const moved = !before || ratio(before.shares.map(plainShare)) !== ratio(shares);
+    segments.push({ key: segKey, label, version: (before?.version ?? 0) + (moved ? 1 : 0), shares });
   }
 
-  const describe = (segs: Record<TrafficSegment, TrafficShare[]>, paused: boolean) =>
-    SEGMENTS.map((seg) =>
-      `${SEGMENT_LABEL[seg]}: ${segs[seg].map((s) => `${SHORT[s.org]} ${s.percent}%${s.assignTo ? ` (to ${s.assignTo.name || s.assignTo.id})` : ""}`).join(" / ")}`,
-    ).join("; ") + (paused ? "; paused" : "");
+  const describe = segments
+    .map((seg) => `${seg.label}: ${seg.shares
+      .map((s) => `${s.name} (${SHORT[s.org]}${s.assignTo ? ` → ${s.assignTo.name || s.assignTo.id}` : ""}) ${s.percent}%`)
+      .join(" / ")}`)
+    .join("; ");
 
   const updated = await TrafficRule.findOneAndUpdate(
-    { key: RULE_KEY },
+    { key: sheet },
     {
       $set: {
         paused: input.paused,
@@ -677,14 +861,13 @@ export async function saveRule(input: RuleInput, admin: { adminId: string; email
         updatedBy: new Types.ObjectId(admin.adminId),
         updatedByEmail: admin.email,
       },
-      ...(percentsChanged ? { $inc: { version: 1 } } : {}),
     },
     { new: true },
   );
-  return { rule: updated!, changed: describe(segments, input.paused) };
+  return { rule: updated!, changed: `${cfg.name} — ${describe}${input.paused ? "; paused" : ""}` };
 }
 
-/** Who can be picked to take a share's leads: the CRM's active people. */
+/** Who can be picked to take a team's leads: the CRM's active people. */
 export async function listCrmUsers(org: TrafficOrg): Promise<{ id: string; name: string; email: string }[]> {
   const { sources } = await getSources();
   const src = sources.find((s) => s.org.code === org);
@@ -698,18 +881,33 @@ export async function listCrmUsers(org: TrafficOrg): Promise<{ id: string; name:
   return users.map((u) => ({ id: String(u._id), name: String(u.name ?? ""), email: String(u.email ?? "") }));
 }
 
-/** What the page shows about the settings, including anything missing to run. */
+/** What the page shows about the settings, sheet by sheet, and anything missing to run. */
 export async function rulesView() {
-  const rule = await getRule();
+  const rules = await getRules();
   const orgs = await Organization.find({ code: { $in: ORGS } }).select("code name isActive").lean();
   return {
-    paused: rule.paused,
-    version: rule.version,
-    segments: SEGMENTS.map((seg) => ({
-      key: seg,
-      label: SEGMENT_LABEL[seg],
-      shares: rule.segments[seg] ?? [],
-    })),
+    sheets: SHEETS.map((key) => {
+      const cfg = SHEET_CONFIG[key];
+      const rule = rules.get(key)!;
+      return {
+        key,
+        name: cfg.name,
+        about: cfg.about,
+        paused: rule.paused,
+        segments: cfg.segments.map((seg) => {
+          const saved = rule.segments.find((s) => s.key === seg.key);
+          return {
+            key: seg.key,
+            label: seg.label,
+            source: seg.source,
+            version: saved?.version ?? 1,
+            shares: (saved?.shares ?? []).map(plainShare),
+          };
+        }),
+        updatedByEmail: rule.updatedByEmail,
+        updatedAt: (rule as unknown as { updatedAt?: Date }).updatedAt ?? null,
+      };
+    }),
     crms: ORGS.map((code) => {
       const org = orgs.find((o) => o.code === code);
       return {
@@ -720,9 +918,6 @@ export async function rulesView() {
       };
     }),
     sheetKeySet: Boolean(env.LEAD_TRAFFIC_SHEET_KEY),
-    sources: SOURCE,
-    updatedByEmail: rule.updatedByEmail,
-    updatedAt: (rule as unknown as { updatedAt?: Date }).updatedAt ?? null,
   };
 }
 
@@ -735,65 +930,88 @@ export const gulfToday = () => new Date(Date.now() + GULF_MS).toISOString().slic
 
 const WAITING: TrafficStatus[] = ["queued", "held", "sending", "retrying"];
 
-export async function summary(from: string, to: string) {
+export async function summary(sheet: TrafficSheet, from: string, to: string) {
+  const cfg = SHEET_CONFIG[sheet];
   const start = gulfStart(from);
   const end = new Date(gulfStart(to).getTime() + 24 * 60 * 60_000);
-  const rule = await getRule();
-  const rows = await TrafficLead.aggregate<{
-    _id: { segment: TrafficSegment; destination: TrafficOrg | null; status: TrafficStatus; counted: boolean };
+  const rule = await getRule(sheet);
+  type Row = {
+    _id: { segment: string; share: string; destination: TrafficOrg | null; status: TrafficStatus; counted: boolean };
     n: number;
-  }>([
-    { $match: { receivedAt: { $gte: start, $lt: end } } },
-    { $group: { _id: { segment: "$segment", destination: "$destination", status: "$status", counted: "$counted" }, n: { $sum: 1 } } },
+  };
+  const rows = await TrafficLead.aggregate<Row>([
+    { $match: { sheet, receivedAt: { $gte: start, $lt: end } } },
+    {
+      $group: {
+        _id: { segment: "$segment", share: "$share", destination: "$destination", status: "$status", counted: "$counted" },
+        n: { $sum: 1 },
+      },
+    },
   ]);
+  const count = (of: Row[], pred: (r: Row["_id"]) => boolean = () => true) =>
+    of.filter((r) => pred(r._id)).reduce((n, r) => n + r.n, 0);
 
   const orgNames = new Map(
     (await Organization.find({ code: { $in: ORGS } }).select("code name").lean()).map((o) => [o.code, o.name]),
   );
-  const segments = SEGMENTS.map((seg) => {
-    const mine = rows.filter((r) => r._id.segment === seg);
-    const split = mine.filter((r) => r._id.counted).reduce((n, r) => n + r.n, 0);
-    const shares = ORGS.map((org) => {
-      const of = mine.filter((r) => r._id.destination === org);
-      const count = (pred: (s: TrafficStatus) => boolean) => of.filter((r) => pred(r._id.status)).reduce((n, r) => n + r.n, 0);
-      const splitHere = of.filter((r) => r._id.counted).reduce((n, r) => n + r.n, 0);
+  const segments = cfg.segments.map((seg) => {
+    const mine = rows.filter((r) => r._id.segment === seg.key);
+    const split = count(mine, (r) => r.counted);
+    const teams = (rule.segments.find((s) => s.key === seg.key)?.shares ?? []).map(plainShare);
+    // The teams in the split now, then any that had leads in this period and
+    // have since been taken out of it.
+    const gone = [...new Set(mine.map((r) => r._id.share).filter((k) => k && !teams.some((t) => t.key === k)))];
+    const shares = [...teams.map((t) => t.key), ...gone].map((key) => {
+      const t = teams.find((x) => x.key === key);
+      const of = mine.filter((r) => r._id.share === key);
+      const org: TrafficOrg = t?.org ?? of.find((r) => r._id.destination)?._id.destination ?? "delta";
+      const splitHere = count(of, (r) => r.counted);
       return {
+        key,
+        name: t?.name ?? key,
         org,
-        name: orgNames.get(org) ?? SHORT[org],
-        target: (rule.segments[seg] ?? []).find((s) => s.org === org)?.percent ?? 0,
+        crm: orgNames.get(org) ?? SHORT[org],
+        assignTo: t?.assignTo ?? null,
+        target: t?.percent ?? 0,
+        removed: !t,
         split: splitHere,
         actual: split ? Math.round((splitHere / split) * 1000) / 10 : null,
-        sent: count((s) => s === "sent"),
-        duplicates: count((s) => s === "duplicate"),
-        invalid: count((s) => s === "invalid"),
-        waiting: count((s) => WAITING.includes(s)),
-        failed: count((s) => s === "failed"),
+        sent: count(of, (r) => r.status === "sent"),
+        duplicates: count(of, (r) => r.status === "duplicate"),
+        invalid: count(of, (r) => r.status === "invalid"),
+        waiting: count(of, (r) => WAITING.includes(r.status)),
+        failed: count(of, (r) => r.status === "failed"),
       };
     });
     return {
-      key: seg,
-      label: SEGMENT_LABEL[seg],
-      received: mine.reduce((n, r) => n + r.n, 0),
+      key: seg.key,
+      label: seg.label,
+      received: count(mine),
       split,
-      invalid: mine.filter((r) => r._id.destination === null).reduce((n, r) => n + r.n, 0),
+      // People already in a CRM went back there, outside the split.
+      known: ORGS.map((org) => ({
+        org,
+        name: orgNames.get(org) ?? SHORT[org],
+        count: count(mine, (r) => !r.share && r.destination === org),
+      })),
+      invalid: count(mine, (r) => r.destination === null),
       shares,
     };
   });
 
-  const total = (pred: (s: TrafficStatus) => boolean) =>
-    rows.filter((r) => pred(r._id.status)).reduce((n, r) => n + r.n, 0);
   return {
+    sheet,
     from,
     to,
     paused: rule.paused,
     segments,
     totals: {
-      received: rows.reduce((n, r) => n + r.n, 0),
-      sent: total((s) => s === "sent"),
-      duplicates: total((s) => s === "duplicate"),
-      invalid: total((s) => s === "invalid"),
-      waiting: total((s) => WAITING.includes(s)),
-      failed: total((s) => s === "failed"),
+      received: count(rows),
+      sent: count(rows, (r) => r.status === "sent"),
+      duplicates: count(rows, (r) => r.status === "duplicate"),
+      invalid: count(rows, (r) => r.status === "invalid"),
+      waiting: count(rows, (r) => WAITING.includes(r.status)),
+      failed: count(rows, (r) => r.status === "failed"),
     },
   };
 }
@@ -803,28 +1021,39 @@ const maskPhone = (p: string) => (p.length > 7 ? `${p.slice(0, 4)}${"•".repeat
 
 export type LeadFilter = "all" | "waiting" | "failed" | "sent" | "duplicate" | "invalid";
 
-export async function listLeads(opts: { filter: LeadFilter; org: TrafficOrg | "all"; page: number; limit: number }) {
-  const q: Record<string, unknown> = {};
+export async function listLeads(opts: {
+  sheet: TrafficSheet;
+  filter: LeadFilter;
+  org: TrafficOrg | "all";
+  page: number;
+  limit: number;
+}) {
+  const q: Record<string, unknown> = { sheet: opts.sheet };
   if (opts.filter === "waiting") q.status = { $in: WAITING };
   else if (opts.filter !== "all") q.status = opts.filter;
   if (opts.org !== "all") q.destination = opts.org;
 
-  const [items, total] = await Promise.all([
+  const [items, total, rule] = await Promise.all([
     TrafficLead.find(q).sort({ receivedAt: -1 }).skip((opts.page - 1) * opts.limit).limit(opts.limit).lean(),
     TrafficLead.countDocuments(q),
+    getRule(opts.sheet),
   ]);
+  const teamName = (segment: string, key: string) =>
+    rule.segments.find((s) => s.key === segment)?.shares.find((s) => s.key === key)?.name ?? key;
   return {
     total,
     page: opts.page,
     limit: opts.limit,
     items: items.map((d) => ({
       id: String(d._id),
+      sheet: d.sheet,
       receivedAt: d.receivedAt,
       name: d.name,
       phone: maskPhone(d.phone),
       tab: d.tab,
       segment: d.segment,
-      segmentLabel: SEGMENT_LABEL[d.segment],
+      segmentLabel: segmentLabel(d.sheet, d.segment),
+      team: d.share ? teamName(d.segment, d.share) : "",
       destination: d.destination,
       reason: d.reason,
       status: d.status,

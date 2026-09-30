@@ -382,33 +382,58 @@ export interface RoleRule {
 
 // ─── Lead traffic ─────────────────────────────────────────────────────────────
 export type TrafficOrg = "delta" | "draw";
-export type TrafficSegmentKey = "uk" | "gcc" | "hindi";
+/** A lead sheet that posts into lead traffic; each has its own split. */
+export type TrafficSheetKey = "abhin" | "shoaib";
 export type TrafficStatus =
   | "queued" | "held" | "sending" | "sent" | "duplicate" | "invalid" | "retrying" | "failed";
 
+/** One team's share of a segment: the CRM its leads go to, and how many of them. */
 export interface TrafficShare {
+  key: string;
+  name: string;
   org: TrafficOrg;
+  /** Percent of the segment, to two decimals. */
   percent: number;
-  /** One person in that CRM who takes this share's leads; null lets the CRM share them out. */
+  /** One person in that CRM who takes this team's leads; null lets the CRM share them out. */
   assignTo: { id: string; name: string } | null;
 }
 
-export interface TrafficRules {
-  paused: boolean;
+export interface TrafficSegmentRule {
+  key: string;
+  label: string;
+  /** What each CRM records as these leads' source. */
+  source: string;
   version: number;
-  segments: { key: TrafficSegmentKey; label: string; shares: TrafficShare[] }[];
-  crms: { code: TrafficOrg; name: string; active: boolean; missing: string[] }[];
-  sheetKeySet: boolean;
-  sources: { uk: string; gcc: string; hindi: string };
+  shares: TrafficShare[];
+}
+
+export interface TrafficSheetRules {
+  key: TrafficSheetKey;
+  name: string;
+  about: string;
+  paused: boolean;
+  segments: TrafficSegmentRule[];
   updatedByEmail: string;
   updatedAt: string | null;
 }
 
+export interface TrafficRules {
+  sheets: TrafficSheetRules[];
+  crms: { code: TrafficOrg; name: string; active: boolean; missing: string[] }[];
+  sheetKeySet: boolean;
+}
+
 export interface TrafficShareStats {
-  org: TrafficOrg;
+  key: string;
   name: string;
+  org: TrafficOrg;
+  /** The CRM's name. */
+  crm: string;
+  assignTo: { id: string; name: string } | null;
   target: number;
-  /** Leads this CRM got from the split in the period. */
+  /** Had leads in the period, and has since been taken out of the split. */
+  removed: boolean;
+  /** Leads this team got from the split in the period. */
   split: number;
   /** Its share of the split, in percent; null when nothing was split. */
   actual: number | null;
@@ -420,15 +445,18 @@ export interface TrafficShareStats {
 }
 
 export interface TrafficSummary {
+  sheet: TrafficSheetKey;
   from: string;
   to: string;
   paused: boolean;
   segments: {
-    key: TrafficSegmentKey;
+    key: string;
     label: string;
     received: number;
     split: number;
     invalid: number;
+    /** People already in a CRM, sent back to it outside the split. */
+    known: { org: TrafficOrg; name: string; count: number }[];
     shares: TrafficShareStats[];
   }[];
   totals: { received: number; sent: number; duplicates: number; invalid: number; waiting: number; failed: number };
@@ -436,12 +464,15 @@ export interface TrafficSummary {
 
 export interface TrafficLeadRow {
   id: string;
+  sheet: TrafficSheetKey;
   receivedAt: string;
   name: string;
   phone: string;
   tab: string;
-  segment: TrafficSegmentKey;
+  segment: string;
   segmentLabel: string;
+  /** The team the split chose; blank when the lead went back to where the person already was. */
+  team: string;
   destination: TrafficOrg | null;
   reason: "split" | "known" | "invalid";
   status: TrafficStatus;

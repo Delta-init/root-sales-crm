@@ -1,13 +1,19 @@
 /**
- * Delta — Lead traffic (Abhin automated Meta leads) → Root portal
+ * Delta — Lead traffic → Root portal
  *
- * Replaces the script that posted this sheet straight into the Delta sales CRM.
- * Every new row now goes to the Root portal, which splits the leads between the
- * Delta and Draw CRMs — each segment on its own, UK, GCC and Hindi, as set on
- * Root's Lead traffic page — and says where each one went. That answer is
- * written into the "CRM Sync" column:
+ * One script for every lead sheet that goes through Root. It replaces the
+ * script that posted the sheet straight into a CRM: every new row now goes to
+ * the Root portal, which splits the leads between the Delta and Draw CRMs as
+ * set for this sheet on Root's Lead traffic page, and says where each one
+ * went. The sheet is told which it is by the SHEET_ID Script property:
+ *
+ *   abhin    Abhin's automated Meta lead sheet — split by tab: UK, GCC, Hindi
+ *   shoaib   Shoaib's Forex leads sheet — one split for the whole sheet
+ *
+ * The answer is written into the "CRM Sync" column:
  *
  *   ✅ Delta / ✅ Draw          sent
+ *   ✅ Delta → Nusra           sent, straight to that person
  *   ⚠️ Duplicate · Delta       already in that CRM (or sent before) — nothing new made
  *   ⏳ Waiting · Draw          Root has it; that CRM could not take it yet, Root keeps trying
  *   ⏸ Paused · Draw            routing is paused on Root; sent when it is resumed
@@ -15,17 +21,23 @@
  *
  * Columns are found BY HEADER NAME, so a tab whose columns are in another
  * order (the GCC tab has phone_number before email) works the same as the rest.
- * Any tab with full_name, a phone column and created_time is a lead tab.
+ * Any tab with full_name, a phone column and created_time is a lead tab. The
+ * ad set (adset_name) and a trading-knowledge question column are sent too,
+ * where a sheet has them.
  *
- * Setup, once:
+ * Setup, once per sheet:
  *   1. Extensions → Apps Script: replace the old script's code with this file.
  *   2. Project Settings → Script properties:
  *        ROOT_API_URL   https://root-api-sales-crm.deltainstitutions.com
  *        TRAFFIC_KEY    the LEAD_TRAFFIC_SHEET_KEY set on the Root server
- *   3. Reload the sheet. 🔀 Lead traffic → Test connection, then Setup triggers
- *      (which also removes the old script's triggers).
+ *        SHEET_ID       abhin, or shoaib
+ *   3. Reload the sheet. 🔀 Lead traffic → Test connection (it names the
+ *      sheet Root thinks this is), then Setup triggers (which also removes the
+ *      old script's triggers).
  *
- * Rows the old script already marked (✅ SYNCED, ⚠️ DUPLICATE) are left alone.
+ * Rows the old scripts already marked (✅ SYNCED, ✅ SYNCED → NUSRA,
+ * ⚠️ DUPLICATE) are left alone. Rows marked ❌ ERROR were not taken by the CRM
+ * and are sent again.
  */
 
 var CHUNK_SIZE = 100;
@@ -46,10 +58,12 @@ function config_() {
   var p = PropertiesService.getScriptProperties();
   var url = String(p.getProperty("ROOT_API_URL") || "").trim().replace(/\/+$/, "").replace(/\/api\/v1$/, "");
   var key = String(p.getProperty("TRAFFIC_KEY") || "").trim();
-  if (!url || !key) {
-    throw new Error("Set ROOT_API_URL and TRAFFIC_KEY in Project Settings → Script properties.");
+  // Never guessed: a sheet sent as another would be split by the other's rules.
+  var sheet = String(p.getProperty("SHEET_ID") || "").trim().toLowerCase();
+  if (!url || !key || !sheet) {
+    throw new Error("Set ROOT_API_URL, TRAFFIC_KEY and SHEET_ID in Project Settings → Script properties.");
   }
-  return { url: url, key: key };
+  return { url: url, key: key, sheet: sheet };
 }
 
 function safeAlert_(msg) {
@@ -78,6 +92,8 @@ function headerMap_(sheet) {
     platform: find(function (x) { return x === "platform"; }),
     campaign: find(function (x) { return x === "campaign_name"; }),
     ad: find(function (x) { return x === "ad_name"; }),
+    adset: find(function (x) { return x === "adset_name"; }),
+    knowledge: find(function (x) { return x.indexOf("knowledge") !== -1; }),
     organic: find(function (x) { return x === "is_organic"; }),
     sync: find(function (x) { return x === SYNC_HEADER.toLowerCase(); }),
   };
@@ -133,6 +149,8 @@ function buildBatch_(sheet, pendingOnly, create) {
         platform: cell(row, m.platform),
         campaign_name: cell(row, m.campaign),
         ad_name: cell(row, m.ad),
+        adset_name: cell(row, m.adset),
+        knowledge: cell(row, m.knowledge),
         is_organic: cell(row, m.organic),
       },
     });
@@ -148,7 +166,7 @@ function post_(cfg, rows) {
       method: "post",
       contentType: "application/json",
       headers: { "x-traffic-key": cfg.key },
-      payload: JSON.stringify({ rows: rows }),
+      payload: JSON.stringify({ sheet: cfg.sheet, rows: rows }),
       muteHttpExceptions: true,
     });
     var body = {};
@@ -259,7 +277,7 @@ function removeTriggers() {
 function testConnection() {
   try {
     var cfg = config_();
-    var res = UrlFetchApp.fetch(cfg.url + "/api/v1/traffic/intake/ping", {
+    var res = UrlFetchApp.fetch(cfg.url + "/api/v1/traffic/intake/ping?sheet=" + encodeURIComponent(cfg.sheet), {
       headers: { "x-traffic-key": cfg.key },
       muteHttpExceptions: true,
     });
@@ -267,7 +285,8 @@ function testConnection() {
     try { body = JSON.parse(res.getContentText() || "{}"); } catch (e) {}
     if (res.getResponseCode() === 200 && body.success) {
       var crms = (body.data.crms || []).map(function (c) { return (c.ready ? "✅ " : "❌ ") + c.name; }).join("\n");
-      safeAlert_("✅ Connected to Root.\nRouting: " + (body.data.paused ? "PAUSED" : "on") + "\n\n" + crms);
+      safeAlert_("✅ Connected to Root as " + (body.data.name || cfg.sheet) + ".\nRouting: " +
+        (body.data.paused ? "PAUSED" : "on") + "\n\n" + crms);
     } else {
       safeAlert_("❌ Root answered " + res.getResponseCode() + ": " + (body.message || res.getContentText()));
     }

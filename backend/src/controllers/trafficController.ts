@@ -3,20 +3,39 @@ import { z } from "zod";
 import * as traffic from "../services/trafficService.js";
 import { record } from "../services/auditService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
-import type { AuthenticatedRequest, TrafficOrg } from "../types/index.js";
+import type { AuthenticatedRequest, TrafficOrg, TrafficSheet } from "../types/index.js";
 
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD");
 const ORG = z.enum(["delta", "draw"]);
 const OBJECT_ID = /^[a-f\d]{24}$/i;
 
-// ── The sheet ────────────────────────────────────────────────────────────────
+/**
+ * Which sheet a request is about. Abhin's when none is named: its script was
+ * posting here before there was a second sheet, and does not say.
+ */
+const sheetOf = (value: unknown): TrafficSheet | null => {
+  const v = value === undefined || value === "" ? "abhin" : String(value).trim().toLowerCase();
+  return traffic.isSheet(v) ? v : null;
+};
+const unknownSheet = (value: unknown) =>
+  `Unknown sheet "${String(value)}" — it is one of: ${traffic.SHEETS.join(", ")}`;
 
-/** The sheet's "Test connection": the key works, and whether routing is on. */
-export const ping = async (_req: Request, res: Response, next: NextFunction) => {
+// ── The sheets ───────────────────────────────────────────────────────────────
+
+/** A sheet's "Test connection": the key works, which sheet it is, and whether its routing is on. */
+export const ping = async (req: Request, res: Response, next: NextFunction) => {
+  const sheet = sheetOf(req.query.sheet);
+  if (!sheet) {
+    sendError(res, unknownSheet(req.query.sheet), 400);
+    return;
+  }
   try {
     const view = await traffic.rulesView();
+    const mine = view.sheets.find((s) => s.key === sheet)!;
     sendSuccess(res, "Lead traffic is reachable", {
-      paused: view.paused,
+      sheet,
+      name: mine.name,
+      paused: mine.paused,
       crms: view.crms.map((c) => ({ code: c.code, name: c.name, ready: c.active && c.missing.length === 0 })),
     });
   } catch (error) {
@@ -24,7 +43,10 @@ export const ping = async (_req: Request, res: Response, next: NextFunction) => 
   }
 };
 
-const intakeSchema = z.object({ rows: z.array(z.unknown()).min(1, "rows is empty").max(200, "At most 200 rows per request") });
+const intakeSchema = z.object({
+  sheet: z.unknown().optional(),
+  rows: z.array(z.unknown()).min(1, "rows is empty").max(200, "At most 200 rows per request"),
+});
 
 export const intake = async (req: Request, res: Response, next: NextFunction) => {
   const parsed = intakeSchema.safeParse(req.body);
@@ -32,8 +54,13 @@ export const intake = async (req: Request, res: Response, next: NextFunction) =>
     sendError(res, parsed.error.issues[0]?.message ?? "Invalid body", 400);
     return;
   }
+  const sheet = sheetOf(parsed.data.sheet);
+  if (!sheet) {
+    sendError(res, unknownSheet(parsed.data.sheet), 400);
+    return;
+  }
   try {
-    const result = await traffic.intake(parsed.data.rows);
+    const result = await traffic.intake(sheet, parsed.data.rows);
     sendSuccess(res, `${parsed.data.rows.length} lead(s) taken`, result);
   } catch (error) {
     next(error);
@@ -51,23 +78,30 @@ export const getRules = async (_req: AuthenticatedRequest, res: Response, next: 
 };
 
 const shareSchema = z.object({
+  key: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, "Not a team key").optional(),
+  name: z.string().trim().min(1, "Every team needs a name").max(60, "A team name is at most 60 characters"),
   org: ORG,
-  percent: z.number().int("Whole percentages only").min(0).max(100),
+  percent: z.number().min(0).max(100),
   assignToId: z.string().regex(OBJECT_ID, "Not a user id").nullable(),
 });
 const rulesSchema = z.object({
   paused: z.boolean(),
-  segments: z.object({ uk: z.array(shareSchema), gcc: z.array(shareSchema), hindi: z.array(shareSchema) }),
+  segments: z.record(z.string(), z.array(shareSchema).max(10, "At most 10 teams in a segment")),
 });
 
 export const putRules = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  const sheet = sheetOf(req.params.sheet);
+  if (!sheet) {
+    sendError(res, unknownSheet(req.params.sheet), 404);
+    return;
+  }
   const parsed = rulesSchema.safeParse(req.body);
   if (!parsed.success) {
     sendError(res, parsed.error.issues[0]?.message ?? "Invalid settings", 400);
     return;
   }
   try {
-    const { changed } = await traffic.saveRule(parsed.data, { adminId: req.admin!.adminId, email: req.admin!.email });
+    const { changed } = await traffic.saveRule(sheet, parsed.data, { adminId: req.admin!.adminId, email: req.admin!.email });
     await record(req, "traffic_rules_changed", {
       adminId: req.admin!.adminId,
       adminEmail: req.admin!.email,
@@ -80,6 +114,11 @@ export const putRules = async (req: AuthenticatedRequest, res: Response, next: N
 };
 
 export const summary = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  const sheet = sheetOf(req.query.sheet);
+  if (!sheet) {
+    sendError(res, unknownSheet(req.query.sheet), 400);
+    return;
+  }
   const today = traffic.gulfToday();
   const from = req.query.from ? String(req.query.from) : today;
   const to = req.query.to ? String(req.query.to) : today;
@@ -92,13 +131,14 @@ export const summary = async (req: AuthenticatedRequest, res: Response, next: Ne
     return;
   }
   try {
-    sendSuccess(res, "Lead traffic", await traffic.summary(from, to));
+    sendSuccess(res, "Lead traffic", await traffic.summary(sheet, from, to));
   } catch (error) {
     next(error);
   }
 };
 
 const leadsQuery = z.object({
+  sheet: z.string().default("abhin"),
   filter: z.enum(["all", "waiting", "failed", "sent", "duplicate", "invalid"]).default("all"),
   org: z.enum(["all", "delta", "draw"]).default("all"),
   page: z.coerce.number().int().min(1).default(1),
@@ -111,8 +151,13 @@ export const leads = async (req: AuthenticatedRequest, res: Response, next: Next
     sendError(res, parsed.error.issues[0]?.message ?? "Invalid query", 400);
     return;
   }
+  const sheet = sheetOf(parsed.data.sheet);
+  if (!sheet) {
+    sendError(res, unknownSheet(parsed.data.sheet), 400);
+    return;
+  }
   try {
-    sendSuccess(res, "Leads", await traffic.listLeads(parsed.data));
+    sendSuccess(res, "Leads", await traffic.listLeads({ ...parsed.data, sheet }));
   } catch (error) {
     next(error);
   }

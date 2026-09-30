@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -15,7 +15,7 @@ import { SplitDialog } from "@/components/traffic/SplitDialog";
 import { api, apiErrorMessage } from "@/lib/axios";
 import { useAuth } from "@/providers/AuthProvider";
 import { cn } from "@/lib/utils";
-import type { TrafficLeadPage, TrafficLeadRow, TrafficRules, TrafficSummary } from "@/lib/types";
+import type { TrafficLeadPage, TrafficLeadRow, TrafficRules, TrafficSheetKey, TrafficSummary } from "@/lib/types";
 
 const RANGES = [
   { key: "today", label: "Today", days: 0 },
@@ -52,11 +52,17 @@ const statusTone = (s: TrafficLeadRow["status"]): "success" | "warning" | "destr
 
 const forbidden = (e: unknown) => e instanceof AxiosError && e.response?.status === 403;
 
+/** A colour per team, in the order the split lists them. */
+const TEAM_COLOURS = ["bg-primary", "bg-violet-500", "bg-amber-500", "bg-emerald-500", "bg-sky-500", "bg-rose-500"];
+
+/** The sheet last looked at, so whoever looks after one sheet lands on it. */
+const SHEET_STORE = "root.traffic.sheet";
+
 /**
  * Lead traffic.
  *
- * Where the Meta lead sheet's leads went: how each segment was split between
- * the Delta and Draw CRMs against the target, and every lead with what became
+ * Where each lead sheet's leads went, a sheet at a time: how each segment was
+ * split between its teams against the target, and every lead with what became
  * of it. The split itself is changed from here, and a lead a CRM could not
  * take can be sent again by hand — the worker would get to it anyway, this
  * just does not make anybody wait for it.
@@ -66,11 +72,31 @@ export default function TrafficPage() {
   const { admin } = useAuth();
   // Looking is enough to be here; changing the split and sending by hand is more.
   const canManage = admin?.role === "root_admin" || admin?.trafficAccess === "manage";
+  const [sheet, setSheet] = useState<TrafficSheetKey>("abhin");
   const [range, setRange] = useState<RangeKey>("today");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [org, setOrg] = useState<"all" | "delta" | "draw">("all");
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState(false);
+
+  // Read after the first render, so the server's and the browser's first render agree.
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(SHEET_STORE);
+      if (saved === "abhin" || saved === "shoaib") setSheet(saved);
+    } catch {
+      /* private window or blocked storage: start on the first sheet */
+    }
+  }, []);
+  const chooseSheet = (key: TrafficSheetKey) => {
+    setSheet(key);
+    setPage(1);
+    try {
+      window.localStorage.setItem(SHEET_STORE, key);
+    } catch {
+      /* not remembered, and nothing else lost */
+    }
+  };
 
   const to = gulfToday();
   const from = shiftDay(to, -RANGES.find((r) => r.key === range)!.days);
@@ -80,14 +106,16 @@ export default function TrafficPage() {
     queryFn: async () => (await api.get("/traffic/rules")).data.data as TrafficRules,
   });
   const summary = useQuery({
-    queryKey: ["traffic-summary", from, to],
-    queryFn: async () => (await api.get(`/traffic/summary?from=${from}&to=${to}`)).data.data as TrafficSummary,
+    queryKey: ["traffic-summary", sheet, from, to],
+    queryFn: async () =>
+      (await api.get(`/traffic/summary?sheet=${sheet}&from=${from}&to=${to}`)).data.data as TrafficSummary,
     refetchInterval: 30_000,
   });
   const leads = useQuery({
-    queryKey: ["traffic-leads", filter, org, page],
+    queryKey: ["traffic-leads", sheet, filter, org, page],
     queryFn: async () =>
-      (await api.get(`/traffic/leads?filter=${filter}&org=${org}&page=${page}&limit=25`)).data.data as TrafficLeadPage,
+      (await api.get(`/traffic/leads?sheet=${sheet}&filter=${filter}&org=${org}&page=${page}&limit=25`)).data
+        .data as TrafficLeadPage,
     refetchInterval: 30_000,
   });
 
@@ -112,15 +140,27 @@ export default function TrafficPage() {
     );
   }
 
+  // Straight after a release the page can be ahead of the portal's server for a
+  // few minutes; its older answers have no sheets in them.
+  if (rules.data && !Array.isArray(rules.data.sheets)) {
+    return (
+      <Card>
+        <CardContent className="pt-6 text-sm text-muted-foreground">
+          The portal&apos;s server is still on the previous version of lead traffic. Once it is updated, this page
+          shows each lead sheet — refresh in a few minutes.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const current = rules.data?.sheets.find((s) => s.key === sheet);
   const setup = [
-    ...(rules.data && !rules.data.sheetKeySet ? ["The sheet has no key to post with — set LEAD_TRAFFIC_SHEET_KEY on the portal's server."] : []),
+    ...(rules.data && !rules.data.sheetKeySet ? ["The sheets have no key to post with — set LEAD_TRAFFIC_SHEET_KEY on the portal's server."] : []),
     ...(rules.data?.crms ?? []).flatMap((c) => [
       ...(c.active ? [] : [`${c.name} is not active in the registry.`]),
       ...(c.missing.length ? [`${c.name} cannot be sent leads yet — set ${c.missing.join(" and ")}.`] : []),
     ]),
   ];
-  const assigneeOf = (seg: string, crm: string) =>
-    rules.data?.segments.find((s) => s.key === seg)?.shares.find((s) => s.org === crm)?.assignTo;
 
   return (
     <div className="space-y-8">
@@ -135,23 +175,44 @@ export default function TrafficPage() {
             <Shuffle className="h-6 w-6 text-primary" /> Lead traffic
           </h2>
           <p className="mt-1 text-muted-foreground">
-            Leads from the Meta lead sheet, split between the Delta and Draw CRMs.
+            Leads from the lead sheets, split between teams in the Delta and Draw CRMs.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {rules.data && (
-            <Badge variant={rules.data.paused ? "warning" : "success"} className="gap-1 py-1">
-              {rules.data.paused ? <PauseCircle className="h-3.5 w-3.5" /> : <PlayCircle className="h-3.5 w-3.5" />}
-              {rules.data.paused ? "Paused" : "Routing"}
+          {current && (
+            <Badge variant={current.paused ? "warning" : "success"} className="gap-1 py-1">
+              {current.paused ? <PauseCircle className="h-3.5 w-3.5" /> : <PlayCircle className="h-3.5 w-3.5" />}
+              {current.paused ? "Paused" : "Routing"}
             </Badge>
           )}
           {canManage && (
-            <Button variant="outline" size="sm" onClick={() => setEditing(true)} disabled={!rules.data}>
+            <Button variant="outline" size="sm" onClick={() => setEditing(true)} disabled={!current}>
               <Settings2 /> Edit split
             </Button>
           )}
         </div>
       </motion.div>
+
+      {/* Which sheet */}
+      <div className="space-y-2">
+        <div className="flex flex-wrap gap-2" role="tablist" aria-label="Lead sheet">
+          {(rules.data?.sheets ?? []).map((s) => (
+            <Button
+              key={s.key}
+              role="tab"
+              aria-selected={sheet === s.key}
+              size="sm"
+              variant={sheet === s.key ? "default" : "outline"}
+              onClick={() => chooseSheet(s.key)}
+            >
+              {s.name}
+              {s.paused && <PauseCircle className="text-amber-500" aria-label="paused" />}
+            </Button>
+          ))}
+          {rules.isLoading && [0, 1].map((i) => <Skeleton key={i} className="h-9 w-40" />)}
+        </div>
+        {current && <p className="text-sm text-muted-foreground">{current.about}</p>}
+      </div>
 
       {setup.length > 0 && (
         <Card className="border-amber-500/40 bg-amber-500/5">
@@ -204,8 +265,8 @@ export default function TrafficPage() {
       </div>
 
       {/* The split, per segment */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {(summary.data?.segments ?? []).map((seg) => (
+      <div className={cn("grid gap-4", (current?.segments.length ?? 3) > 1 ? "md:grid-cols-2 xl:grid-cols-3" : "max-w-3xl")}>
+        {(summary.data?.sheet === sheet ? summary.data.segments : []).map((seg) => (
           <Card key={seg.key}>
             <CardHeader className="pb-3">
               <CardTitle className="flex items-baseline justify-between gap-2 text-base">
@@ -216,26 +277,29 @@ export default function TrafficPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {seg.shares.map((s) => {
-                const assignee = assigneeOf(seg.key, s.org);
-                const off = s.actual !== null && Math.abs(s.actual - s.target) > 10;
+              {seg.shares.map((s, i) => {
+                const off = !s.removed && s.actual !== null && Math.abs(s.actual - s.target) > 10;
                 return (
-                  <div key={s.org} className="space-y-1.5">
+                  <div key={s.key} className="space-y-1.5">
                     <div className="flex items-baseline justify-between gap-2 text-sm">
-                      <span className="font-medium">
-                        {s.name}
-                        {assignee && <span className="ml-2 text-xs font-normal text-muted-foreground">→ {assignee.name || "one person"}</span>}
+                      <span className="min-w-0">
+                        <span className="block font-medium">{s.name}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {s.crm}
+                          {s.assignTo && <> → {s.assignTo.name || "one person"}</>}
+                          {s.removed && " · no longer in the split"}
+                        </span>
                       </span>
-                      <span>
+                      <span className="shrink-0">
                         <span className={cn("font-semibold", off && "text-amber-500")}>
                           {s.split} {s.actual === null ? "" : `(${s.actual}%)`}
                         </span>
-                        <span className="ml-1 text-xs text-muted-foreground">target {s.target}%</span>
+                        {!s.removed && <span className="ml-1 text-xs text-muted-foreground">target {s.target}%</span>}
                       </span>
                     </div>
                     <div className="relative h-2 overflow-hidden rounded-full bg-muted">
                       <div
-                        className={cn("h-full rounded-full", s.org === "delta" ? "bg-primary" : "bg-violet-500")}
+                        className={cn("h-full rounded-full", TEAM_COLOURS[i % TEAM_COLOURS.length])}
                         style={{ width: `${s.actual ?? 0}%` }}
                       />
                       {/* Where the target is, so a drift is visible without reading numbers. */}
@@ -250,6 +314,12 @@ export default function TrafficPage() {
                   </div>
                 );
               })}
+              {seg.known.some((k) => k.count > 0) && (
+                <p className="text-xs text-muted-foreground">
+                  Already in a CRM, sent back there outside the split:{" "}
+                  {seg.known.filter((k) => k.count > 0).map((k) => `${k.name} ${k.count}`).join(" · ")}
+                </p>
+              )}
               {seg.invalid > 0 && (
                 <p className="text-xs text-muted-foreground">{seg.invalid} row(s) could not be sent anywhere — see Invalid below.</p>
               )}
@@ -322,7 +392,9 @@ export default function TrafficPage() {
                         {l.destination ? (
                           <>
                             <div className="capitalize">{l.destination}{l.assignTo ? <span className="text-muted-foreground"> → {l.assignTo}</span> : null}</div>
-                            <div className="text-xs text-muted-foreground">{l.reason === "known" ? "already there" : "by the split"}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {l.reason === "known" ? "already there" : l.team ? `${l.team}, by the split` : "by the split"}
+                            </div>
                           </>
                         ) : "—"}
                       </td>
@@ -363,14 +435,15 @@ export default function TrafficPage() {
         </CardContent>
       </Card>
 
-      {rules.data && (
+      {current && (
         <p className="text-xs text-muted-foreground">
-          Source labels each CRM records: UK tab — {rules.data.sources.uk}; Hindi tab — {rules.data.sources.hindi};
-          every other tab — {rules.data.sources.gcc}.
+          Source each CRM records: {current.segments.map((s) => `${s.label} — ${s.source}`).join("; ")}.
         </p>
       )}
 
-      {canManage && rules.data && <SplitDialog open={editing} onOpenChange={setEditing} rules={rules.data} />}
+      {canManage && rules.data && current && (
+        <SplitDialog open={editing} onOpenChange={setEditing} sheet={current} crms={rules.data.crms} />
+      )}
     </div>
   );
 }
