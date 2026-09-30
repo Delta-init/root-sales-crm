@@ -232,10 +232,11 @@ export interface IDailyEntry extends Document {
 
 // ─── Lead traffic ─────────────────────────────────────────────────────────────
 /**
- * Which half of the sheet a lead belongs to. Each is split on its own, so a
+ * Which part of the sheet a lead belongs to: the UK tab, the Gulf tabs (UAE &
+ * Qatar, and the GCC tab), or the Hindi tab. Each is split on its own, so a
  * quiet Hindi day cannot be made up for with UK leads.
  */
-export type TrafficSegment = "uk_gcc" | "hindi";
+export type TrafficSegment = "uk" | "gcc" | "hindi";
 
 /** The CRMs a lead can be sent to. Registry codes, so names and addresses come from there. */
 export type TrafficOrg = "delta" | "draw";
@@ -257,7 +258,7 @@ export interface ITrafficRule extends Document {
   paused: boolean;
   /** Bumped whenever a percentage changes; the split is counted within one version. */
   version: number;
-  segments: { uk_gcc: TrafficShare[]; hindi: TrafficShare[] };
+  segments: Record<TrafficSegment, TrafficShare[]>;
   /** The CRM user recorded as having added each lead; blank lets the CRM choose. */
   reporters: { delta: string; draw: string };
   updatedBy: Types.ObjectId | null;

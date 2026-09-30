@@ -196,7 +196,7 @@ export default function TrafficPage() {
       </div>
 
       {/* The split, per segment */}
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {(summary.data?.segments ?? []).map((seg) => (
           <Card key={seg.key}>
             <CardHeader className="pb-3">
@@ -248,7 +248,7 @@ export default function TrafficPage() {
             </CardContent>
           </Card>
         ))}
-        {summary.isLoading && [0, 1].map((i) => <Skeleton key={i} className="h-44 w-full" />)}
+        {summary.isLoading && [0, 1, 2].map((i) => <Skeleton key={i} className="h-44 w-full" />)}
       </div>
 
       {/* Every lead */}

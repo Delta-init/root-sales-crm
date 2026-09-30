@@ -3,7 +3,7 @@
  *
  * Replaces the script that posted this sheet straight into the Delta sales CRM.
  * Every new row now goes to the Root portal, which splits the leads between the
- * Delta and Draw CRMs — each segment on its own, UK & GCC and Hindi, as set on
+ * Delta and Draw CRMs — each segment on its own, UK, GCC and Hindi, as set on
  * Root's Lead traffic page — and says where each one went. That answer is
  * written into the "CRM Sync" column:
  *

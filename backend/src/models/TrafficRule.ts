@@ -4,7 +4,7 @@ import type { ITrafficRule } from "../types/index.js";
 /**
  * How the lead sheet is split between the CRMs.
  *
- * One document. Each segment of the sheet — UK & GCC, and Hindi — has its own
+ * One document. Each segment of the sheet — UK, GCC and Hindi — has its own
  * shares, and each share can name one person in that CRM to hand its leads to
  * rather than letting the CRM share them out. `version` moves on whenever a
  * percentage changes, and the split counts only within a version: changing
@@ -29,7 +29,8 @@ const trafficRuleSchema = new Schema<ITrafficRule>(
     paused: { type: Boolean, default: false },
     version: { type: Number, default: 1 },
     segments: {
-      uk_gcc: { type: [shareSchema], default: [] },
+      uk: { type: [shareSchema], default: [] },
+      gcc: { type: [shareSchema], default: [] },
       hindi: { type: [shareSchema], default: [] },
     },
     reporters: {

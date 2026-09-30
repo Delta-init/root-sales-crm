@@ -17,6 +17,7 @@ import { api, apiErrorMessage } from "@/lib/axios";
 import type { CrmPerson, TrafficOrg, TrafficRules, TrafficSegmentKey } from "@/lib/types";
 
 const ORGS: TrafficOrg[] = ["delta", "draw"];
+const SEGMENTS: TrafficSegmentKey[] = ["uk", "gcc", "hindi"];
 
 type Draft = {
   paused: boolean;
@@ -31,11 +32,10 @@ const fromRules = (rules: TrafficRules): Draft => {
     rules.segments.find((s) => s.key === seg)?.shares.find((s) => s.org === org);
   return {
     paused: rules.paused,
-    delta: { uk_gcc: String(share("uk_gcc", "delta")?.percent ?? 50), hindi: String(share("hindi", "delta")?.percent ?? 50) },
-    assign: {
-      uk_gcc: { delta: share("uk_gcc", "delta")?.assignTo?.id ?? "", draw: share("uk_gcc", "draw")?.assignTo?.id ?? "" },
-      hindi: { delta: share("hindi", "delta")?.assignTo?.id ?? "", draw: share("hindi", "draw")?.assignTo?.id ?? "" },
-    },
+    delta: Object.fromEntries(SEGMENTS.map((seg) => [seg, String(share(seg, "delta")?.percent ?? 50)])) as Draft["delta"],
+    assign: Object.fromEntries(
+      SEGMENTS.map((seg) => [seg, { delta: share(seg, "delta")?.assignTo?.id ?? "", draw: share(seg, "draw")?.assignTo?.id ?? "" }]),
+    ) as Draft["assign"],
   };
 };
 
@@ -77,12 +77,12 @@ export function SplitDialog({
     const n = Number(draft.delta[seg]);
     return Number.isInteger(n) && n >= 0 && n <= 100 ? n : null;
   };
-  const valid = pct("uk_gcc") !== null && pct("hindi") !== null;
+  const valid = SEGMENTS.every((seg) => pct(seg) !== null);
 
   const save = useMutation({
     mutationFn: async () => {
       const segments = Object.fromEntries(
-        (["uk_gcc", "hindi"] as TrafficSegmentKey[]).map((seg) => [
+        SEGMENTS.map((seg) => [
           seg,
           ORGS.map((org) => ({
             org,
@@ -106,7 +106,7 @@ export function SplitDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Split between the CRMs</DialogTitle>
           <DialogDescription>

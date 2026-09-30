@@ -19,7 +19,7 @@ const trafficLeadSchema = new Schema<ITrafficLead>(
     sourceKey: { type: String, required: true, unique: true },
     metaId: { type: String, default: "" },
     tab: { type: String, default: "" },
-    segment: { type: String, enum: ["uk_gcc", "hindi"], required: true },
+    segment: { type: String, enum: ["uk", "gcc", "hindi"], required: true },
     source: { type: String, default: "" },
     name: { type: String, default: "" },
     phone: { type: String, default: "" },

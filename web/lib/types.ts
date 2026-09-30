@@ -376,7 +376,7 @@ export interface RoleRule {
 
 // ─── Lead traffic ─────────────────────────────────────────────────────────────
 export type TrafficOrg = "delta" | "draw";
-export type TrafficSegmentKey = "uk_gcc" | "hindi";
+export type TrafficSegmentKey = "uk" | "gcc" | "hindi";
 export type TrafficStatus =
   | "queued" | "held" | "sending" | "sent" | "duplicate" | "invalid" | "retrying" | "failed";
 

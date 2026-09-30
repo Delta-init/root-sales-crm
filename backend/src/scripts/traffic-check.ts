@@ -175,6 +175,44 @@ async function main() {
   const HINDI = "Abhin | Hindi FORM UAE ,QATAR  ";
   const leadDoc = (metaId: string) => TrafficLead.findOne({ metaId }).lean();
 
+  // ── Case 0 ─────────────────────────────────────────────────────────────────
+  step("Case 0 — a split saved when UK and GCC were one segment is carried over");
+  const legacyLead = (key: string, source: string, phone: string) => ({
+    sourceKey: key, metaId: key, tab: "old tab", segment: "uk_gcc", source, name: "Old lead", phone, phone9: phone.slice(-9),
+    email: "", platform: "meta", campaign: "", adName: "", isOrganic: false, createdTime: new Date("2026-09-01"),
+    destination: "delta", reason: "split", counted: true, ruleVersion: 1, assignTo: null, status: "sent", crmLeadId: "",
+    note: "", attempts: 1, nextAttemptAt: null, claimedAt: null, lastError: "", sentAt: new Date("2026-09-01"),
+    receivedAt: new Date("2026-09-01"), createdAt: new Date("2026-09-01"), updatedAt: new Date("2026-09-01"),
+  });
+  await db.collection("trafficleads").insertMany([
+    legacyLead("legacy-uk", "FOREX LEADS ALPHA UK", "+449999999991"),
+    legacyLead("legacy-gcc", "FOREX LEADS ALPHA GCC", "+971599999992"),
+  ]);
+  // The saved split as the first version of this feature wrote it.
+  await db.collection("trafficrules").updateOne({ key: "sheet" }, {
+    $set: {
+      paused: false, version: 1, reporters: { delta: REPORTER, draw: "" },
+      segments: {
+        uk_gcc: [{ org: "delta", percent: 60, assignTo: null }, { org: "draw", percent: 40, assignTo: null }],
+        hindi: [{ org: "delta", percent: 50, assignTo: { id: LUBNA, name: "Lubna" } }, { org: "draw", percent: 50, assignTo: null }],
+      },
+    },
+  }, { upsert: true });
+  const carried = (await call("GET", "/traffic/rules", undefined, root)).body?.data;
+  const shareOf = (key: string, org: string) => carried?.segments?.find((s: Json) => s.key === key)?.shares?.find((s: Json) => s.org === org);
+  check("UK and GCC each start with the old UK & GCC split", shareOf("uk", "delta")?.percent === 60 && shareOf("uk", "draw")?.percent === 40
+    && shareOf("gcc", "delta")?.percent === 60 && shareOf("gcc", "draw")?.percent === 40, show(carried?.segments));
+  check("Hindi keeps its split and Lubna", shareOf("hindi", "delta")?.percent === 50 && shareOf("hindi", "delta")?.assignTo?.id === LUBNA);
+  check("the count starts again", carried?.version === 2, String(carried?.version));
+  check("the old segment is gone from what is saved", !(await db.collection("trafficrules").findOne({ key: "sheet" }))?.segments?.uk_gcc);
+  const oldUk = await db.collection("trafficleads").findOne({ sourceKey: "legacy-uk" });
+  const oldGcc = await db.collection("trafficleads").findOne({ sourceKey: "legacy-gcc" });
+  check("leads recorded under it are put in UK or GCC by their tab", oldUk?.segment === "uk" && oldGcc?.segment === "gcc", `${oldUk?.segment} / ${oldGcc?.segment}`);
+  const half = (d: number, w: number, to: string | null = null) => [{ org: "delta", percent: d, assignToId: to }, { org: "draw", percent: w, assignToId: null }];
+  const reset = await call("PUT", "/traffic/rules", { paused: false, segments: { uk: half(50, 50), gcc: half(50, 50), hindi: half(50, 50, LUBNA) } }, root);
+  check("and it can be set to half and half in each", reset.status === 200 && reset.body?.data?.segments?.length === 3, show(reset.body));
+  await db.collection("trafficleads").deleteMany({ sourceKey: { $in: ["legacy-uk", "legacy-gcc"] } });
+
   // ── Case 1 ─────────────────────────────────────────────────────────────────
   step("Case 1 — the split, the fields each CRM gets, and resending");
   const ping = await call("GET", "/traffic/intake/ping", undefined, { "x-traffic-key": SHEET_KEY });
@@ -184,7 +222,7 @@ async function main() {
   const batchA = [row(UK, "+44 7700 900001"), row(UK, "+447700900002"), row(UAE, "+971500000003"), row(UAE, "+971500000004")];
   const a = await sheet(batchA);
   const destA = (a.body?.data?.results ?? []).map((r: Json) => r.destination);
-  check("UK & GCC leads take turns: Delta, Draw, Delta, Draw", a.status === 200 && show(destA) === show(["delta", "draw", "delta", "draw"]), show(a.body));
+  check("UK and GCC each take turns: UK Delta, Draw; GCC Delta, Draw", a.status === 200 && show(destA) === show(["delta", "draw", "delta", "draw"]), show(a.body));
   check("and the sheet is told where each went", show((a.body?.data?.results ?? []).map((r: Json) => r.label)) === show(["✅ Delta", "✅ Draw", "✅ Delta", "✅ Draw"]));
   const d0 = crm.delta.rows[0];
   check("Delta gets the sheet's fields, cleaned", d0?.full_name === "Lead 1" && d0?.phone_number === "+447700900001" && d0?.platform === "instagram"
@@ -201,7 +239,7 @@ async function main() {
   check("Draw's Hindi lead names nobody", !("assigned_to" in (crm.draw.rows.at(-1) ?? {})), show(crm.draw.rows.at(-1)));
 
   const g = await sheet([row(GCC, "+966500000007")]);
-  check("the GCC tab is UK & GCC, labelled GCC, and at 2–2 the tie goes to Delta",
+  check("the GCC tab counts with UAE & Qatar as GCC, labelled GCC, and at 1–1 the tie goes to Delta",
     g.body?.data?.results?.[0]?.destination === "delta" && crm.delta.rows.at(-1)?.source === "FOREX LEADS ALPHA GCC", show(g.body));
 
   const callsBefore = crm.delta.calls + crm.draw.calls;
@@ -212,9 +250,11 @@ async function main() {
   const sum1 = (await call("GET", "/traffic/summary", undefined, root)).body?.data;
   const seg = (s: Json, key: string) => s?.segments?.find((x: Json) => x.key === key);
   const share = (s: Json, key: string, org: string) => seg(s, key)?.shares?.find((x: Json) => x.org === org);
-  check("today's numbers: UK & GCC Delta 3 (60%), Draw 2 (40%), against 50/50",
-    share(sum1, "uk_gcc", "delta")?.split === 3 && share(sum1, "uk_gcc", "delta")?.actual === 60 && share(sum1, "uk_gcc", "draw")?.split === 2
-    && share(sum1, "uk_gcc", "delta")?.target === 50, show(seg(sum1, "uk_gcc")));
+  check("today's numbers: UK Delta 1 and Draw 1 (50/50); GCC Delta 2 (66.7%) and Draw 1, against 50/50",
+    share(sum1, "uk", "delta")?.split === 1 && share(sum1, "uk", "delta")?.actual === 50 && share(sum1, "uk", "draw")?.split === 1
+    && share(sum1, "gcc", "delta")?.split === 2 && share(sum1, "gcc", "delta")?.actual === 66.7 && share(sum1, "gcc", "draw")?.split === 1
+    && share(sum1, "gcc", "delta")?.target === 50, show(sum1?.segments));
+  check("three segments are reported", sum1?.segments?.map((x: Json) => x.key).join(",") === "uk,gcc,hindi", show(sum1?.segments?.map((x: Json) => x.key)));
   check("Hindi 1 and 1; seven sent in all", share(sum1, "hindi", "delta")?.split === 1 && share(sum1, "hindi", "draw")?.split === 1 && sum1?.totals?.sent === 7, show(sum1?.totals));
   const list1 = (await call("GET", "/traffic/leads?limit=50", undefined, root)).body?.data;
   check("the list shows them newest first, numbers masked", list1?.total === 7 && list1?.items?.[0]?.name === "Lead 7" && String(list1?.items?.[0]?.phone).includes("•"), show(list1?.items?.[0]));
@@ -232,9 +272,9 @@ async function main() {
   const tw = (twice.body?.data?.results ?? []).map((r: Json) => r.status);
   check("the same person twice in one batch: sent once, then a duplicate", show(tw) === show(["sent", "duplicate"]), show(twice.body));
   const sum2 = (await call("GET", "/traffic/summary", undefined, root)).body?.data;
-  check("duplicates take no place in the split", seg(sum2, "uk_gcc")?.split === 6, show(seg(sum2, "uk_gcc")));
+  check("duplicates take no place in the split", seg(sum2, "uk")?.split === 2 && seg(sum2, "gcc")?.split === 4, show(sum2?.segments));
 
-  // UK & GCC now Delta 3, Draw 3: the next goes to Delta (tie), the one after to Draw.
+  // UK now Delta 1, Draw 1: the next UK lead goes to Delta (tie), the one after to Draw.
   await sheet([row(UK, "+447700900010")]);
   crm.draw.mode = "down";
   const downRow = row(UK, "+447700900011");
@@ -249,7 +289,7 @@ async function main() {
   check("when its time comes and Draw is back, the worker sends it", await waitFor(async () => (await leadDoc(downId))?.status === "sent"), show(await leadDoc(downId)));
   check("and the sheet's next pass reads ✅ Draw", (await sheet([downRow])).body?.data?.results?.[0]?.label === "✅ Draw");
 
-  // Next UK & GCC decision: Delta 4, Draw 4 → Delta. Lose its answer.
+  // Next UK decision: Delta 2, Draw 2 → Delta. Lose its answer.
   crm.delta.mode = "lost";
   const lostRow = row(UK, "+447700900012");
   const lost = await sheet([lostRow]);
@@ -264,7 +304,8 @@ async function main() {
     call("PUT", "/traffic/rules", {
       paused,
       segments: {
-        uk_gcc: [{ org: "delta", percent: uk[0], assignToId: null }, { org: "draw", percent: uk[1], assignToId: null }],
+        uk: [{ org: "delta", percent: uk[0], assignToId: null }, { org: "draw", percent: uk[1], assignToId: null }],
+        gcc: [{ org: "delta", percent: uk[0], assignToId: null }, { org: "draw", percent: uk[1], assignToId: null }],
         hindi: [{ org: "delta", percent: 50, assignToId: LUBNA }, { org: "draw", percent: 50, assignToId: null }],
       },
     }, root);
@@ -283,7 +324,7 @@ async function main() {
   const v = await pause(false, [100, 0]);
   check("the split can change, and a new count starts", v.status === 200 && v.body?.data?.version > 1, show(v.body?.data?.version));
   const all = await sheet([row(UK, "+447700900014"), row(UAE, "+971500000015"), row(GCC, "+966500000016")]);
-  check("at 100/0 every UK & GCC lead goes to Delta", (all.body?.data?.results ?? []).every((r: Json) => r.destination === "delta"), show(all.body));
+  check("at 100/0 every UK and GCC lead goes to Delta", (all.body?.data?.results ?? []).every((r: Json) => r.destination === "delta"), show(all.body));
   await pause(false, [50, 50]);
 
   const tooMany = await sheet(Array.from({ length: 201 }, (_, i) => row(UK, `+4477009${String(10000 + i)}`)));
@@ -324,10 +365,11 @@ async function main() {
 
   const putBad = (segments: Json) => call("PUT", "/traffic/rules", { paused: false, segments }, root);
   const good = (d: number, w: number, to: string | null = null) => [{ org: "delta", percent: d, assignToId: to }, { org: "draw", percent: w, assignToId: null }];
-  check("shares that do not add up to 100 are refused", (await putBad({ uk_gcc: good(50, 40), hindi: good(50, 50) })).status === 400);
-  check("fractions of a percent are refused", (await putBad({ uk_gcc: good(50.5, 49.5), hindi: good(50, 50) })).status === 400);
-  check("a segment missing a CRM is refused", (await putBad({ uk_gcc: [{ org: "delta", percent: 100, assignToId: null }], hindi: good(50, 50) })).status === 400);
-  check("handing leads to somebody inactive in that CRM is refused", (await putBad({ uk_gcc: good(50, 50), hindi: good(50, 50, String(old)) })).status === 400);
+  check("shares that do not add up to 100 are refused", (await putBad({ uk: good(50, 40), gcc: good(50, 50), hindi: good(50, 50) })).status === 400);
+  check("fractions of a percent are refused", (await putBad({ uk: good(50.5, 49.5), gcc: good(50, 50), hindi: good(50, 50) })).status === 400);
+  check("a split missing a segment is refused", (await putBad({ uk: good(50, 50), hindi: good(50, 50) })).status === 400);
+  check("a segment missing a CRM is refused", (await putBad({ uk: [{ org: "delta", percent: 100, assignToId: null }], gcc: good(50, 50), hindi: good(50, 50) })).status === 400);
+  check("handing leads to somebody inactive in that CRM is refused", (await putBad({ uk: good(50, 50), gcc: good(50, 50), hindi: good(50, 50, String(old)) })).status === 400);
   const audit = await db.collection("auditlogs").find({ action: "traffic_rules_changed" }).toArray();
   check("every saved change is in the audit log", audit.length >= 4 && audit.every((x) => x.adminEmail === "root@traffic-e2e.test"), `${audit.length} rows`);
   check("and so is the lead sent by hand", (await db.collection("auditlogs").countDocuments({ action: "traffic_lead_retried" })) === 1);

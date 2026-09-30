@@ -57,7 +57,7 @@ const shareSchema = z.object({
 });
 const rulesSchema = z.object({
   paused: z.boolean(),
-  segments: z.object({ uk_gcc: z.array(shareSchema), hindi: z.array(shareSchema) }),
+  segments: z.object({ uk: z.array(shareSchema), gcc: z.array(shareSchema), hindi: z.array(shareSchema) }),
 });
 
 export const putRules = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {

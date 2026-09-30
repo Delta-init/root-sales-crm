@@ -21,8 +21,9 @@ import type {
  * CRMs.
  *
  * The sheet posts every new row here instead of into a CRM. Each lead is put
- * in its segment (the Hindi tab, or everything else — UK and the GCC tabs),
- * checked against everyone already sent or already in either CRM, and given
+ * in its segment — UK (the UK tab), GCC (the Gulf tabs: UAE & Qatar, and the
+ * GCC tab) or Hindi (the Hindi tab) — checked against everyone already sent or
+ * already in either CRM, and given
  * to whichever CRM is furthest behind its share of that segment. It is then
  * posted into that CRM's own sheet intake, which shares it out across that
  * CRM's teams exactly as it did when the sheet posted there directly. A CRM
@@ -32,8 +33,8 @@ import type {
 
 const RULE_KEY = "sheet";
 export const ORGS: TrafficOrg[] = ["delta", "draw"];
-export const SEGMENTS: TrafficSegment[] = ["uk_gcc", "hindi"];
-export const SEGMENT_LABEL: Record<TrafficSegment, string> = { uk_gcc: "UK & GCC", hindi: "Hindi" };
+export const SEGMENTS: TrafficSegment[] = ["uk", "gcc", "hindi"];
+export const SEGMENT_LABEL: Record<TrafficSegment, string> = { uk: "UK", gcc: "GCC", hindi: "Hindi" };
 const SHORT: Record<TrafficOrg, string> = { delta: "Delta", draw: "Draw" };
 
 /** Past this many tries a lead stops being retried on its own and waits for a person. */
@@ -55,8 +56,9 @@ export function classifyTab(tab: string): { segment: TrafficSegment; source: str
   const t = tab.toLowerCase();
   if (t.includes("hindi")) return { segment: "hindi", source: SOURCE.hindi };
   // "UK" as a word: "Abhin | UK | New" is, "Kuwait" is not.
-  if (/(^|[^a-z])uk([^a-z]|$)/.test(t)) return { segment: "uk_gcc", source: SOURCE.uk };
-  return { segment: "uk_gcc", source: SOURCE.gcc };
+  if (/(^|[^a-z])uk([^a-z]|$)/.test(t)) return { segment: "uk", source: SOURCE.uk };
+  // Everything else is a Gulf tab: UAE & Qatar, and the GCC tab.
+  return { segment: "gcc", source: SOURCE.gcc };
 }
 
 /**
@@ -72,7 +74,11 @@ const DEFAULT_RULE = {
   paused: false,
   version: 1,
   segments: {
-    uk_gcc: [
+    uk: [
+      { org: "delta", percent: 50, assignTo: null },
+      { org: "draw", percent: 50, assignTo: null },
+    ],
+    gcc: [
       { org: "delta", percent: 50, assignTo: null },
       { org: "draw", percent: 50, assignTo: null },
     ],
@@ -84,7 +90,36 @@ const DEFAULT_RULE = {
   reporters: { delta: "69ef14534e41f5008be375d2", draw: "" },
 };
 
+/**
+ * UK and GCC used to be one segment, "UK & GCC".
+ *
+ * A split saved then is carried over rather than reset: UK and GCC each start
+ * with what "UK & GCC" had — the same percentages and the same person, if one
+ * was named — and the count starts again, since the two are now split
+ * separately. Leads recorded under it are put in UK or GCC by the tab they came
+ * from, which is what their source label already says.
+ *
+ * Looked for on every read, not once at start-up: it is one lookup on a unique
+ * key, and a rule restored from a backup should not stay half-converted until
+ * somebody restarts the server.
+ */
+async function splitLegacySegments(): Promise<void> {
+  const legacy = await TrafficRule.collection.findOne(
+    { key: RULE_KEY, "segments.uk_gcc": { $exists: true } },
+    { projection: { "segments.uk_gcc": 1 } },
+  );
+  if (!legacy) return;
+  const shares = (legacy.segments as { uk_gcc: unknown[] }).uk_gcc;
+  await TrafficRule.collection.updateOne(
+    { key: RULE_KEY, "segments.uk_gcc": { $exists: true } },
+    { $set: { "segments.uk": shares, "segments.gcc": shares }, $unset: { "segments.uk_gcc": "" }, $inc: { version: 1 } },
+  );
+  await TrafficLead.collection.updateMany({ segment: "uk_gcc", source: SOURCE.uk }, { $set: { segment: "uk" } });
+  await TrafficLead.collection.updateMany({ segment: "uk_gcc" }, { $set: { segment: "gcc" } });
+}
+
 export async function getRule(): Promise<ITrafficRule> {
+  await splitLegacySegments();
   const found = await TrafficRule.findOne({ key: RULE_KEY });
   if (found) return found;
   // Upsert rather than create, so two first requests cannot make two rules.
