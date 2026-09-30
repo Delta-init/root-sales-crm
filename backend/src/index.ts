@@ -8,6 +8,7 @@ import { corsOptions, allowedOrigins } from "./config/cors.js";
 import routes from "./routes/index.js";
 import { verify as verifySsoToken } from "./controllers/ssoController.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
+import { startTrafficWorker } from "./services/trafficService.js";
 
 const app = express();
 
@@ -36,6 +37,11 @@ const start = async () => {
     console.log(`Root CRM API listening on :${env.PORT} (${env.NODE_ENV})`);
     console.log(`CORS allowed origins: ${allowedOrigins.join(", ")}`);
   });
+  // Leads a CRM could not take are tried again from here. One process runs it;
+  // TRAFFIC_WORKER=false keeps a second one sharing the database from doubling up.
+  if (env.TRAFFIC_WORKER !== "false") {
+    startTrafficWorker(Math.max(1000, Number(env.TRAFFIC_WORKER_INTERVAL_MS) || 30_000));
+  }
 };
 
 start();

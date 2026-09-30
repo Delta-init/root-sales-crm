@@ -48,6 +48,9 @@ const auditLogSchema = new Schema<IAuditLog>(
         "task_returned",
         "task_verified",
         "task_rejected",
+        // Lead traffic: the split between the CRMs, and a stuck lead sent by hand.
+        "traffic_rules_changed",
+        "traffic_lead_retried",
       ],
       required: true,
     },

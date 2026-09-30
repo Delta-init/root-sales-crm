@@ -7,8 +7,10 @@ const envSchema = z.object({
   PORT: z.string().default("5100"),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 
-  // Portal's own database — holds admins, org registry and the audit log only.
-  // It never stores CRM data; the three CRM databases stay where they are.
+  // Portal's own database — admins, org registry and the audit log, and the
+  // lead-traffic log: each lead from the Meta sheet (name, number, email) and
+  // which CRM it was sent to, kept so a lead a CRM could not take waits here.
+  // Nothing else of the CRMs' data; their databases stay where they are.
   MONGODB_URI: z.string().min(1, "MONGODB_URI is required"),
 
   JWT_SECRET: z.string().min(1, "JWT_SECRET is required"),
@@ -72,6 +74,23 @@ const envSchema = z.object({
   HRMS_CLIENT_ID:           z.string().default(""),
   HRMS_INTEGRATION_SECRET:  z.string().default(""),
   HRMS_ORG_ID:              z.string().default(""),
+
+  /**
+   * Lead traffic: the Meta lead sheet posts here, and the portal splits its
+   * leads between the Delta and Draw CRMs.
+   *
+   * LEAD_TRAFFIC_SHEET_KEY is what the sheet's script presents. Unset, the
+   * intake refuses everything with a 503 that names it — an empty key must
+   * never be one an empty header matches. Posting on into each CRM uses that
+   * CRM's own sheet key, read as {CODE}_SHEETS_API_KEY (DELTA_SHEETS_API_KEY,
+   * DRAW_SHEETS_API_KEY) in the same way as the rest of a system's settings.
+   *
+   * The worker retries leads a CRM could not take. "false" stops it, for a
+   * second process sharing the same database.
+   */
+  LEAD_TRAFFIC_SHEET_KEY: z.string().default(""),
+  TRAFFIC_WORKER: z.string().default("true"),
+  TRAFFIC_WORKER_INTERVAL_MS: z.string().default("30000"),
 
 });
 

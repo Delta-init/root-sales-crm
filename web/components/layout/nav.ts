@@ -8,7 +8,7 @@
  */
 import type { LucideIcon } from "lucide-react";
 import {
-  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, LayoutGrid, Users2,
+  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, LayoutGrid, Shuffle, Users2,
 } from "lucide-react";
 
 export interface NavLink {
@@ -46,6 +46,8 @@ export const NAV: NavItem[] = [
     children: [
       { href: "/reports", label: "Group report", icon: BarChart3 },
       { href: "/tracker", label: "Daily tracker", icon: ClipboardList },
+      // Where the Meta lead sheet's leads go: split between Delta and Draw.
+      { href: "/traffic", label: "Lead traffic", icon: Shuffle },
     ],
   },
   // Root admins only: deciding who may open which production system is the

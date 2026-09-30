@@ -373,3 +373,91 @@ export interface RoleRule {
   toTarget: TargetCode;
   toRole: string;
 }
+
+// ─── Lead traffic ─────────────────────────────────────────────────────────────
+export type TrafficOrg = "delta" | "draw";
+export type TrafficSegmentKey = "uk_gcc" | "hindi";
+export type TrafficStatus =
+  | "queued" | "held" | "sending" | "sent" | "duplicate" | "invalid" | "retrying" | "failed";
+
+export interface TrafficShare {
+  org: TrafficOrg;
+  percent: number;
+  /** One person in that CRM who takes this share's leads; null lets the CRM share them out. */
+  assignTo: { id: string; name: string } | null;
+}
+
+export interface TrafficRules {
+  paused: boolean;
+  version: number;
+  segments: { key: TrafficSegmentKey; label: string; shares: TrafficShare[] }[];
+  crms: { code: TrafficOrg; name: string; active: boolean; missing: string[] }[];
+  sheetKeySet: boolean;
+  sources: { uk: string; gcc: string; hindi: string };
+  updatedByEmail: string;
+  updatedAt: string | null;
+}
+
+export interface TrafficShareStats {
+  org: TrafficOrg;
+  name: string;
+  target: number;
+  /** Leads this CRM got from the split in the period. */
+  split: number;
+  /** Its share of the split, in percent; null when nothing was split. */
+  actual: number | null;
+  sent: number;
+  duplicates: number;
+  invalid: number;
+  waiting: number;
+  failed: number;
+}
+
+export interface TrafficSummary {
+  from: string;
+  to: string;
+  paused: boolean;
+  segments: {
+    key: TrafficSegmentKey;
+    label: string;
+    received: number;
+    split: number;
+    invalid: number;
+    shares: TrafficShareStats[];
+  }[];
+  totals: { received: number; sent: number; duplicates: number; invalid: number; waiting: number; failed: number };
+}
+
+export interface TrafficLeadRow {
+  id: string;
+  receivedAt: string;
+  name: string;
+  phone: string;
+  tab: string;
+  segment: TrafficSegmentKey;
+  segmentLabel: string;
+  destination: TrafficOrg | null;
+  reason: "split" | "known" | "invalid";
+  status: TrafficStatus;
+  label: string;
+  assignTo: string;
+  crmLeadId: string;
+  note: string;
+  lastError: string;
+  attempts: number;
+  nextAttemptAt: string | null;
+  canRetry: boolean;
+}
+
+export interface TrafficLeadPage {
+  total: number;
+  page: number;
+  limit: number;
+  items: TrafficLeadRow[];
+}
+
+export interface CrmPerson {
+  id: string;
+  name: string;
+  email: string;
+}

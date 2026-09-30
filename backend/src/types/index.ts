@@ -173,7 +173,11 @@ export type AuditAction =
   | "people_imported"
   | "role_map_changed"
   | "account_deactivated"
-  | "account_deleted";
+  | "account_deleted"
+  // Lead traffic: the split decides which CRM every sheet lead lands in, so
+  // who changed it, and who pushed a stuck lead through by hand, is recorded.
+  | "traffic_rules_changed"
+  | "traffic_lead_retried";
 
 export interface IAuditLog extends Document {
   admin: Types.ObjectId | null;
@@ -224,6 +228,86 @@ export interface IDailyEntry extends Document {
   remarks: string;
   actionRequired: string;
   updatedBy: Types.ObjectId | null;
+}
+
+// ─── Lead traffic ─────────────────────────────────────────────────────────────
+/**
+ * Which half of the sheet a lead belongs to. Each is split on its own, so a
+ * quiet Hindi day cannot be made up for with UK leads.
+ */
+export type TrafficSegment = "uk_gcc" | "hindi";
+
+/** The CRMs a lead can be sent to. Registry codes, so names and addresses come from there. */
+export type TrafficOrg = "delta" | "draw";
+
+export interface TrafficShare {
+  org: TrafficOrg;
+  /** Whole percent; a segment's shares add up to 100. */
+  percent: number;
+  /**
+   * Hand every lead of this share to one person in that CRM, instead of
+   * letting the CRM share them out across its teams. Hindi leads in Delta go
+   * to Lubna, for one.
+   */
+  assignTo: { id: string; name: string } | null;
+}
+
+export interface ITrafficRule extends Document {
+  key: string;
+  paused: boolean;
+  /** Bumped whenever a percentage changes; the split is counted within one version. */
+  version: number;
+  segments: { uk_gcc: TrafficShare[]; hindi: TrafficShare[] };
+  /** The CRM user recorded as having added each lead; blank lets the CRM choose. */
+  reporters: { delta: string; draw: string };
+  updatedBy: Types.ObjectId | null;
+  updatedByEmail: string;
+}
+
+export type TrafficStatus =
+  | "queued"
+  | "held"
+  | "sending"
+  | "sent"
+  | "duplicate"
+  | "invalid"
+  | "retrying"
+  | "failed";
+
+export interface ITrafficLead extends Document {
+  _id: Types.ObjectId;
+  /** Meta's lead id when the sheet has one; what makes a resend the same lead. */
+  sourceKey: string;
+  metaId: string;
+  tab: string;
+  segment: TrafficSegment;
+  source: string;
+  name: string;
+  phone: string;
+  /** The last nine digits: the same person, however the number was typed. */
+  phone9: string;
+  email: string;
+  platform: string;
+  campaign: string;
+  adName: string;
+  isOrganic: boolean;
+  createdTime: Date | null;
+  destination: TrafficOrg | null;
+  /** How the destination was chosen: the split, or where the person already is. */
+  reason: "split" | "known" | "invalid";
+  /** Whether it took a place in the split; duplicates and rejects do not. */
+  counted: boolean;
+  ruleVersion: number;
+  assignTo: { id: string; name: string } | null;
+  status: TrafficStatus;
+  crmLeadId: string;
+  note: string;
+  attempts: number;
+  nextAttemptAt: Date | null;
+  claimedAt: Date | null;
+  lastError: string;
+  sentAt: Date | null;
+  receivedAt: Date;
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────

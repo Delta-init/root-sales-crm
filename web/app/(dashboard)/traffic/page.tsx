@@ -1,0 +1,368 @@
+"use client";
+
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { motion } from "framer-motion";
+import { toast } from "sonner";
+import { AlertTriangle, Loader2, PauseCircle, PlayCircle, RotateCcw, Settings2, Shuffle } from "lucide-react";
+import { AxiosError } from "axios";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { gulfToday } from "@/components/tracker/DayPicker";
+import { SplitDialog } from "@/components/traffic/SplitDialog";
+import { api, apiErrorMessage } from "@/lib/axios";
+import { cn } from "@/lib/utils";
+import type { TrafficLeadPage, TrafficLeadRow, TrafficRules, TrafficSummary } from "@/lib/types";
+
+const RANGES = [
+  { key: "today", label: "Today", days: 0 },
+  { key: "7d", label: "7 days", days: 6 },
+  { key: "30d", label: "30 days", days: 29 },
+] as const;
+type RangeKey = (typeof RANGES)[number]["key"];
+
+const FILTERS = [
+  { key: "all", label: "All" },
+  { key: "waiting", label: "Waiting" },
+  { key: "failed", label: "Failed" },
+  { key: "sent", label: "Sent" },
+  { key: "duplicate", label: "Duplicates" },
+  { key: "invalid", label: "Invalid" },
+] as const;
+type FilterKey = (typeof FILTERS)[number]["key"];
+
+const shiftDay = (date: string, days: number) =>
+  new Date(new Date(`${date}T12:00:00Z`).getTime() + days * 86_400_000).toISOString().slice(0, 10);
+
+const when = (iso: string) =>
+  new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Dubai", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+  }).format(new Date(iso));
+
+const statusTone = (s: TrafficLeadRow["status"]): "success" | "warning" | "destructive" | "secondary" | "outline" => {
+  if (s === "sent") return "success";
+  if (s === "duplicate") return "secondary";
+  if (s === "invalid" || s === "failed") return "destructive";
+  if (s === "held") return "warning";
+  return "outline";
+};
+
+const forbidden = (e: unknown) => e instanceof AxiosError && e.response?.status === 403;
+
+/**
+ * Lead traffic.
+ *
+ * Where the Meta lead sheet's leads went: how each segment was split between
+ * the Delta and Draw CRMs against the target, and every lead with what became
+ * of it. The split itself is changed from here, and a lead a CRM could not
+ * take can be sent again by hand — the worker would get to it anyway, this
+ * just does not make anybody wait for it.
+ */
+export default function TrafficPage() {
+  const qc = useQueryClient();
+  const [range, setRange] = useState<RangeKey>("today");
+  const [filter, setFilter] = useState<FilterKey>("all");
+  const [org, setOrg] = useState<"all" | "delta" | "draw">("all");
+  const [page, setPage] = useState(1);
+  const [editing, setEditing] = useState(false);
+
+  const to = gulfToday();
+  const from = shiftDay(to, -RANGES.find((r) => r.key === range)!.days);
+
+  const rules = useQuery({
+    queryKey: ["traffic-rules"],
+    queryFn: async () => (await api.get("/traffic/rules")).data.data as TrafficRules,
+  });
+  const summary = useQuery({
+    queryKey: ["traffic-summary", from, to],
+    queryFn: async () => (await api.get(`/traffic/summary?from=${from}&to=${to}`)).data.data as TrafficSummary,
+    refetchInterval: 30_000,
+  });
+  const leads = useQuery({
+    queryKey: ["traffic-leads", filter, org, page],
+    queryFn: async () =>
+      (await api.get(`/traffic/leads?filter=${filter}&org=${org}&page=${page}&limit=25`)).data.data as TrafficLeadPage,
+    refetchInterval: 30_000,
+  });
+
+  const retry = useMutation({
+    mutationFn: async (id: string) => (await api.post(`/traffic/leads/${id}/retry`)).data,
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ["traffic-leads"] });
+      qc.invalidateQueries({ queryKey: ["traffic-summary"] });
+      if (res?.data?.status === "sent") toast.success("Sent");
+      else toast.warning(res?.message ?? "Tried again");
+    },
+    onError: (e) => toast.error(apiErrorMessage(e, "Could not send it")),
+  });
+
+  if (forbidden(rules.error) || forbidden(summary.error)) {
+    return (
+      <Card>
+        <CardContent className="pt-6 text-sm text-muted-foreground">Lead traffic is for root admins.</CardContent>
+      </Card>
+    );
+  }
+
+  const setup = [
+    ...(rules.data && !rules.data.sheetKeySet ? ["The sheet has no key to post with — set LEAD_TRAFFIC_SHEET_KEY on the portal's server."] : []),
+    ...(rules.data?.crms ?? []).flatMap((c) => [
+      ...(c.active ? [] : [`${c.name} is not active in the registry.`]),
+      ...(c.missing.length ? [`${c.name} cannot be sent leads yet — set ${c.missing.join(" and ")}.`] : []),
+    ]),
+  ];
+  const assigneeOf = (seg: string, crm: string) =>
+    rules.data?.segments.find((s) => s.key === seg)?.shares.find((s) => s.org === crm)?.assignTo;
+
+  return (
+    <div className="space-y-8">
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35 }}
+        className="flex flex-wrap items-start justify-between gap-4"
+      >
+        <div>
+          <h2 className="flex items-center gap-2 text-2xl font-bold text-foreground">
+            <Shuffle className="h-6 w-6 text-primary" /> Lead traffic
+          </h2>
+          <p className="mt-1 text-muted-foreground">
+            Leads from the Meta lead sheet, split between the Delta and Draw CRMs.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {rules.data && (
+            <Badge variant={rules.data.paused ? "warning" : "success"} className="gap-1 py-1">
+              {rules.data.paused ? <PauseCircle className="h-3.5 w-3.5" /> : <PlayCircle className="h-3.5 w-3.5" />}
+              {rules.data.paused ? "Paused" : "Routing"}
+            </Badge>
+          )}
+          <Button variant="outline" size="sm" onClick={() => setEditing(true)} disabled={!rules.data}>
+            <Settings2 /> Edit split
+          </Button>
+        </div>
+      </motion.div>
+
+      {setup.length > 0 && (
+        <Card className="border-amber-500/40 bg-amber-500/5">
+          <CardContent className="flex gap-3 pt-6 text-sm">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+            <div>
+              <p className="font-medium">Not everything is set up</p>
+              <ul className="mt-1 space-y-0.5 text-muted-foreground">
+                {setup.map((s) => <li key={s}>{s}</li>)}
+              </ul>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        {RANGES.map((r) => (
+          <Button key={r.key} size="sm" variant={range === r.key ? "default" : "outline"} onClick={() => setRange(r.key)}>
+            {r.label}
+          </Button>
+        ))}
+        <span className="text-xs text-muted-foreground">
+          {from === to ? from : `${from} → ${to}`} · Gulf time
+        </span>
+      </div>
+
+      {/* Totals */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {(
+          [
+            ["Received", summary.data?.totals.received, ""],
+            ["Sent", summary.data?.totals.sent, "text-emerald-500"],
+            ["Duplicates", summary.data?.totals.duplicates, ""],
+            ["Waiting", summary.data?.totals.waiting, "text-amber-500"],
+            ["Failed", summary.data?.totals.failed, "text-rose-500"],
+            ["Invalid", summary.data?.totals.invalid, ""],
+          ] as const
+        ).map(([label, value, tone]) => (
+          <Card key={label}>
+            <CardContent className="pt-5">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+              {summary.isLoading ? (
+                <Skeleton className="mt-2 h-7 w-12" />
+              ) : (
+                <p className={cn("mt-1 text-2xl font-bold", value ? tone : "")}>{value ?? 0}</p>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* The split, per segment */}
+      <div className="grid gap-4 md:grid-cols-2">
+        {(summary.data?.segments ?? []).map((seg) => (
+          <Card key={seg.key}>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-baseline justify-between gap-2 text-base">
+                <span>{seg.label}</span>
+                <span className="text-sm font-normal text-muted-foreground">
+                  {seg.split} split · {seg.received} received
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {seg.shares.map((s) => {
+                const assignee = assigneeOf(seg.key, s.org);
+                const off = s.actual !== null && Math.abs(s.actual - s.target) > 10;
+                return (
+                  <div key={s.org} className="space-y-1.5">
+                    <div className="flex items-baseline justify-between gap-2 text-sm">
+                      <span className="font-medium">
+                        {s.name}
+                        {assignee && <span className="ml-2 text-xs font-normal text-muted-foreground">→ {assignee.name || "one person"}</span>}
+                      </span>
+                      <span>
+                        <span className={cn("font-semibold", off && "text-amber-500")}>
+                          {s.split} {s.actual === null ? "" : `(${s.actual}%)`}
+                        </span>
+                        <span className="ml-1 text-xs text-muted-foreground">target {s.target}%</span>
+                      </span>
+                    </div>
+                    <div className="relative h-2 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className={cn("h-full rounded-full", s.org === "delta" ? "bg-primary" : "bg-violet-500")}
+                        style={{ width: `${s.actual ?? 0}%` }}
+                      />
+                      {/* Where the target is, so a drift is visible without reading numbers. */}
+                      <div className="absolute inset-y-0 w-0.5 bg-foreground/60" style={{ left: `${s.target}%` }} />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {s.sent} sent · {s.duplicates} duplicates
+                      {s.waiting ? <span className="text-amber-500"> · {s.waiting} waiting</span> : null}
+                      {s.failed ? <span className="text-rose-500"> · {s.failed} failed</span> : null}
+                      {s.invalid ? ` · ${s.invalid} turned down` : null}
+                    </p>
+                  </div>
+                );
+              })}
+              {seg.invalid > 0 && (
+                <p className="text-xs text-muted-foreground">{seg.invalid} row(s) could not be sent anywhere — see Invalid below.</p>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+        {summary.isLoading && [0, 1].map((i) => <Skeleton key={i} className="h-44 w-full" />)}
+      </div>
+
+      {/* Every lead */}
+      <Card>
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0 pb-3">
+          <CardTitle className="text-base">Leads</CardTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap gap-1">
+              {FILTERS.map((f) => (
+                <Button
+                  key={f.key}
+                  size="sm"
+                  variant={filter === f.key ? "secondary" : "ghost"}
+                  onClick={() => { setFilter(f.key); setPage(1); }}
+                >
+                  {f.label}
+                </Button>
+              ))}
+            </div>
+            <select
+              value={org}
+              onChange={(e) => { setOrg(e.target.value as typeof org); setPage(1); }}
+              className="rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
+              aria-label="CRM"
+            >
+              <option value="all">Both CRMs</option>
+              <option value="delta">Delta</option>
+              <option value="draw">Draw</option>
+            </select>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {leads.isLoading ? (
+            <div className="space-y-2">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
+          ) : !leads.data?.items.length ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">No leads here yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border/40 text-left text-muted-foreground">
+                    <th className="pb-2 pr-3 font-medium">Received</th>
+                    <th className="pb-2 pr-3 font-medium">Lead</th>
+                    <th className="pb-2 pr-3 font-medium">From</th>
+                    <th className="pb-2 pr-3 font-medium">Went to</th>
+                    <th className="pb-2 pr-3 font-medium">Status</th>
+                    <th className="pb-2 font-medium" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {leads.data.items.map((l) => (
+                    <tr key={l.id} className="border-b border-border/20 align-top">
+                      <td className="whitespace-nowrap py-2.5 pr-3 text-muted-foreground">{when(l.receivedAt)}</td>
+                      <td className="py-2.5 pr-3">
+                        <div className="font-medium">{l.name || "—"}</div>
+                        <div className="font-mono text-xs text-muted-foreground">{l.phone}</div>
+                      </td>
+                      <td className="py-2.5 pr-3">
+                        <div>{l.segmentLabel}</div>
+                        <div className="max-w-56 truncate text-xs text-muted-foreground" title={l.tab}>{l.tab}</div>
+                      </td>
+                      <td className="py-2.5 pr-3">
+                        {l.destination ? (
+                          <>
+                            <div className="capitalize">{l.destination}{l.assignTo ? <span className="text-muted-foreground"> → {l.assignTo}</span> : null}</div>
+                            <div className="text-xs text-muted-foreground">{l.reason === "known" ? "already there" : "by the split"}</div>
+                          </>
+                        ) : "—"}
+                      </td>
+                      <td className="py-2.5 pr-3">
+                        <Badge variant={statusTone(l.status)}>{l.label}</Badge>
+                        {(l.lastError || (l.note && l.status !== "invalid")) && (
+                          <p className="mt-1 max-w-72 text-xs text-muted-foreground">
+                            {l.lastError || l.note}
+                            {l.nextAttemptAt && ["retrying"].includes(l.status) ? ` · next try ${when(l.nextAttemptAt)}` : ""}
+                          </p>
+                        )}
+                      </td>
+                      <td className="py-2.5 text-right">
+                        {l.canRetry && (
+                          <Button size="sm" variant="outline" disabled={retry.isPending} onClick={() => retry.mutate(l.id)}>
+                            {retry.isPending && retry.variables === l.id ? <Loader2 className="animate-spin" /> : <RotateCcw />}
+                            Send now
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {leads.data && leads.data.total > leads.data.limit && (
+            <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
+              <span>
+                {(page - 1) * leads.data.limit + 1}–{Math.min(page * leads.data.limit, leads.data.total)} of {leads.data.total}
+              </span>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</Button>
+                <Button size="sm" variant="outline" disabled={page * leads.data.limit >= leads.data.total} onClick={() => setPage((p) => p + 1)}>Next</Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {rules.data && (
+        <p className="text-xs text-muted-foreground">
+          Source labels each CRM records: UK tab — {rules.data.sources.uk}; Hindi tab — {rules.data.sources.hindi};
+          every other tab — {rules.data.sources.gcc}.
+        </p>
+      )}
+
+      {rules.data && <SplitDialog open={editing} onOpenChange={setEditing} rules={rules.data} />}
+    </div>
+  );
+}
