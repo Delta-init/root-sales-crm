@@ -48,6 +48,8 @@ export type OrgCode =
   | "delta"
   | "banglore"
   | "draw"
+  // The Dilshad team's CRM: the Delta CRM's code, deployed on its own.
+  | "remote"
   | "finance-hq"
   | "finance-banglore"
   | "hrms"
@@ -244,7 +246,7 @@ export interface IDailyEntry extends Document {
 export type TrafficSheet = "abhin" | "shoaib";
 
 /** The CRMs a lead can be sent to. Registry codes, so names and addresses come from there. */
-export type TrafficOrg = "delta" | "draw";
+export type TrafficOrg = "delta" | "draw" | "remote";
 
 /**
  * One team's share of a segment: where its leads go, and how many of them.
@@ -282,7 +284,7 @@ export interface ITrafficRule extends Document {
   paused: boolean;
   segments: TrafficSegmentRule[];
   /** The CRM user recorded as having added each lead; blank lets the CRM choose. */
-  reporters: { delta: string; draw: string };
+  reporters: Record<TrafficOrg, string>;
   updatedBy: Types.ObjectId | null;
   updatedByEmail: string;
 }

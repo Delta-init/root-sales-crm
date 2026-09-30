@@ -5,7 +5,7 @@ const organizationSchema = new Schema<IOrganization>(
   {
     code: {
       type: String,
-      enum: ["delta", "banglore", "draw", "finance-hq", "finance-banglore", "hrms", "lms", "media-erp", "commission"],
+      enum: ["delta", "banglore", "draw", "remote", "finance-hq", "finance-banglore", "hrms", "lms", "media-erp", "commission"],
       required: true,
       unique: true,
     },

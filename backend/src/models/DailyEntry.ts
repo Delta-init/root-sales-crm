@@ -16,7 +16,7 @@ const dailyEntrySchema = new Schema<IDailyEntry>(
   {
     org: {
       type: String,
-      enum: ["delta", "banglore", "draw"],
+      enum: ["delta", "banglore", "draw", "remote"],
       required: true,
     },
     userId: { type: String, required: true },

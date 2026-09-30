@@ -32,9 +32,9 @@ import type {
  * tried again.
  */
 
-export const ORGS: TrafficOrg[] = ["delta", "draw"];
+export const ORGS: TrafficOrg[] = ["delta", "draw", "remote"];
 export const SHEETS: TrafficSheet[] = ["abhin", "shoaib"];
-const SHORT: Record<TrafficOrg, string> = { delta: "Delta", draw: "Draw" };
+const SHORT: Record<TrafficOrg, string> = { delta: "Delta", draw: "Draw", remote: "Remote" };
 
 export const isSheet = (v: unknown): v is TrafficSheet => SHEETS.includes(v as TrafficSheet);
 
@@ -70,7 +70,7 @@ const team = (
 ): TrafficShare => ({ key, name, org, percent, assignTo });
 
 /** What a CRM's own team is called, wherever one is made from a CRM alone. */
-const TEAM_NAME: Record<TrafficOrg, string> = { delta: "Delta sales team", draw: "Draw department" };
+const TEAM_NAME: Record<TrafficOrg, string> = { delta: "Delta sales team", draw: "Draw department", remote: "Dilshad team" };
 
 export const SHEET_CONFIG: Record<TrafficSheet, SheetConfig> = {
   /*
@@ -107,10 +107,11 @@ export const SHEET_CONFIG: Record<TrafficSheet, SheetConfig> = {
   },
   /*
    * Shoaib's Forex lead sheet: one tab, split as a whole — 200, 800 and 300 in
-   * every 1,300. The Dilshad team is new and has no CRM of its own yet, so its
-   * share goes into Delta, straight to Nusra. The sheet's own script told the
-   * CRM the lead's trading-knowledge answer and the ad set in place of the ad
-   * name, and so does this.
+   * every 1,300 to start with. The Dilshad team's share starts in Delta,
+   * straight to Nusra; its own CRM, remote, is chosen for it on the Lead
+   * traffic page once that is set up. The sheet's own script told the CRM the
+   * lead's trading-knowledge answer and the ad set in place of the ad name,
+   * and so does this.
    */
   shoaib: {
     name: "Shoaib — Forex leads",
@@ -146,7 +147,7 @@ const defaultRule = (sheet: TrafficSheet) => ({
     version: 1,
     shares: SHEET_CONFIG[sheet].teams[s.key],
   })),
-  reporters: { delta: SHEETS_REPORTER, draw: "" },
+  reporters: { delta: SHEETS_REPORTER, draw: "", remote: "" },
 });
 
 /**
@@ -894,6 +895,8 @@ export async function rulesView() {
         name: cfg.name,
         about: cfg.about,
         paused: rule.paused,
+        // The CRMs this sheet's split sends to, so its checks name only those.
+        uses: ORGS.filter((org) => rule.segments.some((seg) => seg.shares.some((s) => s.org === org && s.percent > 0))),
         segments: cfg.segments.map((seg) => {
           const saved = rule.segments.find((s) => s.key === seg.key);
           return {

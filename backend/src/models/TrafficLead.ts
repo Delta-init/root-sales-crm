@@ -36,7 +36,7 @@ const trafficLeadSchema = new Schema<ITrafficLead>(
     createdTime: { type: Date, default: null },
     // The team the split chose; blank when the lead went back to where the person already was.
     share: { type: String, default: "" },
-    destination: { type: String, enum: ["delta", "draw", null], default: null },
+    destination: { type: String, enum: ["delta", "draw", "remote", null], default: null },
     reason: { type: String, enum: ["split", "known", "invalid"], required: true },
     counted: { type: Boolean, default: false },
     ruleVersion: { type: Number, default: 0 },

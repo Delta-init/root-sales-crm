@@ -60,7 +60,7 @@ const auditLogSchema = new Schema<IAuditLog>(
     // target in its detail instead.
     org: {
       type: String,
-      enum: ["delta", "banglore", "draw", "finance-hq", "finance-banglore", "hrms", "lms", "media-erp", "commission", null],
+      enum: ["delta", "banglore", "draw", "remote", "finance-hq", "finance-banglore", "hrms", "lms", "media-erp", "commission", null],
       default: null,
     },
     ip: { type: String, default: "" },

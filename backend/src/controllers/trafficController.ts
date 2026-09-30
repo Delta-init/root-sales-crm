@@ -6,7 +6,7 @@ import { sendSuccess, sendError } from "../utils/response.js";
 import type { AuthenticatedRequest, TrafficOrg, TrafficSheet } from "../types/index.js";
 
 const DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD");
-const ORG = z.enum(["delta", "draw"]);
+const ORG = z.enum(["delta", "draw", "remote"]);
 const OBJECT_ID = /^[a-f\d]{24}$/i;
 
 /**
@@ -36,7 +36,11 @@ export const ping = async (req: Request, res: Response, next: NextFunction) => {
       sheet,
       name: mine.name,
       paused: mine.paused,
-      crms: view.crms.map((c) => ({ code: c.code, name: c.name, ready: c.active && c.missing.length === 0 })),
+      // Only the CRMs this sheet's split sends to: another sheet's CRM not
+      // being set up yet is nothing this sheet needs to hear about.
+      crms: view.crms
+        .filter((c) => (mine.uses as string[]).includes(c.code))
+        .map((c) => ({ code: c.code, name: c.name, ready: c.active && c.missing.length === 0 })),
     });
   } catch (error) {
     next(error);
@@ -140,7 +144,7 @@ export const summary = async (req: AuthenticatedRequest, res: Response, next: Ne
 const leadsQuery = z.object({
   sheet: z.string().default("abhin"),
   filter: z.enum(["all", "waiting", "failed", "sent", "duplicate", "invalid"]).default("all"),
-  org: z.enum(["all", "delta", "draw"]).default("all"),
+  org: z.enum(["all", "delta", "draw", "remote"]).default("all"),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });

@@ -24,7 +24,10 @@
  *     segment's split starts that segment's count again and no other's;
  *   - bad rows are turned away with a reason and come through once fixed;
  *   - only the sheet key opens the intake, an unknown sheet is turned away,
- *     and only people given lead-traffic access see the rest.
+ *     and only people given lead-traffic access see the rest;
+ *   - the Dilshad team moves to its own CRM, remote, straight to Nusra's
+ *     account there, without its count starting again; somebody the remote
+ *     CRM already has goes back to it; Abhin's sheet is not bothered by it.
  *
  * Run through scripts/traffic-check.sh (throwaway mongod, the real backend, and
  * stand-in CRMs served from here). With `seed` it only writes the old split
@@ -39,6 +42,7 @@ for (const [name, value] of [
   ["MONGODB_URI", uri],
   ["DELTA_MONGODB_URI", process.env.DELTA_MONGODB_URI ?? ""],
   ["DRAW_MONGODB_URI", process.env.DRAW_MONGODB_URI ?? ""],
+  ["REMOTE_MONGODB_URI", process.env.REMOTE_MONGODB_URI ?? ""],
 ] as const) {
   if (!/^mongodb:\/\/127\.0\.0\.1:\d+\/[^/?]*e2e/.test(value)) {
     console.error(`Refusing to run: ${name} must be a scratch e2e database on 127.0.0.1, got "${value}"`);
@@ -132,6 +136,7 @@ type Mode = "ok" | "down" | "refuse" | "lost";
 const crm = {
   delta: { mode: "ok" as Mode, calls: 0, rows: [] as Json[], key: process.env.DELTA_SHEETS_API_KEY ?? "", port: Number(process.env.E2E_DELTA_PORT) },
   draw: { mode: "ok" as Mode, calls: 0, rows: [] as Json[], key: process.env.DRAW_SHEETS_API_KEY ?? "", port: Number(process.env.E2E_DRAW_PORT) },
+  remote: { mode: "ok" as Mode, calls: 0, rows: [] as Json[], key: process.env.REMOTE_SHEETS_API_KEY ?? "", port: Number(process.env.E2E_REMOTE_PORT) },
 };
 
 async function main() {
@@ -144,9 +149,10 @@ async function main() {
   const db = mongoose.connection.db!;
   const deltaDb = (await mongoose.createConnection(process.env.DELTA_MONGODB_URI!).asPromise()).db!;
   const drawDb = (await mongoose.createConnection(process.env.DRAW_MONGODB_URI!).asPromise()).db!;
-  const crmDb = { delta: deltaDb, draw: drawDb };
+  const remoteDb = (await mongoose.createConnection(process.env.REMOTE_MONGODB_URI!).asPromise()).db!;
+  const crmDb = { delta: deltaDb, draw: drawDb, remote: remoteDb };
 
-  const servers = (["delta", "draw"] as const).map((org) =>
+  const servers = (["delta", "draw", "remote"] as const).map((org) =>
     http.createServer(async (req, res) => {
       const me = crm[org];
       const chunks: Buffer[] = [];
@@ -193,7 +199,7 @@ async function main() {
   const { AdminUser } = await import("../models/AdminUser.js");
   const { Organization } = await import("../models/Organization.js");
   const { TrafficLead } = await import("../models/TrafficLead.js");
-  for (const [code, name] of [["delta", "Delta CRM"], ["draw", "Draw CRM"]] as const) {
+  for (const [code, name] of [["delta", "Delta CRM"], ["draw", "Draw CRM"], ["remote", "Remote CRM"]] as const) {
     await Organization.create({ code, kind: "crm", name, timezone: "Asia/Dubai", currency: "AED", fxToBase: 1, isActive: true });
   }
   await AdminUser.create({ name: "Root E2E", email: "root@traffic-e2e.test", password: PASSWORD, role: "root_admin", status: "active" });
@@ -209,6 +215,10 @@ async function main() {
   ]);
   const anagha = new Types.ObjectId();
   await drawDb.collection("users").insertMany([{ _id: anagha, name: "Anagha", email: "anagha@draw-e2e.test", status: "active" }]);
+  // Nusra has an account of her own in the remote CRM, with its own id.
+  const NUSRA_REMOTE = String(new Types.ObjectId());
+  await remoteDb.collection("users").insertMany([{ _id: new Types.ObjectId(NUSRA_REMOTE), name: "Nusra", email: "nusra@remote-e2e.test", status: "active" }]);
+  await remoteDb.collection("leads").insertOne({ name: "Known to Remote", phone: "+971509999001", createdAt: new Date("2026-09-30") });
   await deltaDb.collection("leads").insertOne({ name: "Known to Delta", phone: "+971501111111", createdAt: new Date("2026-08-01") });
   await drawDb.collection("leads").insertOne({ name: "Known to Draw", phone: "0502222222", createdAt: new Date("2026-09-01") });
 
@@ -626,6 +636,54 @@ async function main() {
     .find((x) => String(x.detail).startsWith("Shoaib — Forex leads"));
   check("Shoaib's changes are in the audit log too, team by team",
     /Dilshad team \(Delta → Nusra\) 23\.08%/.test(String(shAudit?.detail)), show(shAudit?.detail));
+
+  // ── Case 6 ─────────────────────────────────────────────────────────────────
+  step("Case 6 — the Dilshad team moves to its own CRM, remote");
+  const remotePeople = (await call("GET", "/traffic/crm-users/remote", undefined, root)).body?.data ?? [];
+  check("the remote CRM's people can be picked from", remotePeople.some((p: Json) => p.id === NUSRA_REMOTE), show(remotePeople));
+  const dilshadTo = (org: string, to: string) => shoaibTeams().map((t) => (t.key === "dilshad" ? { ...t, org, assignToId: to } : t));
+  check("handing it to Delta's Nusra in the remote CRM is refused — she has another account there",
+    (await putShoaib(false, dilshadTo("remote", NUSRA))).status === 400);
+  const vBeforeMove = segOf(await rulesOf("shoaib"), "all")?.version;
+  const moved = await putShoaib(false, dilshadTo("remote", NUSRA_REMOTE));
+  const movedSheet = sheetIn(moved.body?.data, "shoaib");
+  check("the Dilshad team goes to the remote CRM, straight to Nusra there", moved.status === 200
+    && teamOf(movedSheet, "all", "dilshad")?.org === "remote" && teamOf(movedSheet, "all", "dilshad")?.assignTo?.id === NUSRA_REMOTE, show(moved.body));
+  check("moving a team to another CRM does not start its count again", segOf(movedSheet, "all")?.version === vBeforeMove,
+    `${segOf(movedSheet, "all")?.version} / ${vBeforeMove}`);
+  check("Shoaib's sheet now sends to three CRMs, Abhin's still to two",
+    show(movedSheet?.uses) === show(["delta", "draw", "remote"]) && show(sheetIn(moved.body?.data, "abhin")?.uses) === show(["delta", "draw"]),
+    show([movedSheet?.uses, sheetIn(moved.body?.data, "abhin")?.uses]));
+  const shPing2 = await call("GET", "/traffic/intake/ping?sheet=shoaib", undefined, { "x-traffic-key": SHEET_KEY });
+  check("Shoaib's connection test lists the remote CRM, ready", shPing2.body?.data?.crms?.some((c: Json) => c.code === "remote" && c.ready), show(shPing2.body));
+  const abPing = await call("GET", "/traffic/intake/ping", undefined, { "x-traffic-key": SHEET_KEY });
+  check("Abhin's still names only Delta and Draw", show(abPing.body?.data?.crms?.map((c: Json) => c.code)) === show(["delta", "draw"]), show(abPing.body));
+
+  const remoteAt = crm.remote.rows.length;
+  const deltaAt2 = crm.delta.rows.length;
+  const next13 = Array.from({ length: 13 }, (_, i) => srow(`+9665400000${10 + i}`));
+  const r13b = ((await shoaib(next13)).body?.data?.results ?? []) as Json[];
+  const toRemote = crm.remote.rows.slice(remoteAt);
+  const toDelta2 = crm.delta.rows.slice(deltaAt2);
+  check("13 more leads: all sent, 3 of them into the remote CRM", r13b.every((r) => r.status === "sent") && toRemote.length === 3, show(r13b));
+  check("each straight to Nusra's account there, with the sheet's label and no reporter — the CRM records its own",
+    toRemote.every((r) => r.assigned_to === NUSRA_REMOTE && r.source === "FOREX LEADS SEIRRA" && !("reporter" in r)), show(toRemote));
+  check("and the trading-knowledge answer and ad set, as before", toRemote.every((r) => r.ad_creative === "Trading knowledge: beginner\nAd set: KSA broad"));
+  check("Delta gets only the Delta sales team's 2, handed to nobody in particular",
+    toDelta2.length === 2 && toDelta2.every((r) => !("assigned_to" in r)), show(toDelta2));
+  check("the sheet is told: 3 × Remote → Nusra", r13b.filter((r) => r.label === "✅ Remote → Nusra").length === 3, show(r13b.map((r) => r.label)));
+
+  const kr = await shoaib([srow("+971509999001")]);
+  check("somebody the remote CRM already has goes back there, as a duplicate", kr.body?.data?.results?.[0]?.label === "⚠️ Duplicate · Remote", show(kr.body));
+  const sum6 = (await call("GET", "/traffic/summary?sheet=shoaib", undefined, root)).body?.data;
+  const dil = seg(sum6, "all")?.shares?.find((x: Json) => x.key === "dilshad");
+  check("the page shows the Dilshad team in the Remote CRM, going to Nusra",
+    dil?.crm === "Remote CRM" && dil?.org === "remote" && dil?.assignTo?.id === NUSRA_REMOTE, show(dil));
+  const remoteList = (await call("GET", "/traffic/leads?sheet=shoaib&org=remote&limit=50", undefined, root)).body?.data;
+  check("and its leads can be listed by that CRM", remoteList?.total === 4 && remoteList?.items?.every((i: Json) => i.destination === "remote"), show(remoteList?.items?.[0]));
+  const moveAudit = (await db.collection("auditlogs").find({ action: "traffic_rules_changed" }).toArray())
+    .find((x) => /Dilshad team \(Remote → Nusra\) 23\.08%/.test(String(x.detail)));
+  check("the move is in the audit log", !!moveAudit);
 
   console.log(`\n${checks - failures}/${checks} checks passed`);
   for (const s of servers) s.close();

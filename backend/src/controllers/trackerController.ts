@@ -108,7 +108,7 @@ export const putTargets = async (req: AuthenticatedRequest, res: Response, next:
 };
 
 const entrySchema = z.object({
-  org: z.enum(["delta", "banglore", "draw"]),
+  org: z.enum(["delta", "banglore", "draw", "remote"]),
   userId: z.string().min(1),
   userName: z.string().optional(),
   date: DATE,

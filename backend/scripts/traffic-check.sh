@@ -25,6 +25,7 @@ MONGO_PORT="${TRAFFIC_MONGO_PORT:-27087}"
 API_PORT="${TRAFFIC_API_PORT:-5187}"
 DELTA_PORT="${TRAFFIC_DELTA_PORT:-5188}"
 DRAW_PORT="${TRAFFIC_DRAW_PORT:-5189}"
+REMOTE_PORT="${TRAFFIC_REMOTE_PORT:-5190}"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/traffic-check.XXXXXX")"
 
 release_port() {
@@ -43,6 +44,7 @@ cleanup() {
   release_port "$API_PORT"
   release_port "$DELTA_PORT"
   release_port "$DRAW_PORT"
+  release_port "$REMOTE_PORT"
   mongod --dbpath "$WORK/db" --port "$MONGO_PORT" --shutdown >/dev/null 2>&1 || true
   release_port "$MONGO_PORT"
   rm -rf "$WORK"
@@ -50,9 +52,9 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-for port in "$MONGO_PORT" "$API_PORT" "$DELTA_PORT" "$DRAW_PORT"; do
+for port in "$MONGO_PORT" "$API_PORT" "$DELTA_PORT" "$DRAW_PORT" "$REMOTE_PORT"; do
   if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-    echo "Port $port is already in use. Set TRAFFIC_MONGO_PORT / TRAFFIC_API_PORT / TRAFFIC_DELTA_PORT / TRAFFIC_DRAW_PORT." >&2
+    echo "Port $port is already in use. Set TRAFFIC_MONGO_PORT / TRAFFIC_API_PORT / TRAFFIC_DELTA_PORT / TRAFFIC_DRAW_PORT / TRAFFIC_REMOTE_PORT." >&2
     exit 1
   fi
 done
@@ -74,9 +76,11 @@ export DELTA_API_URL="http://127.0.0.1:$DELTA_PORT" DRAW_API_URL="http://127.0.0
 export DELTA_MONGODB_URI="$MONGO/delta-crm-traffic-e2e" DRAW_MONGODB_URI="$MONGO/draw-crm-traffic-e2e"
 export DELTA_SSO_SECRET="" DRAW_SSO_SECRET="" BANGLORE_API_URL="" BANGLORE_MONGODB_URI=""
 export DELTA_SHEETS_API_KEY="delta-sheets-e2e-key" DRAW_SHEETS_API_KEY="draw-sheets-e2e-key"
+export REMOTE_API_URL="http://127.0.0.1:$REMOTE_PORT" REMOTE_MONGODB_URI="$MONGO/remote-crm-traffic-e2e"
+export REMOTE_SHEETS_API_KEY="remote-sheets-e2e-key" REMOTE_SSO_SECRET=""
 export LEAD_TRAFFIC_SHEET_KEY="lead-traffic-e2e-sheet-key"
 export TRAFFIC_WORKER=true TRAFFIC_WORKER_INTERVAL_MS=1000
-export E2E_API_PORT="$API_PORT" E2E_DELTA_PORT="$DELTA_PORT" E2E_DRAW_PORT="$DRAW_PORT"
+export E2E_API_PORT="$API_PORT" E2E_DELTA_PORT="$DELTA_PORT" E2E_DRAW_PORT="$DRAW_PORT" E2E_REMOTE_PORT="$REMOTE_PORT"
 
 # From the scratch directory, so dotenv finds no .env to fill the gaps with.
 cd "$WORK/run"

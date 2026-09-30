@@ -13,7 +13,7 @@ const trackerTargetSchema = new Schema<ITrackerTarget>(
   {
     org: {
       type: String,
-      enum: ["delta", "banglore", "draw"],
+      enum: ["delta", "banglore", "draw", "remote"],
       required: true,
       unique: true,
     },

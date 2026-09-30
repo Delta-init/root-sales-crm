@@ -22,7 +22,7 @@ const shareSchema = new Schema(
   {
     key: { type: String, required: true },
     name: { type: String, required: true },
-    org: { type: String, enum: ["delta", "draw"], required: true },
+    org: { type: String, enum: ["delta", "draw", "remote"], required: true },
     percent: { type: Number, min: 0, max: 100, required: true },
     assignTo: { type: assigneeSchema, default: null },
   },
@@ -47,6 +47,7 @@ const trafficRuleSchema = new Schema<ITrafficRule>(
     reporters: {
       delta: { type: String, default: "" },
       draw: { type: String, default: "" },
+      remote: { type: String, default: "" },
     },
     updatedBy: { type: Schema.Types.ObjectId, ref: "AdminUser", default: null },
     updatedByEmail: { type: String, default: "" },

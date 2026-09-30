@@ -15,7 +15,7 @@ import { SplitDialog } from "@/components/traffic/SplitDialog";
 import { api, apiErrorMessage } from "@/lib/axios";
 import { useAuth } from "@/providers/AuthProvider";
 import { cn } from "@/lib/utils";
-import type { TrafficLeadPage, TrafficLeadRow, TrafficRules, TrafficSheetKey, TrafficSummary } from "@/lib/types";
+import type { TrafficLeadPage, TrafficLeadRow, TrafficOrg, TrafficRules, TrafficSheetKey, TrafficSummary } from "@/lib/types";
 
 const RANGES = [
   { key: "today", label: "Today", days: 0 },
@@ -75,7 +75,7 @@ export default function TrafficPage() {
   const [sheet, setSheet] = useState<TrafficSheetKey>("abhin");
   const [range, setRange] = useState<RangeKey>("today");
   const [filter, setFilter] = useState<FilterKey>("all");
-  const [org, setOrg] = useState<"all" | "delta" | "draw">("all");
+  const [org, setOrg] = useState<"all" | TrafficOrg>("all");
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState(false);
 
@@ -156,7 +156,9 @@ export default function TrafficPage() {
   const current = rules.data?.sheets.find((s) => s.key === sheet);
   const setup = [
     ...(rules.data && !rules.data.sheetKeySet ? ["The sheets have no key to post with — set LEAD_TRAFFIC_SHEET_KEY on the portal's server."] : []),
-    ...(rules.data?.crms ?? []).flatMap((c) => [
+    // Only the CRMs this sheet sends to: another CRM not being set up yet is
+    // not this sheet's problem.
+    ...(rules.data?.crms ?? []).filter((c) => current?.uses.includes(c.code)).flatMap((c) => [
       ...(c.active ? [] : [`${c.name} is not active in the registry.`]),
       ...(c.missing.length ? [`${c.name} cannot be sent leads yet — set ${c.missing.join(" and ")}.`] : []),
     ]),
@@ -352,9 +354,10 @@ export default function TrafficPage() {
               className="rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
               aria-label="CRM"
             >
-              <option value="all">Both CRMs</option>
-              <option value="delta">Delta</option>
-              <option value="draw">Draw</option>
+              <option value="all">All CRMs</option>
+              {(rules.data?.crms ?? []).map((c) => (
+                <option key={c.code} value={c.code}>{c.name}</option>
+              ))}
             </select>
           </div>
         </CardHeader>

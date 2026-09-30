@@ -9,7 +9,7 @@ import type { AuthenticatedRequest, OrgCode } from "../types/index.js";
 const loginSchema = z.object({
   email: z.email("A valid email is required"),
   password: z.string().min(1, "Password is required"),
-  org: z.enum(["delta", "banglore", "draw"]).optional(),
+  org: z.enum(["delta", "banglore", "draw", "remote"]).optional(),
 });
 
 export const login = async (req: Request, res: Response, next: NextFunction) => {

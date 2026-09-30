@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Loader2, Plus, X } from "lucide-react";
 import {
@@ -16,8 +16,6 @@ import { Button } from "@/components/ui/button";
 import { api, apiErrorMessage } from "@/lib/axios";
 import { cn } from "@/lib/utils";
 import type { CrmPerson, TrafficOrg, TrafficRules, TrafficSheetRules } from "@/lib/types";
-
-const ORGS: TrafficOrg[] = ["delta", "draw"];
 
 type TeamDraft = {
   /** Kept for a team already in the split, so it keeps its count; none for one being added. */
@@ -101,15 +99,19 @@ export function SplitDialog({
     if (open) setDraft(fromSheet(sheet));
   }, [open, sheet]);
 
-  const peopleQuery = (org: TrafficOrg) => ({
-    queryKey: ["traffic-people", org],
-    queryFn: async () => (await api.get(`/traffic/crm-users/${org}`)).data.data as CrmPerson[],
-    enabled: open,
-    staleTime: 5 * 60_000,
+  // Every CRM the portal can send to, with its people — only once they are
+  // wanted, and only from a CRM that is set up to be read.
+  const ORGS = crms.map((c) => c.code);
+  const ready = (org: TrafficOrg) => crms.some((c) => c.code === org && c.active && c.missing.length === 0);
+  const peopleQueries = useQueries({
+    queries: ORGS.map((org) => ({
+      queryKey: ["traffic-people", org],
+      queryFn: async () => (await api.get(`/traffic/crm-users/${org}`)).data.data as CrmPerson[],
+      enabled: open && ready(org),
+      staleTime: 5 * 60_000,
+    })),
   });
-  const deltaPeople = useQuery(peopleQuery("delta"));
-  const drawPeople = useQuery(peopleQuery("draw"));
-  const peopleOf = { delta: deltaPeople, draw: drawPeople };
+  const peopleOf = (org: TrafficOrg) => peopleQueries[ORGS.indexOf(org)];
 
   const nameOf = (org: TrafficOrg) => crms.find((c) => c.code === org)?.name ?? org;
   const valid = sheet.segments.every((seg) => problemWith(draft.segments[seg.key] ?? []) === null);
@@ -173,7 +175,7 @@ export function SplitDialog({
 
                 <div className="space-y-3">
                   {teams.map((t) => {
-                    const q = peopleOf[t.org];
+                    const q = peopleOf(t.org);
                     const kept = current(t.key);
                     return (
                       <div
@@ -195,7 +197,9 @@ export function SplitDialog({
                           onChange={(e) => setTeam(seg.key, t.row, { org: e.target.value as TrafficOrg, assignToId: "" })}
                           className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
                         >
-                          {ORGS.map((org) => <option key={org} value={org}>{nameOf(org)}</option>)}
+                          {ORGS.map((org) => (
+                            <option key={org} value={org}>{nameOf(org)}{ready(org) ? "" : " — not set up"}</option>
+                          ))}
                         </select>
                         <div className="flex items-center gap-1">
                           <input
@@ -213,16 +217,16 @@ export function SplitDialog({
                         <select
                           aria-label="Leads go to"
                           value={t.assignToId}
-                          disabled={q.isLoading}
+                          disabled={q?.isLoading}
                           onChange={(e) => setTeam(seg.key, t.row, { assignToId: e.target.value })}
                           className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus:border-primary"
                         >
                           <option value="">Shared out by the CRM</option>
                           {/* Keep the current choice visible even before the list arrives. */}
-                          {kept && t.assignToId === kept.id && !q.data?.some((p) => p.id === kept.id) && (
+                          {kept && t.assignToId === kept.id && !q?.data?.some((p) => p.id === kept.id) && (
                             <option value={kept.id}>{kept.name || kept.id}</option>
                           )}
-                          {(q.data ?? []).map((p) => (
+                          {(q?.data ?? []).map((p) => (
                             <option key={p.id} value={p.id}>{p.name}{p.email ? ` — ${p.email}` : ""}</option>
                           ))}
                         </select>
@@ -236,7 +240,7 @@ export function SplitDialog({
                         >
                           <X />
                         </Button>
-                        {q.isError && (
+                        {q?.isError && (
                           <p className="text-xs text-amber-500 sm:col-span-5">Could not load {nameOf(t.org)}&apos;s people just now.</p>
                         )}
                       </div>

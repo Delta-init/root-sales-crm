@@ -21,7 +21,7 @@ const roleMapSchema = new Schema<IRoleMap>(
   {
     fromTarget: {
       type: String,
-      enum: ["delta", "banglore", "draw", "finance-hq", "finance-banglore", "hrms", "lms", "media-erp", "commission"],
+      enum: ["delta", "banglore", "draw", "remote", "finance-hq", "finance-banglore", "hrms", "lms", "media-erp", "commission"],
       required: true,
     },
     /** Stored lowercase; what was typed is kept in `label` for the screen. */
@@ -30,7 +30,7 @@ const roleMapSchema = new Schema<IRoleMap>(
 
     toTarget: {
       type: String,
-      enum: ["delta", "banglore", "draw", "finance-hq", "finance-banglore", "hrms", "lms", "media-erp", "commission"],
+      enum: ["delta", "banglore", "draw", "remote", "finance-hq", "finance-banglore", "hrms", "lms", "media-erp", "commission"],
       required: true,
     },
     /** Spelled the way the far system spells it — it is sent there verbatim. */

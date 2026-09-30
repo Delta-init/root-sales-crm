@@ -1,4 +1,4 @@
-export type OrgCode = "delta" | "banglore" | "draw";
+export type OrgCode = "delta" | "banglore" | "draw" | "remote";
 
 export interface Organization {
   id: string;
@@ -228,7 +228,7 @@ export interface MyTracker {
  * report filter to have an opinion about HRMS.
  */
 export type TargetCode =
-  | "delta" | "banglore" | "draw"
+  | "delta" | "banglore" | "draw" | "remote"
   | "finance-hq" | "finance-banglore" | "hrms"
   | "lms" | "media-erp" | "commission";
 
@@ -381,7 +381,7 @@ export interface RoleRule {
 }
 
 // ─── Lead traffic ─────────────────────────────────────────────────────────────
-export type TrafficOrg = "delta" | "draw";
+export type TrafficOrg = "delta" | "draw" | "remote";
 /** A lead sheet that posts into lead traffic; each has its own split. */
 export type TrafficSheetKey = "abhin" | "shoaib";
 export type TrafficStatus =
@@ -412,6 +412,8 @@ export interface TrafficSheetRules {
   name: string;
   about: string;
   paused: boolean;
+  /** The CRMs this sheet's split sends to. */
+  uses: TrafficOrg[];
   segments: TrafficSegmentRule[];
   updatedByEmail: string;
   updatedAt: string | null;
