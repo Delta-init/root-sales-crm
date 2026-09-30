@@ -51,6 +51,7 @@ const auditLogSchema = new Schema<IAuditLog>(
         // Lead traffic: the split between the CRMs, and a stuck lead sent by hand.
         "traffic_rules_changed",
         "traffic_lead_retried",
+        "traffic_access_changed",
       ],
       required: true,
     },

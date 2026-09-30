@@ -16,7 +16,7 @@ import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { Logo } from "@/components/shared/Logo";
 import { useAuth } from "@/providers/AuthProvider";
 import { cn, getInitials } from "@/lib/utils";
-import { NAV } from "./nav";
+import { navFor } from "./nav";
 
 export function Header() {
   const { admin, logout } = useAuth();
@@ -38,7 +38,7 @@ export function Header() {
         {/* Wide screens only. On a phone these live in the bar along the
             bottom, where a thumb reaches — see MobileNav. */}
         <nav className="hidden items-center gap-1 md:flex">
-          {NAV.filter((item) => !item.rootOnly || admin?.role === "root_admin").map((item) => {
+          {navFor(admin).map((item) => {
             // startsWith so a drill-down like /tracker/delta keeps the tab lit
             const lit = (href: string) =>
               pathname === href || pathname.startsWith(href + "/");

@@ -15,6 +15,9 @@ export interface NavLink {
   href: string;
   label: string;
   icon: LucideIcon;
+  rootOnly?: boolean;
+  /** Shown to root admins and to anybody given lead-traffic access. */
+  traffic?: boolean;
 }
 
 export interface NavItem extends Partial<NavLink> {
@@ -42,12 +45,12 @@ export const NAV: NavItem[] = [
   {
     label: "Sales",
     icon: BarChart3,
-    rootOnly: true,
     children: [
-      { href: "/reports", label: "Group report", icon: BarChart3 },
-      { href: "/tracker", label: "Daily tracker", icon: ClipboardList },
+      { href: "/reports", label: "Group report", icon: BarChart3, rootOnly: true },
+      { href: "/tracker", label: "Daily tracker", icon: ClipboardList, rootOnly: true },
       // Where the Meta lead sheet's leads go: split between Delta and Draw.
-      { href: "/traffic", label: "Lead traffic", icon: Shuffle },
+      // Also for anybody a root admin has given lead-traffic access.
+      { href: "/traffic", label: "Lead traffic", icon: Shuffle, traffic: true },
     ],
   },
   // Root admins only: deciding who may open which production system is the
@@ -75,3 +78,22 @@ export const NAV: NavItem[] = [
    * nuisance rather than a tidy-up.
    */
 ];
+
+/**
+ * The menu for one person.
+ *
+ * A group shows when any of its links does: somebody given lead-traffic access
+ * sees Sales with just Lead traffic in it, and somebody with nothing in a group
+ * does not see an empty one.
+ */
+export function navFor(admin: { role: string; trafficAccess?: string } | null): NavItem[] {
+  const root = admin?.role === "root_admin";
+  const traffic = root || (!!admin?.trafficAccess && admin.trafficAccess !== "none");
+  const canSee = (x: { rootOnly?: boolean; traffic?: boolean }) => (x.traffic ? traffic : !x.rootOnly || root);
+  return NAV.flatMap((item) => {
+    if (!item.children) return canSee(item) ? [item] : [];
+    if (item.rootOnly && !root) return [];
+    const children = item.children.filter(canSee);
+    return children.length ? [{ ...item, children }] : [];
+  });
+}

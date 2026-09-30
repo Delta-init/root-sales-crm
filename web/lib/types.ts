@@ -42,6 +42,8 @@ export interface Admin {
   /** `member` is most people now — see PortalRole. */
   role: "root_admin" | "member" | "viewer";
   status: "active" | "inactive";
+  /** Lead traffic: nothing, look, or also change the split. Root admins have it all. */
+  trafficAccess?: TrafficAccess;
   lastLoginAt: string | null;
 }
 
@@ -240,6 +242,9 @@ export interface Target {
 
 export type PortalRole = "root_admin" | "member" | "viewer";
 
+/** Somebody's reach on the Lead traffic page when they are not a root admin. */
+export type TrafficAccess = "none" | "view" | "manage";
+
 export interface PersonAccess {
   target: TargetCode;
   roleInTarget: string;
@@ -309,6 +314,7 @@ export interface PersonDetail {
     email: string;
     role: PortalRole;
     status: "active" | "inactive";
+    trafficAccess?: TrafficAccess;
   };
   targets: TargetView[];
 }

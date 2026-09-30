@@ -1,6 +1,6 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
-import { authenticate, requireRole } from "../middleware/auth.js";
+import { authenticate, requireTrafficAccess } from "../middleware/auth.js";
 import { requireSheetKey } from "../middleware/sheetKeyAuth.js";
 import { ping, intake, getRules, putRules, summary, leads, retry, crmUsers } from "../controllers/trafficController.js";
 
@@ -25,16 +25,18 @@ router.get("/intake/ping", sheetLimiter, requireSheetKey, ping);
 router.post("/intake", sheetLimiter, requireSheetKey, intake);
 
 /*
- * Everything else is root_admin only. The split decides which CRM every lead
- * from the sheet lands in, and the list names and numbers real people.
+ * Everything else: root admins, and whoever a root admin has given lead-traffic
+ * access. Looking needs `view`. Changing the split, sending a lead by hand, and
+ * listing a CRM's people to hand leads to all need `manage` — the split decides
+ * which CRM every lead from the sheet lands in.
  */
-router.use(authenticate, requireRole("root_admin"));
+router.use(authenticate);
 
-router.get("/rules", getRules);
-router.put("/rules", putRules);
-router.get("/summary", summary);
-router.get("/leads", leads);
-router.post("/leads/:id/retry", retry);
-router.get("/crm-users/:code", crmUsers);
+router.get("/rules", requireTrafficAccess("view"), getRules);
+router.get("/summary", requireTrafficAccess("view"), summary);
+router.get("/leads", requireTrafficAccess("view"), leads);
+router.put("/rules", requireTrafficAccess("manage"), putRules);
+router.post("/leads/:id/retry", requireTrafficAccess("manage"), retry);
+router.get("/crm-users/:code", requireTrafficAccess("manage"), crmUsers);
 
 export default router;

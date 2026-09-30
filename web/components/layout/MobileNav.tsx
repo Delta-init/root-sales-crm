@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { NAV, type NavItem } from "./nav";
+import { navFor, type NavItem } from "./nav";
 import { useAuth } from "@/providers/AuthProvider";
 import { cn } from "@/lib/utils";
 
@@ -29,7 +29,7 @@ export function MobileNav() {
 
   if (!admin) return null;
 
-  const items = NAV.filter((i) => !i.rootOnly || admin.role === "root_admin");
+  const items = navFor(admin);
   const lit = (href: string) => pathname === href || pathname.startsWith(href + "/");
   const isActive = (i: NavItem) =>
     i.children ? i.children.some((c) => lit(c.href)) : lit(i.href ?? "");

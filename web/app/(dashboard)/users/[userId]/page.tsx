@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/axios";
 import { useAuth } from "@/providers/AuthProvider";
-import type { PersonDetail, PortalRole, TargetRole, TargetView } from "@/lib/types";
+import type { PersonDetail, PortalRole, TargetRole, TargetView, TrafficAccess } from "@/lib/types";
 
 /**
  * One person, as every system actually sees them.
@@ -69,6 +69,19 @@ export default function PersonAccessPage() {
    * The user list is invalidated too: it shows this role, and leaving it
    * stale would have the two screens disagreeing about the same person.
    */
+  /*
+   * The Lead traffic page, for somebody who is not a root admin: nothing,
+   * looking, or also changing the split. A root admin has it all anyway, so
+   * theirs is not offered.
+   */
+  const setTrafficAccess = useMutation({
+    mutationFn: async (access: TrafficAccess) =>
+      api.patch(`/access/${userId}/traffic`, { access }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["person-access", userId] });
+    },
+  });
+
   const setPortalRole = useMutation({
     mutationFn: async (role: PortalRole) =>
       api.patch(`/access/${userId}/role`, { role }),
@@ -180,6 +193,22 @@ export default function PersonAccessPage() {
                 {(Object.keys(PORTAL_ROLE_LABEL) as PortalRole[]).map((r) => (
                   <option key={r} value={r}>{PORTAL_ROLE_LABEL[r]}</option>
                 ))}
+              </select>
+            </label>
+          )}
+          {person.role !== "root_admin" && (
+            <label className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">Lead traffic</span>
+              <select
+                value={person.trafficAccess ?? "none"}
+                disabled={setTrafficAccess.isPending}
+                onChange={(e) => setTrafficAccess.mutate(e.target.value as TrafficAccess)}
+                className="h-8 rounded-md border border-border bg-background px-2 text-xs disabled:opacity-50"
+                title="What they may do on Sales → Lead traffic"
+              >
+                <option value="none">No access</option>
+                <option value="view">View</option>
+                <option value="manage">Manage</option>
               </select>
             </label>
           )}

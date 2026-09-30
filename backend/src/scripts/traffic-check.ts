@@ -389,6 +389,33 @@ async function main() {
   check("the people to pick from are Delta's active ones", people.some((p: Json) => p.id === LUBNA) && !people.some((p: Json) => p.id === String(old)), show(people));
   check("an unknown CRM is a 404", (await call("GET", "/traffic/crm-users/banglore", undefined, root)).status === 404);
 
+  step("Case 4b — lead-traffic access for people who are not root admins");
+  const memberRow = await AdminUser.findOne({ email: "member@traffic-e2e.test" }).lean();
+  const rootRow = await AdminUser.findOne({ email: "root@traffic-e2e.test" }).lean();
+  const setAccess = (id: unknown, access: string, as = root) => call("PATCH", `/access/${String(id)}/traffic`, { access }, as);
+  check("a member cannot hand out lead-traffic access", (await setAccess(memberRow?._id, "view", member)).status === 403);
+  check("nor can anybody be given a level that does not exist", (await setAccess(memberRow?._id, "admin")).status === 400);
+  check("a root admin already has it all, so theirs is not set", (await setAccess(rootRow?._id, "view")).status === 409);
+  const gaveView = await setAccess(memberRow?._id, "view");
+  check("a root admin gives a member View", gaveView.status === 200 && gaveView.body?.data?.trafficAccess === "view", show(gaveView.body));
+  check("which takes effect at once, on the session they already have",
+    (await call("GET", "/traffic/summary", undefined, member)).status === 200 && (await call("GET", "/traffic/leads", undefined, member)).status === 200
+    && (await call("GET", "/traffic/rules", undefined, member)).status === 200);
+  check("and their session says so", (await call("GET", "/auth/me", undefined, member)).body?.data?.trafficAccess === "view");
+  check("View cannot change the split", (await call("PUT", "/traffic/rules", { paused: false, segments: { uk: good(50, 50), gcc: good(50, 50), hindi: good(50, 50, LUBNA) } }, member)).status === 403);
+  check("…send a lead by hand", (await call("POST", `/traffic/leads/${refDoc?._id}/retry`, undefined, member)).status === 403);
+  check("…or list a CRM's people", (await call("GET", "/traffic/crm-users/delta", undefined, member)).status === 403);
+  check("nor see who is who in the Users area", (await call("GET", "/access/people", undefined, member)).status === 403);
+  const gaveManage = await setAccess(memberRow?._id, "manage");
+  check("Manage can change the split", gaveManage.status === 200
+    && (await call("PUT", "/traffic/rules", { paused: false, segments: { uk: good(50, 50), gcc: good(50, 50), hindi: good(50, 50, LUBNA) } }, member)).status === 200);
+  check("…and list a CRM's people, and get as far as a retry", (await call("GET", "/traffic/crm-users/delta", undefined, member)).status === 200
+    && (await call("POST", `/traffic/leads/${refDoc?._id}/retry`, undefined, member)).status === 409);
+  await setAccess(memberRow?._id, "none");
+  check("taking it away takes effect at once too", (await call("GET", "/traffic/summary", undefined, member)).status === 403);
+  const accessAudit = await db.collection("auditlogs").find({ action: "traffic_access_changed" }).toArray();
+  check("every change of access is in the audit log", accessAudit.length === 3 && accessAudit.every((x) => x.adminEmail === "root@traffic-e2e.test"), `${accessAudit.length} rows`);
+
   console.log(`\n${checks - failures}/${checks} checks passed`);
   for (const s of servers) s.close();
   await mongoose.disconnect();

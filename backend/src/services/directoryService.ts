@@ -111,10 +111,10 @@ export const directoryService = {
    * through a door this portal does not know about.
    */
   async describe(userId: string): Promise<{
-    person: { id: string; name: string; email: string; role: string; status: string };
+    person: { id: string; name: string; email: string; role: string; status: string; trafficAccess: string };
     targets: TargetView[];
   }> {
-    const person = await AdminUser.findById(userId).select("name email role status");
+    const person = await AdminUser.findById(userId).select("name email role status trafficAccess");
     if (!person) throw httpError("No such person", 404);
 
     const orgs = await Organization.find({ isActive: true })
@@ -192,6 +192,7 @@ export const directoryService = {
         email: person.email,
         role: person.role,
         status: person.status,
+        trafficAccess: person.trafficAccess ?? "none",
       },
       targets: views,
     };

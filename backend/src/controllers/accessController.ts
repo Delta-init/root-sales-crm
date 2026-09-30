@@ -402,6 +402,40 @@ export const revoke = async (req: AuthenticatedRequest, res: Response, next: Nex
  * Separate from the grants because it is a different decision: the grants say
  * where they may go, this says whether they administer the portal at all.
  */
+/**
+ * What somebody may do on the Lead traffic page: nothing, look, or also change
+ * the split. Root admins can do everything there already, so theirs is not set.
+ */
+export const setTrafficAccess = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = String(req.params["userId"] ?? "");
+    const access = String((req.body as { access?: string })?.access ?? "");
+    if (!["none", "view", "manage"].includes(access)) {
+      sendError(res, "access must be none, view or manage", 400);
+      return;
+    }
+    const person = await AdminUser.findById(userId).select("email role trafficAccess");
+    if (!person) { sendError(res, "No such person", 404); return; }
+    if (person.role === "root_admin") {
+      sendError(res, "Root admins already have full access to lead traffic", 409);
+      return;
+    }
+
+    const before = person.trafficAccess ?? "none";
+    person.trafficAccess = access as typeof person.trafficAccess;
+    await person.save();
+
+    await record(req, "traffic_access_changed", {
+      adminId: req.admin!.adminId,
+      adminEmail: req.admin!.email,
+      org: null,
+      detail: `Lead traffic for ${person.email}: ${before} → ${access}`,
+    });
+
+    sendSuccess(res, "Lead traffic access updated", { id: String(person._id), trafficAccess: person.trafficAccess });
+  } catch (err) { next(err); }
+};
+
 export const setRole = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const userId = String(req.params["userId"] ?? "");

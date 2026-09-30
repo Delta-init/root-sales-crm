@@ -24,6 +24,13 @@ export interface ApiResponse<T = unknown> {
  */
 export type AdminRole = "root_admin" | "member" | "viewer";
 
+/**
+ * What somebody who is not a root admin may do on the Lead traffic page.
+ * `view` sees the split and the leads; `manage` also changes the split and
+ * sends a stuck lead by hand. Root admins can do both whatever this says.
+ */
+export type TrafficAccess = "none" | "view" | "manage";
+
 export interface IAdminUser extends Document {
   _id: Types.ObjectId;
   name: string;
@@ -31,6 +38,7 @@ export interface IAdminUser extends Document {
   password: string;
   role: AdminRole;
   status: "active" | "inactive";
+  trafficAccess: TrafficAccess;
   lastLoginAt: Date | null;
   comparePassword(candidate: string): Promise<boolean>;
 }
@@ -177,7 +185,8 @@ export type AuditAction =
   // Lead traffic: the split decides which CRM every sheet lead lands in, so
   // who changed it, and who pushed a stuck lead through by hand, is recorded.
   | "traffic_rules_changed"
-  | "traffic_lead_retried";
+  | "traffic_lead_retried"
+  | "traffic_access_changed";
 
 export interface IAuditLog extends Document {
   admin: Types.ObjectId | null;
@@ -330,6 +339,8 @@ export interface JwtPayload {
    * does not have. Wearing somebody's face means having only their reach.
    */
   impersonatedBy?: { id: string; email: string };
+  /** Read from the record on every request, like the role — never from the token. */
+  trafficAccess?: TrafficAccess;
 }
 
 /** A sales rep's session. Distinct from an admin's — `kind` is what stops an

@@ -43,6 +43,19 @@ const adminUserSchema = new Schema<IAdminUser>(
       enum: ["active", "inactive"],
       default: "active",
     },
+    /*
+     * Lead traffic, for somebody who is not a root admin.
+     *
+     * A separate grant rather than a role, because it is about one page and
+     * not about which systems a person may open: a team leader can watch where
+     * the sheet's leads went without being able to hand out reach anywhere.
+     * `none` by default, like every other door here.
+     */
+    trafficAccess: {
+      type: String,
+      enum: ["none", "view", "manage"],
+      default: "none",
+    },
     lastLoginAt: { type: Date, default: null },
   },
   { timestamps: true, versionKey: false }

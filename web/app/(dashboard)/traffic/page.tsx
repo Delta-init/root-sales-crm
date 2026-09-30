@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { gulfToday } from "@/components/tracker/DayPicker";
 import { SplitDialog } from "@/components/traffic/SplitDialog";
 import { api, apiErrorMessage } from "@/lib/axios";
+import { useAuth } from "@/providers/AuthProvider";
 import { cn } from "@/lib/utils";
 import type { TrafficLeadPage, TrafficLeadRow, TrafficRules, TrafficSummary } from "@/lib/types";
 
@@ -62,6 +63,9 @@ const forbidden = (e: unknown) => e instanceof AxiosError && e.response?.status 
  */
 export default function TrafficPage() {
   const qc = useQueryClient();
+  const { admin } = useAuth();
+  // Looking is enough to be here; changing the split and sending by hand is more.
+  const canManage = admin?.role === "root_admin" || admin?.trafficAccess === "manage";
   const [range, setRange] = useState<RangeKey>("today");
   const [filter, setFilter] = useState<FilterKey>("all");
   const [org, setOrg] = useState<"all" | "delta" | "draw">("all");
@@ -101,7 +105,9 @@ export default function TrafficPage() {
   if (forbidden(rules.error) || forbidden(summary.error)) {
     return (
       <Card>
-        <CardContent className="pt-6 text-sm text-muted-foreground">Lead traffic is for root admins.</CardContent>
+        <CardContent className="pt-6 text-sm text-muted-foreground">
+          You do not have access to lead traffic. A root admin can give it to you from your page under Users.
+        </CardContent>
       </Card>
     );
   }
@@ -139,9 +145,11 @@ export default function TrafficPage() {
               {rules.data.paused ? "Paused" : "Routing"}
             </Badge>
           )}
-          <Button variant="outline" size="sm" onClick={() => setEditing(true)} disabled={!rules.data}>
-            <Settings2 /> Edit split
-          </Button>
+          {canManage && (
+            <Button variant="outline" size="sm" onClick={() => setEditing(true)} disabled={!rules.data}>
+              <Settings2 /> Edit split
+            </Button>
+          )}
         </div>
       </motion.div>
 
@@ -328,7 +336,7 @@ export default function TrafficPage() {
                         )}
                       </td>
                       <td className="py-2.5 text-right">
-                        {l.canRetry && (
+                        {canManage && l.canRetry && (
                           <Button size="sm" variant="outline" disabled={retry.isPending} onClick={() => retry.mutate(l.id)}>
                             {retry.isPending && retry.variables === l.id ? <Loader2 className="animate-spin" /> : <RotateCcw />}
                             Send now
@@ -362,7 +370,7 @@ export default function TrafficPage() {
         </p>
       )}
 
-      {rules.data && <SplitDialog open={editing} onOpenChange={setEditing} rules={rules.data} />}
+      {canManage && rules.data && <SplitDialog open={editing} onOpenChange={setEditing} rules={rules.data} />}
     </div>
   );
 }

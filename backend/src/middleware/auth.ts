@@ -32,7 +32,7 @@ export const authenticate = async (
     // Hit the DB on every request rather than trusting the token alone. This
     // endpoint set can open three production CRMs, so revoking an admin has to
     // take effect immediately, not whenever their token happens to expire.
-    const admin = await AdminUser.findById(decoded.adminId).select("status role email");
+    const admin = await AdminUser.findById(decoded.adminId).select("status role email trafficAccess");
     if (!admin) {
       sendError(res, "Admin no longer exists", 401);
       return;
@@ -58,6 +58,7 @@ export const authenticate = async (
       adminId: admin._id.toString(),
       email: admin.email,
       role: admin.role,
+      trafficAccess: admin.trafficAccess ?? "none",
       ...(decoded.impersonatedBy ? { impersonatedBy: decoded.impersonatedBy } : {}),
     };
 
@@ -83,6 +84,29 @@ export const requireRole =
   (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
     if (!req.admin || !roles.includes(req.admin.role)) {
       sendError(res, "You do not have permission to perform this action", 403);
+      return;
+    }
+    next();
+  };
+
+/**
+ * Gate for the Lead traffic page: root admins, and whoever was given access.
+ *
+ * `view` lets somebody look; `manage` also lets them change the split and send
+ * a lead by hand. Read from the record on every request, so taking it away
+ * takes effect at once.
+ */
+export const requireTrafficAccess =
+  (level: "view" | "manage") =>
+  (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+    const a = req.admin;
+    const allowed =
+      !!a &&
+      (a.role === "root_admin" ||
+        a.trafficAccess === "manage" ||
+        (level === "view" && a.trafficAccess === "view"));
+    if (!allowed) {
+      sendError(res, level === "manage" ? "You cannot change lead traffic" : "You do not have access to lead traffic", 403);
       return;
     }
     next();
