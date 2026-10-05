@@ -11,10 +11,11 @@ const OBJECT_ID = /^[a-f\d]{24}$/i;
 
 /**
  * Which sheet a request is about. Abhin's when none is named: its script was
- * posting here before there was a second sheet, and does not say.
+ * posting here before there was a second sheet, and does not say. Written any
+ * case, with spaces or hyphens: "TRADING-LEADS NITRO" is trading-leads-nitro.
  */
 const sheetOf = (value: unknown): TrafficSheet | null => {
-  const v = value === undefined || value === "" ? "abhin" : String(value).trim().toLowerCase();
+  const v = value === undefined || value === "" ? "abhin" : String(value).trim().toLowerCase().replace(/\s+/g, "-");
   return traffic.isSheet(v) ? v : null;
 };
 const unknownSheet = (value: unknown) =>

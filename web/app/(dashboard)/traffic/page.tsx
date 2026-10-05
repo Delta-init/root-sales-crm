@@ -61,7 +61,7 @@ const TEAM_COLOURS = ["bg-primary", "bg-violet-500", "bg-amber-500", "bg-emerald
 
 /** The sheet last looked at, so whoever looks after one sheet lands on it. */
 const SHEET_STORE = "root.traffic.sheet";
-const SHEET_KEYS: TrafficSheetKey[] = ["abhin", "shoaib", "drawsheet"];
+const SHEET_KEYS: TrafficSheetKey[] = ["abhin", "shoaib", "trading-leads-nitro"];
 
 /**
  * Lead traffic.

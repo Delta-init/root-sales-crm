@@ -243,7 +243,7 @@ export interface IDailyEntry extends Document {
 
 // ─── Lead traffic ─────────────────────────────────────────────────────────────
 /** A lead sheet that posts into lead traffic. Each has its own split. */
-export type TrafficSheet = "abhin" | "shoaib" | "drawsheet";
+export type TrafficSheet = "abhin" | "shoaib" | "trading-leads-nitro";
 
 /** The CRMs a lead can be sent to. Registry codes, so names and addresses come from there. */
 export type TrafficOrg = "delta" | "draw" | "remote";

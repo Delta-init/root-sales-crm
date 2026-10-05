@@ -22,9 +22,9 @@ import type {
  *
  * Each sheet posts its new rows here instead of into a CRM, and says which
  * sheet it is. Every lead is put in its segment of that sheet — Abhin's Meta
- * sheet is split by tab into UK, GCC and Hindi; Shoaib's Forex sheet and the
- * Draw lead sheet are split as one — checked against everyone already sent or
- * already in either CRM,
+ * sheet is split by tab into UK, GCC and Hindi; Shoaib's Forex sheet and
+ * TRADING-LEADS NITRO are split as one — checked against everyone already sent
+ * or already in either CRM,
  * and given to whichever team is furthest behind its share of that segment.
  * It is then posted into that team's CRM through the CRM's own sheet intake,
  * which shares it out across its teams exactly as it did when the sheet
@@ -34,7 +34,7 @@ import type {
  */
 
 export const ORGS: TrafficOrg[] = ["delta", "draw", "remote"];
-export const SHEETS: TrafficSheet[] = ["abhin", "shoaib", "drawsheet"];
+export const SHEETS: TrafficSheet[] = ["abhin", "shoaib", "trading-leads-nitro"];
 const SHORT: Record<TrafficOrg, string> = { delta: "Delta", draw: "Draw", remote: "Remote" };
 
 export const isSheet = (v: unknown): v is TrafficSheet => SHEETS.includes(v as TrafficSheet);
@@ -136,15 +136,16 @@ export const SHEET_CONFIG: Record<TrafficSheet, SheetConfig> = {
     },
   },
   /*
-   * The Draw lead sheet (the user, 2026-10-05): Meta's leads and rows typed in
-   * by hand, every one to Delta's Sales CRM — where its own script sent them
-   * straight, with this source label and, as then, no reporter named: the CRM
-   * records its own. Its hand-typed rows have no created time; they are taken
-   * all the same. Its Meta rows are not laid out under its headers, so it has
-   * a script of its own, sheets/draw-lead-sheet.gs.
+   * TRADING-LEADS NITRO — the DRAW LEAD SHEET (the user, 2026-10-05): Meta's
+   * leads and rows typed in by hand, every one to Delta's Sales CRM — where its
+   * own script sent them straight, with this source label and, as then, no
+   * reporter named: the CRM records its own. Its hand-typed rows have no
+   * created time; they are taken all the same. Its Meta rows are not laid out
+   * under its headers, so it has a script of its own, sheets/draw-lead-sheet.gs,
+   * which names it as the user does, "TRADING-LEADS NITRO".
    */
-  drawsheet: {
-    name: "Draw lead sheet",
+  "trading-leads-nitro": {
+    name: "TRADING-LEADS NITRO",
     about: "Meta's leads and rows typed in by hand — one split for the whole sheet.",
     segments: [{ key: "all", label: "All leads", source: "TRADING-LEADS NITRO" }],
     segmentOf: () => "all",

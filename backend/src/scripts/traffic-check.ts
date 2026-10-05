@@ -29,7 +29,10 @@
  *     account there, without its count starting again; somebody the remote
  *     CRM already has goes back to it; Abhin's sheet is not bothered by it;
  *   - the Leads list keeps to the dates the page picks — Gulf days, as the
- *     totals count them — and without dates lists everything, as before.
+ *     totals count them — and without dates lists everything, as before;
+ *   - TRADING-LEADS NITRO, the DRAW LEAD SHEET, sends every lead to the Sales
+ *     CRM as its own script did — rows typed in by hand too — under the ID
+ *     its script writes, and somebody another CRM has stays there.
  *
  * Run through scripts/traffic-check.sh (throwaway mongod, the real backend, and
  * stand-in CRMs served from here). With `seed` it only writes the old split
@@ -687,19 +690,23 @@ async function main() {
     .find((x) => /Dilshad team \(Remote → Nusra\) 23\.08%/.test(String(x.detail)));
   check("the move is in the audit log", !!moveAudit);
 
-  // ── The Draw lead sheet ─────────────────────────────────────────────────────
-  step("The Draw lead sheet — every lead to the Sales CRM, rows typed in by hand too, on the page");
+  // ── TRADING-LEADS NITRO, the DRAW LEAD SHEET ────────────────────────────────
+  step("TRADING-LEADS NITRO (the DRAW LEAD SHEET) — every lead to the Sales CRM, rows typed in by hand too, on the page");
+  const NITRO = "TRADING-LEADS NITRO"; // its ID, as sheets/draw-lead-sheet.gs writes it
   const dsRules = (await call("GET", "/traffic/rules", undefined, root)).body?.data;
-  const ds = sheetIn(dsRules, "drawsheet");
-  check("it is the third sheet: one split, all of it to the Delta sales team, with its own source label",
-    dsRules?.sheets?.map((s: Json) => s.key).join(",") === "abhin,shoaib,drawsheet" && ds?.name === "Draw lead sheet"
+  const ds = sheetIn(dsRules, "trading-leads-nitro");
+  check("it is the third sheet, TRADING-LEADS NITRO: one split, all of it to the Delta sales team, with its own source label",
+    dsRules?.sheets?.map((s: Json) => s.key).join(",") === "abhin,shoaib,trading-leads-nitro" && ds?.name === "TRADING-LEADS NITRO"
     && ds?.segments?.length === 1 && segOf(ds, "all")?.source === "TRADING-LEADS NITRO" && show(ds?.uses) === show(["delta"])
     && show(segOf(ds, "all")?.shares?.map((s: Json) => [s.name, s.org, s.percent])) === show([["Delta sales team", "delta", 100]]), show(ds));
-  const dsRule = await db.collection("trafficrules").findOne({ key: "drawsheet" });
+  const dsRule = await db.collection("trafficrules").findOne({ key: "trading-leads-nitro" });
   check("…naming no reporter for the Sales CRM, as its own script named none", dsRule?.reporters?.delta === "", show(dsRule?.reporters));
-  const dsPing = await call("GET", "/traffic/intake/ping?sheet=drawsheet", undefined, { "x-traffic-key": SHEET_KEY });
-  check("its connection test names it, and only the Sales CRM", dsPing.status === 200 && dsPing.body?.data?.name === "Draw lead sheet"
+  const dsPing = await call("GET", `/traffic/intake/ping?sheet=${encodeURIComponent(NITRO)}`, undefined, { "x-traffic-key": SHEET_KEY });
+  check("its connection test, asked as the script asks, names it, and only the Sales CRM", dsPing.status === 200
+    && dsPing.body?.data?.name === "TRADING-LEADS NITRO" && dsPing.body?.data?.sheet === "trading-leads-nitro"
     && show(dsPing.body?.data?.crms?.map((c: Json) => c.code)) === show(["delta"]), show(dsPing.body));
+  const oldId = await call("GET", "/traffic/intake/ping?sheet=drawsheet", undefined, { "x-traffic-key": SHEET_KEY });
+  check("the ID it had before going live is not a sheet", oldId.status === 400 && /Unknown sheet/.test(String(oldId.body?.message)), show(oldId.body));
   // As sheets/draw-lead-sheet.gs builds them: Meta's rows, and a row typed in by hand — no lead id, no created time.
   const dsMeta = (n: number) => ({
     id: `l:77000${n}`, tab: "Sheet1", created_time: `2026-10-05T0${n}:00:00+05:30`, full_name: `Nitro ${n}`,
@@ -707,7 +714,7 @@ async function main() {
     ad_name: `Ad ${n}`, adset_name: "Kerala 25-45", is_organic: "false",
   });
   const dsHand = { id: "", tab: "Sheet1", created_time: "", full_name: "Typed In", phone_number: "971556667777", email: "typed@example.test", platform: "Meta" };
-  const dsPost = (rows: unknown[]) => post({ sheet: "drawsheet", rows });
+  const dsPost = (rows: unknown[]) => post({ sheet: NITRO, rows });
   const [deltaAtDs, drawAtDs, remoteAtDs] = [crm.delta.rows.length, crm.draw.rows.length, crm.remote.rows.length];
   const ds1 = await dsPost([dsMeta(1), dsMeta(2), dsHand]);
   const dsRes = (ds1.body?.data?.results ?? []) as Json[];
@@ -727,6 +734,9 @@ async function main() {
   const dsAgain = await dsPost([dsHand, dsMeta(1)]);
   check("sent again: the same answers, nothing posted twice", (dsAgain.body?.data?.results ?? []).every((r: Json) => r.label === "✅ Delta")
     && crm.delta.rows.length === deltaAtDs + 3, show(dsAgain.body));
+  const slugged = await post({ sheet: "trading-leads-nitro", rows: [dsMeta(2)] });
+  check("…and named in small letters with hyphens, it is the same sheet", slugged.body?.data?.results?.[0]?.label === "✅ Delta"
+    && crm.delta.rows.length === deltaAtDs + 3, show(slugged.body));
   const dsKnown = await dsPost([
     { ...dsHand, full_name: "Known to Draw", phone_number: "+971502222222" },
     { ...dsHand, full_name: "Known to Delta", phone_number: "0501111111" },
@@ -736,13 +746,13 @@ async function main() {
     && crm.delta.rows.length === deltaAtDs + 3 && crm.draw.rows.length === drawAtDs, show(dsKnown.body));
   const dsBad = await dsPost([{ ...dsHand, full_name: "No Phone", phone_number: "12" }]);
   check("a row without a usable phone is turned away with its reason", dsBad.body?.data?.results?.[0]?.label === "❌ Invalid: No usable phone number", show(dsBad.body));
-  const dsSum = (await call("GET", "/traffic/summary?sheet=drawsheet", undefined, root)).body?.data;
+  const dsSum = (await call("GET", "/traffic/summary?sheet=trading-leads-nitro", undefined, root)).body?.data;
   const dsTeam = seg(dsSum, "all")?.shares?.find((x: Json) => x.key === "delta");
   check("the page counts them: 3 to the Delta sales team — 100% against its 100% — 2 duplicates, 1 invalid",
     dsSum?.totals?.sent === 3 && dsTeam?.split === 3 && dsTeam?.actual === 100 && dsTeam?.target === 100
     && dsSum?.totals?.duplicates === 2 && dsSum?.totals?.invalid === 1, show(dsSum?.totals));
-  const dsList = (await call("GET", "/traffic/leads?sheet=drawsheet&limit=50", undefined, root)).body?.data;
-  check("and lists them, this sheet's only", dsList?.total === 6 && dsList?.items?.every((i: Json) => i.sheet === "drawsheet"),
+  const dsList = (await call("GET", "/traffic/leads?sheet=trading-leads-nitro&limit=50", undefined, root)).body?.data;
+  check("and lists them, this sheet's only", dsList?.total === 6 && dsList?.items?.every((i: Json) => i.sheet === "trading-leads-nitro"),
     show(dsList?.items?.map((i: Json) => [i.name, i.status])));
   const shoaibNoDate = await shoaib([srow("+966540000099", { created_time: "" })]);
   check("Shoaib's sheet still turns a row without a created time away", shoaibNoDate.body?.data?.results?.[0]?.label === "❌ Invalid: No created time", show(shoaibNoDate.body));

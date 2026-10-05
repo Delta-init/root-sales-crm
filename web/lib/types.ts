@@ -383,7 +383,7 @@ export interface RoleRule {
 // ─── Lead traffic ─────────────────────────────────────────────────────────────
 export type TrafficOrg = "delta" | "draw" | "remote";
 /** A lead sheet that posts into lead traffic; each has its own split. */
-export type TrafficSheetKey = "abhin" | "shoaib" | "drawsheet";
+export type TrafficSheetKey = "abhin" | "shoaib" | "trading-leads-nitro";
 export type TrafficStatus =
   | "queued" | "held" | "sending" | "sent" | "duplicate" | "invalid" | "retrying" | "failed";
 

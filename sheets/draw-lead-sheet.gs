@@ -1,11 +1,12 @@
 /**
- * Draw lead sheet → Root portal (Lead traffic)
+ * DRAW LEAD SHEET → Root portal (Lead traffic), as TRADING-LEADS NITRO
  *
  * Replaces the script that posted this sheet straight into the Sales CRM. Every
  * new row now goes to the Root portal, which sends it on as set for this sheet
  * on Root's Lead traffic page — to start with, every lead to Delta's Sales CRM,
  * with the source label TRADING-LEADS NITRO, as before — and says where each one
- * went. The leads, and where they went, show on that page.
+ * went. The leads, and where they went, show on that page under TRADING-LEADS
+ * NITRO. The sheet's ID on Root is set below; there is no SHEET_ID property.
  *
  * Two kinds of row, told apart by their values, as the old script did:
  *
@@ -41,7 +42,7 @@
  *      (which also removes the old script's triggers).
  */
 
-var SHEET_ID = "drawsheet"; // which sheet this is, on Root
+var SHEET_ID = "TRADING-LEADS NITRO"; // which sheet this is, on Root
 var SHEET_NAME = "Sheet1";
 var FIRST_DATA_ROW = 2;
 var SYNC_COL = 12; // L
