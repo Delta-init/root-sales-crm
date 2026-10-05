@@ -10,6 +10,9 @@
  *   abhin    Abhin's automated Meta lead sheet — split by tab: UK, GCC, Hindi
  *   shoaib   Shoaib's Forex leads sheet — one split for the whole sheet
  *
+ * The Draw lead sheet has a script of its own, draw-lead-sheet.gs: its Meta rows
+ * are not laid out under its headers, so they cannot be found by header name.
+ *
  * The answer is written into the "CRM Sync" column:
  *
  *   ✅ Delta / ✅ Draw          sent

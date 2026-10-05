@@ -61,6 +61,7 @@ const TEAM_COLOURS = ["bg-primary", "bg-violet-500", "bg-amber-500", "bg-emerald
 
 /** The sheet last looked at, so whoever looks after one sheet lands on it. */
 const SHEET_STORE = "root.traffic.sheet";
+const SHEET_KEYS: TrafficSheetKey[] = ["abhin", "shoaib", "drawsheet"];
 
 /**
  * Lead traffic.
@@ -89,7 +90,8 @@ export default function TrafficPage() {
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(SHEET_STORE);
-      if (saved === "abhin" || saved === "shoaib") setSheet(saved);
+      const known = SHEET_KEYS.find((k) => k === saved);
+      if (known) setSheet(known);
     } catch {
       /* private window or blocked storage: start on the first sheet */
     }

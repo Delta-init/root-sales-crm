@@ -687,6 +687,66 @@ async function main() {
     .find((x) => /Dilshad team \(Remote → Nusra\) 23\.08%/.test(String(x.detail)));
   check("the move is in the audit log", !!moveAudit);
 
+  // ── The Draw lead sheet ─────────────────────────────────────────────────────
+  step("The Draw lead sheet — every lead to the Sales CRM, rows typed in by hand too, on the page");
+  const dsRules = (await call("GET", "/traffic/rules", undefined, root)).body?.data;
+  const ds = sheetIn(dsRules, "drawsheet");
+  check("it is the third sheet: one split, all of it to the Delta sales team, with its own source label",
+    dsRules?.sheets?.map((s: Json) => s.key).join(",") === "abhin,shoaib,drawsheet" && ds?.name === "Draw lead sheet"
+    && ds?.segments?.length === 1 && segOf(ds, "all")?.source === "TRADING-LEADS NITRO" && show(ds?.uses) === show(["delta"])
+    && show(segOf(ds, "all")?.shares?.map((s: Json) => [s.name, s.org, s.percent])) === show([["Delta sales team", "delta", 100]]), show(ds));
+  const dsRule = await db.collection("trafficrules").findOne({ key: "drawsheet" });
+  check("…naming no reporter for the Sales CRM, as its own script named none", dsRule?.reporters?.delta === "", show(dsRule?.reporters));
+  const dsPing = await call("GET", "/traffic/intake/ping?sheet=drawsheet", undefined, { "x-traffic-key": SHEET_KEY });
+  check("its connection test names it, and only the Sales CRM", dsPing.status === 200 && dsPing.body?.data?.name === "Draw lead sheet"
+    && show(dsPing.body?.data?.crms?.map((c: Json) => c.code)) === show(["delta"]), show(dsPing.body));
+  // As sheets/draw-lead-sheet.gs builds them: Meta's rows, and a row typed in by hand — no lead id, no created time.
+  const dsMeta = (n: number) => ({
+    id: `l:77000${n}`, tab: "Sheet1", created_time: `2026-10-05T0${n}:00:00+05:30`, full_name: `Nitro ${n}`,
+    phone_number: `p:+97155877000${n}`, email: `nitro${n}@example.test`, platform: "Meta", campaign_name: "Nitro | Draw | Forex",
+    ad_name: `Ad ${n}`, adset_name: "Kerala 25-45", is_organic: "false",
+  });
+  const dsHand = { id: "", tab: "Sheet1", created_time: "", full_name: "Typed In", phone_number: "971556667777", email: "typed@example.test", platform: "Meta" };
+  const dsPost = (rows: unknown[]) => post({ sheet: "drawsheet", rows });
+  const [deltaAtDs, drawAtDs, remoteAtDs] = [crm.delta.rows.length, crm.draw.rows.length, crm.remote.rows.length];
+  const ds1 = await dsPost([dsMeta(1), dsMeta(2), dsHand]);
+  const dsRes = (ds1.body?.data?.results ?? []) as Json[];
+  check("three rows: all sent to the Sales CRM, the typed-in one too", ds1.status === 200 && dsRes.length === 3
+    && dsRes.every((r) => r.status === "sent" && r.destination === "delta" && r.label === "✅ Delta"), show(ds1.body));
+  check("…and nothing to Draw or Remote", crm.draw.rows.length === drawAtDs && crm.remote.rows.length === remoteAtDs);
+  const toDeltaDs = crm.delta.rows.slice(deltaAtDs);
+  const nitro1 = toDeltaDs.find((r) => r.full_name === "Nitro 1");
+  check("the Sales CRM gets the sheet's source label, the lead id, its time and the campaign — and no reporter: it records its own",
+    nitro1?.source === "TRADING-LEADS NITRO" && nitro1?.id === "l:770001" && nitro1?.phone_number === "+971558770001"
+    && nitro1?.created_time === new Date("2026-10-05T01:00:00+05:30").toISOString() && nitro1?.campaign_name === "Nitro | Draw | Forex"
+    && !("reporter" in nitro1) && !("assigned_to" in nitro1), show(nitro1));
+  check("…with the ad and the ad set where the ad goes", nitro1?.ad_creative === "Ad: Ad 1\nAd set: Kerala 25-45", show(nitro1?.ad_creative));
+  const typedIn = toDeltaDs.find((r) => r.full_name === "Typed In");
+  check("the typed-in row goes too, without a lead id or a time", typedIn?.phone_number === "971556667777"
+    && typedIn?.source === "TRADING-LEADS NITRO" && !("id" in typedIn) && !("created_time" in typedIn), show(typedIn));
+  const dsAgain = await dsPost([dsHand, dsMeta(1)]);
+  check("sent again: the same answers, nothing posted twice", (dsAgain.body?.data?.results ?? []).every((r: Json) => r.label === "✅ Delta")
+    && crm.delta.rows.length === deltaAtDs + 3, show(dsAgain.body));
+  const dsKnown = await dsPost([
+    { ...dsHand, full_name: "Known to Draw", phone_number: "+971502222222" },
+    { ...dsHand, full_name: "Known to Delta", phone_number: "0501111111" },
+  ]);
+  check("somebody the Draw CRM already has stays Draw's — not sent to the Sales CRM, as for the other sheets",
+    dsKnown.body?.data?.results?.[0]?.label === "⚠️ Duplicate · Draw" && dsKnown.body?.data?.results?.[1]?.label === "⚠️ Duplicate · Delta"
+    && crm.delta.rows.length === deltaAtDs + 3 && crm.draw.rows.length === drawAtDs, show(dsKnown.body));
+  const dsBad = await dsPost([{ ...dsHand, full_name: "No Phone", phone_number: "12" }]);
+  check("a row without a usable phone is turned away with its reason", dsBad.body?.data?.results?.[0]?.label === "❌ Invalid: No usable phone number", show(dsBad.body));
+  const dsSum = (await call("GET", "/traffic/summary?sheet=drawsheet", undefined, root)).body?.data;
+  const dsTeam = seg(dsSum, "all")?.shares?.find((x: Json) => x.key === "delta");
+  check("the page counts them: 3 to the Delta sales team — 100% against its 100% — 2 duplicates, 1 invalid",
+    dsSum?.totals?.sent === 3 && dsTeam?.split === 3 && dsTeam?.actual === 100 && dsTeam?.target === 100
+    && dsSum?.totals?.duplicates === 2 && dsSum?.totals?.invalid === 1, show(dsSum?.totals));
+  const dsList = (await call("GET", "/traffic/leads?sheet=drawsheet&limit=50", undefined, root)).body?.data;
+  check("and lists them, this sheet's only", dsList?.total === 6 && dsList?.items?.every((i: Json) => i.sheet === "drawsheet"),
+    show(dsList?.items?.map((i: Json) => [i.name, i.status])));
+  const shoaibNoDate = await shoaib([srow("+966540000099", { created_time: "" })]);
+  check("Shoaib's sheet still turns a row without a created time away", shoaibNoDate.body?.data?.results?.[0]?.label === "❌ Invalid: No created time", show(shoaibNoDate.body));
+
   // ── The Leads list, by the page's dates ────────────────────────────────────
   step("The Leads list by date — the page's Today, 30 days, This month and Custom");
   const dated = (n: number, at: string, extra: Record<string, unknown> = {}) =>

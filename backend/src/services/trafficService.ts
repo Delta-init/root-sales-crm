@@ -22,8 +22,9 @@ import type {
  *
  * Each sheet posts its new rows here instead of into a CRM, and says which
  * sheet it is. Every lead is put in its segment of that sheet — Abhin's Meta
- * sheet is split by tab into UK, GCC and Hindi; Shoaib's Forex sheet is split
- * as one — checked against everyone already sent or already in either CRM,
+ * sheet is split by tab into UK, GCC and Hindi; Shoaib's Forex sheet and the
+ * Draw lead sheet are split as one — checked against everyone already sent or
+ * already in either CRM,
  * and given to whichever team is furthest behind its share of that segment.
  * It is then posted into that team's CRM through the CRM's own sheet intake,
  * which shares it out across its teams exactly as it did when the sheet
@@ -33,7 +34,7 @@ import type {
  */
 
 export const ORGS: TrafficOrg[] = ["delta", "draw", "remote"];
-export const SHEETS: TrafficSheet[] = ["abhin", "shoaib"];
+export const SHEETS: TrafficSheet[] = ["abhin", "shoaib", "drawsheet"];
 const SHORT: Record<TrafficOrg, string> = { delta: "Delta", draw: "Draw", remote: "Remote" };
 
 export const isSheet = (v: unknown): v is TrafficSheet => SHEETS.includes(v as TrafficSheet);
@@ -59,6 +60,10 @@ interface SheetConfig {
   creative: (lead: Pick<ITrafficLead, "adName" | "adset" | "knowledge">) => string;
   /** The split the first time, before anybody has changed it. */
   teams: Record<string, TrafficShare[]>;
+  /** Who each CRM is told added its leads, where not the account the first two sheets' scripts named. */
+  reporters?: Partial<Record<TrafficOrg, string>>;
+  /** Rows without a created time are taken, dated when they reach Root — rows typed into the sheet by hand. */
+  undated?: boolean;
 }
 
 const team = (
@@ -130,6 +135,25 @@ export const SHEET_CONFIG: Record<TrafficSheet, SheetConfig> = {
       ],
     },
   },
+  /*
+   * The Draw lead sheet (the user, 2026-10-05): Meta's leads and rows typed in
+   * by hand, every one to Delta's Sales CRM — where its own script sent them
+   * straight, with this source label and, as then, no reporter named: the CRM
+   * records its own. Its hand-typed rows have no created time; they are taken
+   * all the same. Its Meta rows are not laid out under its headers, so it has
+   * a script of its own, sheets/draw-lead-sheet.gs.
+   */
+  drawsheet: {
+    name: "Draw lead sheet",
+    about: "Meta's leads and rows typed in by hand — one split for the whole sheet.",
+    segments: [{ key: "all", label: "All leads", source: "TRADING-LEADS NITRO" }],
+    segmentOf: () => "all",
+    creative: (lead) =>
+      [lead.adName && `Ad: ${lead.adName}`, lead.adset && `Ad set: ${lead.adset}`].filter(Boolean).join("\n"),
+    teams: { all: [team("delta", TEAM_NAME.delta, "delta", 100)] },
+    reporters: { delta: "" },
+    undated: true,
+  },
 };
 
 const configOf = (sheet: string | undefined) => SHEET_CONFIG[isSheet(sheet) ? sheet : "abhin"];
@@ -147,7 +171,7 @@ const defaultRule = (sheet: TrafficSheet) => ({
     version: 1,
     shares: SHEET_CONFIG[sheet].teams[s.key],
   })),
-  reporters: { delta: SHEETS_REPORTER, draw: "", remote: "" },
+  reporters: { delta: SHEETS_REPORTER, draw: "", remote: "", ...SHEET_CONFIG[sheet].reporters },
 });
 
 /**
@@ -338,7 +362,7 @@ function parseRow(raw: z.output<typeof intakeRowSchema>, sheet: TrafficSheet): P
   else if (isTest(`${raw.full_name} ${raw.phone_number}`)) problem = "Meta test lead";
   else if (!raw.full_name || raw.full_name.toLowerCase() === "nan") problem = "No name";
   else if (phone.replace(/\D/g, "").length < 7) problem = "No usable phone number";
-  else if (!createdTime) problem = "No created time";
+  else if (!createdTime && !cfg.undated) problem = "No created time";
 
   return {
     sourceKey,
