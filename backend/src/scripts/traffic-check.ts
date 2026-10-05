@@ -27,7 +27,9 @@
  *     and only people given lead-traffic access see the rest;
  *   - the Dilshad team moves to its own CRM, remote, straight to Nusra's
  *     account there, without its count starting again; somebody the remote
- *     CRM already has goes back to it; Abhin's sheet is not bothered by it.
+ *     CRM already has goes back to it; Abhin's sheet is not bothered by it;
+ *   - the Leads list keeps to the dates the page picks — Gulf days, as the
+ *     totals count them — and without dates lists everything, as before.
  *
  * Run through scripts/traffic-check.sh (throwaway mongod, the real backend, and
  * stand-in CRMs served from here). With `seed` it only writes the old split
@@ -684,6 +686,41 @@ async function main() {
   const moveAudit = (await db.collection("auditlogs").find({ action: "traffic_rules_changed" }).toArray())
     .find((x) => /Dilshad team \(Remote → Nusra\) 23\.08%/.test(String(x.detail)));
   check("the move is in the audit log", !!moveAudit);
+
+  // ── The Leads list, by the page's dates ────────────────────────────────────
+  step("The Leads list by date — the page's Today, 30 days, This month and Custom");
+  const dated = (n: number, at: string, extra: Record<string, unknown> = {}) =>
+    legacyLead(`dated-${n}`, `+97159777000${n}`, { sheet: "abhin", name: `Dated ${n}`, receivedAt: new Date(at), createdTime: new Date(at), ...extra });
+  await db.collection("trafficleads").insertMany([
+    dated(1, "2026-08-31T19:59:00Z"),                            // 23:59 Gulf on 31 August
+    dated(2, "2026-08-31T20:00:00Z"),                            // midnight Gulf: 1 September
+    dated(3, "2026-09-15T08:00:00Z", { destination: "draw" }),
+    dated(4, "2026-09-30T19:59:59Z"),                            // September's last second, Gulf
+    dated(5, "2026-09-30T20:00:00Z"),                            // 1 October, Gulf
+  ]);
+  const byDates = async (q: string) => (await call("GET", `/traffic/leads?limit=100${q}`, undefined, root)).body?.data;
+  const names = (l: Json) => ((l?.items ?? []) as Json[]).map((i) => i.name).filter((n) => /^Dated/.test(String(n)));
+  const sept = await byDates("&from=2026-09-01&to=2026-09-30");
+  check("September: its three, newest first — the boundaries in Gulf time",
+    sept?.total === 3 && show(names(sept)) === show(["Dated 4", "Dated 3", "Dated 2"]), show(sept?.items?.map((i: Json) => i.name)));
+  check("one day: 31 August is its last minute only", show(names(await byDates("&from=2026-08-31&to=2026-08-31"))) === show(["Dated 1"]));
+  check("1 October, Gulf, is the lead at 20:00 UTC on 30 September", show(names(await byDates("&from=2026-10-01&to=2026-10-01"))) === show(["Dated 5"]));
+  const septDraw = await byDates("&from=2026-09-01&to=2026-09-30&org=draw");
+  check("with a CRM picked as well: September's Draw one", septDraw?.total === 1 && septDraw?.items?.[0]?.name === "Dated 3", show(septDraw?.items));
+  const septPage2 = (await call("GET", "/traffic/leads?limit=2&page=2&from=2026-09-01&to=2026-09-30", undefined, root)).body?.data;
+  check("paged within the dates: page 2 of 2", septPage2?.total === 3 && show(septPage2?.items?.map((i: Json) => i.name)) === show(["Dated 2"]), show(septPage2));
+  const onwards = names(await byDates("&from=2026-09-30"));
+  check("from a day on, with no end", onwards.includes("Dated 4") && onwards.includes("Dated 5") && !onwards.includes("Dated 3"), show(onwards));
+  const upTo = await byDates("&to=2026-08-31");
+  check("up to a day, with no start", upTo?.total === 1 && upTo?.items?.[0]?.name === "Dated 1", show(upTo?.items));
+  const all = await byDates("");
+  check("no dates: every lead, as before", all?.total === await db.collection("trafficleads").countDocuments({ sheet: "abhin" }), show(all?.total));
+  const septSum = (await call("GET", "/traffic/summary?sheet=abhin&from=2026-09-01&to=2026-09-30", undefined, root)).body?.data;
+  check("the totals for the same dates count the same three", septSum?.totals?.received === 3, show(septSum?.totals));
+  const badDate = await call("GET", "/traffic/leads?from=2026-9-1&to=2026-09-30", undefined, root);
+  check("a date not written YYYY-MM-DD is refused", badDate.status === 400 && /YYYY-MM-DD/.test(String(badDate.body?.message)), show(badDate.body));
+  const backwards = await call("GET", "/traffic/leads?from=2026-09-30&to=2026-09-01", undefined, root);
+  check("'from' after 'to' is refused", backwards.status === 400 && /after/.test(String(backwards.body?.message)), show(backwards.body));
 
   console.log(`\n${checks - failures}/${checks} checks passed`);
   for (const s of servers) s.close();

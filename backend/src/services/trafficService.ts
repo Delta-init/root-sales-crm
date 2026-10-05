@@ -1030,11 +1030,20 @@ export async function listLeads(opts: {
   org: TrafficOrg | "all";
   page: number;
   limit: number;
+  /** Received on these Gulf days, YYYY-MM-DD, both included; either left out, no bound that side. */
+  from?: string;
+  to?: string;
 }) {
   const q: Record<string, unknown> = { sheet: opts.sheet };
   if (opts.filter === "waiting") q.status = { $in: WAITING };
   else if (opts.filter !== "all") q.status = opts.filter;
   if (opts.org !== "all") q.destination = opts.org;
+  if (opts.from || opts.to) {
+    q.receivedAt = {
+      ...(opts.from ? { $gte: gulfStart(opts.from) } : {}),
+      ...(opts.to ? { $lt: new Date(gulfStart(opts.to).getTime() + 24 * 60 * 60_000) } : {}),
+    };
+  }
 
   const [items, total, rule] = await Promise.all([
     TrafficLead.find(q).sort({ receivedAt: -1 }).skip((opts.page - 1) * opts.limit).limit(opts.limit).lean(),

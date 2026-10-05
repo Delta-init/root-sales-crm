@@ -17,12 +17,16 @@ import { useAuth } from "@/providers/AuthProvider";
 import { cn } from "@/lib/utils";
 import type { TrafficLeadPage, TrafficLeadRow, TrafficOrg, TrafficRules, TrafficSheetKey, TrafficSummary } from "@/lib/types";
 
+/** The days the page looks at, in Gulf time: the last few, this month so far, or any two dates. */
 const RANGES = [
-  { key: "today", label: "Today", days: 0 },
-  { key: "7d", label: "7 days", days: 6 },
-  { key: "30d", label: "30 days", days: 29 },
+  { key: "today", label: "Today" },
+  { key: "7d", label: "7 days" },
+  { key: "30d", label: "30 days" },
+  { key: "month", label: "This month" },
+  { key: "custom", label: "Custom" },
 ] as const;
 type RangeKey = (typeof RANGES)[number]["key"];
+const LAST_DAYS: Partial<Record<RangeKey, number>> = { today: 0, "7d": 6, "30d": 29 };
 
 const FILTERS = [
   { key: "all", label: "All" },
@@ -74,6 +78,8 @@ export default function TrafficPage() {
   const canManage = admin?.role === "root_admin" || admin?.trafficAccess === "manage";
   const [sheet, setSheet] = useState<TrafficSheetKey>("abhin");
   const [range, setRange] = useState<RangeKey>("today");
+  // The two dates of Custom, filled from whatever was on show when it is picked.
+  const [custom, setCustom] = useState({ from: "", to: "" });
   const [filter, setFilter] = useState<FilterKey>("all");
   const [org, setOrg] = useState<"all" | TrafficOrg>("all");
   const [page, setPage] = useState(1);
@@ -98,8 +104,25 @@ export default function TrafficPage() {
     }
   };
 
-  const to = gulfToday();
-  const from = shiftDay(to, -RANGES.find((r) => r.key === range)!.days);
+  const today = gulfToday();
+  const { from, to } =
+    range === "custom" && custom.from && custom.to
+      ? custom
+      : range === "month"
+        ? { from: `${today.slice(0, 8)}01`, to: today }
+        : { from: shiftDay(today, -(LAST_DAYS[range] ?? 0)), to: today };
+  // The leads below keep to the same days, from their first page.
+  const chooseRange = (key: RangeKey) => {
+    if (key === "custom") setCustom({ from, to });
+    setRange(key);
+    setPage(1);
+  };
+  // A From after To moves To along with it, and the other way round.
+  const setCustomDay = (side: "from" | "to", day: string) => {
+    if (!day) return;
+    setCustom((c) => (side === "from" ? { from: day, to: day > c.to ? day : c.to } : { from: day < c.from ? day : c.from, to: day }));
+    setPage(1);
+  };
 
   const rules = useQuery({
     queryKey: ["traffic-rules"],
@@ -112,10 +135,10 @@ export default function TrafficPage() {
     refetchInterval: 30_000,
   });
   const leads = useQuery({
-    queryKey: ["traffic-leads", sheet, filter, org, page],
+    queryKey: ["traffic-leads", sheet, filter, org, from, to, page],
     queryFn: async () =>
-      (await api.get(`/traffic/leads?sheet=${sheet}&filter=${filter}&org=${org}&page=${page}&limit=25`)).data
-        .data as TrafficLeadPage,
+      (await api.get(`/traffic/leads?sheet=${sheet}&filter=${filter}&org=${org}&from=${from}&to=${to}&page=${page}&limit=25`))
+        .data.data as TrafficLeadPage,
     refetchInterval: 30_000,
   });
 
@@ -232,10 +255,31 @@ export default function TrafficPage() {
 
       <div className="flex flex-wrap items-center gap-2">
         {RANGES.map((r) => (
-          <Button key={r.key} size="sm" variant={range === r.key ? "default" : "outline"} onClick={() => setRange(r.key)}>
+          <Button key={r.key} size="sm" variant={range === r.key ? "default" : "outline"} onClick={() => chooseRange(r.key)}>
             {r.label}
           </Button>
         ))}
+        {range === "custom" && (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <input
+              type="date"
+              value={from}
+              max={today}
+              onChange={(e) => setCustomDay("from", e.target.value)}
+              className="rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-primary"
+              aria-label="From"
+            />
+            <span className="text-muted-foreground">to</span>
+            <input
+              type="date"
+              value={to}
+              max={today}
+              onChange={(e) => setCustomDay("to", e.target.value)}
+              className="rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-primary"
+              aria-label="To"
+            />
+          </div>
+        )}
         <span className="text-xs text-muted-foreground">
           {from === to ? from : `${from} → ${to}`} · Gulf time
         </span>
@@ -365,7 +409,7 @@ export default function TrafficPage() {
           {leads.isLoading ? (
             <div className="space-y-2">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
           ) : !leads.data?.items.length ? (
-            <p className="py-10 text-center text-sm text-muted-foreground">No leads here yet.</p>
+            <p className="py-10 text-center text-sm text-muted-foreground">No leads here for these dates.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

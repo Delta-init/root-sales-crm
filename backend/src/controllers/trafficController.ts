@@ -147,12 +147,19 @@ const leadsQuery = z.object({
   org: z.enum(["all", "delta", "draw", "remote"]).default("all"),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(25),
+  // The days the page is looking at, as the summary takes them (Gulf time); without them, every lead.
+  from: DATE.optional(),
+  to: DATE.optional(),
 });
 
 export const leads = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   const parsed = leadsQuery.safeParse(req.query);
   if (!parsed.success) {
     sendError(res, parsed.error.issues[0]?.message ?? "Invalid query", 400);
+    return;
+  }
+  if (parsed.data.from && parsed.data.to && parsed.data.from > parsed.data.to) {
+    sendError(res, "'from' is after 'to'", 400);
     return;
   }
   const sheet = sheetOf(parsed.data.sheet);
