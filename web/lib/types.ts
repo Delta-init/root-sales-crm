@@ -464,6 +464,27 @@ export interface TrafficSummary {
   totals: { received: number; sent: number; duplicates: number; invalid: number; waiting: number; failed: number };
 }
 
+/** A tab on the Lead traffic page: one sheet, or all of them together. */
+export type TrafficTab = TrafficSheetKey | "all";
+
+export type TrafficTotals = TrafficSummary["totals"];
+
+/** Every sheet together, for the All tab: the totals, and each sheet's with the CRMs its leads went to. */
+export interface TrafficAllSummary {
+  sheet: "all";
+  from: string;
+  to: string;
+  totals: TrafficTotals;
+  sheets: {
+    key: TrafficSheetKey;
+    name: string;
+    paused: boolean;
+    totals: TrafficTotals;
+    /** Only CRMs that got any of its leads in the period. */
+    crms: ({ org: TrafficOrg; name: string } & TrafficTotals)[];
+  }[];
+}
+
 export interface TrafficLeadRow {
   id: string;
   sheet: TrafficSheetKey;

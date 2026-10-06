@@ -1044,13 +1044,71 @@ export async function summary(sheet: TrafficSheet, from: string, to: string) {
   };
 }
 
+type TallyRow = { _id: { status: TrafficStatus }; n: number };
+
+/** The six counts the page's totals show, for any set of grouped rows. */
+function tally(of: TallyRow[]) {
+  const count = (pred: (status: TrafficStatus) => boolean = () => true) =>
+    of.filter((r) => pred(r._id.status)).reduce((n, r) => n + r.n, 0);
+  return {
+    received: count(),
+    sent: count((st) => st === "sent"),
+    duplicates: count((st) => st === "duplicate"),
+    invalid: count((st) => st === "invalid"),
+    waiting: count((st) => WAITING.includes(st)),
+    failed: count((st) => st === "failed"),
+  };
+}
+
+/**
+ * Every lead sheet together, for the page's All tab (the user, 2026-10-06): the
+ * totals of all of them, and each sheet's own with the CRMs its leads went to —
+ * by the split, or back to where the person already was. A split belongs to one
+ * sheet, so there is none here.
+ */
+export async function summaryAll(from: string, to: string) {
+  const start = gulfStart(from);
+  const end = new Date(gulfStart(to).getTime() + 24 * 60 * 60_000);
+  type Row = { _id: { sheet: TrafficSheet; destination: TrafficOrg | null; status: TrafficStatus }; n: number };
+  const [rows, rules, orgs] = await Promise.all([
+    TrafficLead.aggregate<Row>([
+      { $match: { sheet: { $in: SHEETS }, receivedAt: { $gte: start, $lt: end } } },
+      { $group: { _id: { sheet: "$sheet", destination: "$destination", status: "$status" }, n: { $sum: 1 } } },
+    ]),
+    getRules(),
+    Organization.find({ code: { $in: ORGS } }).select("code name").lean(),
+  ]);
+  const orgNames = new Map(orgs.map((o) => [o.code, o.name]));
+  return {
+    sheet: "all" as const,
+    from,
+    to,
+    totals: tally(rows),
+    sheets: SHEETS.map((sheet) => {
+      const mine = rows.filter((r) => r._id.sheet === sheet);
+      return {
+        key: sheet,
+        name: SHEET_CONFIG[sheet].name,
+        paused: rules.get(sheet)?.paused ?? false,
+        totals: tally(mine),
+        crms: ORGS.map((org) => ({
+          org,
+          name: orgNames.get(org) ?? SHORT[org],
+          ...tally(mine.filter((r) => r._id.destination === org)),
+        })).filter((c) => c.received > 0),
+      };
+    }),
+  };
+}
+
 /** Enough of a number to recognise it, not enough to ring it. */
 const maskPhone = (p: string) => (p.length > 7 ? `${p.slice(0, 4)}${"•".repeat(p.length - 7)}${p.slice(-3)}` : p);
 
 export type LeadFilter = "all" | "waiting" | "failed" | "sent" | "duplicate" | "invalid";
 
 export async function listLeads(opts: {
-  sheet: TrafficSheet;
+  /** One sheet's leads, or — on the All tab — every sheet's. */
+  sheet: TrafficSheet | "all";
   filter: LeadFilter;
   org: TrafficOrg | "all";
   page: number;
@@ -1059,7 +1117,7 @@ export async function listLeads(opts: {
   from?: string;
   to?: string;
 }) {
-  const q: Record<string, unknown> = { sheet: opts.sheet };
+  const q: Record<string, unknown> = { sheet: opts.sheet === "all" ? { $in: SHEETS } : opts.sheet };
   if (opts.filter === "waiting") q.status = { $in: WAITING };
   else if (opts.filter !== "all") q.status = opts.filter;
   if (opts.org !== "all") q.destination = opts.org;
@@ -1070,13 +1128,14 @@ export async function listLeads(opts: {
     };
   }
 
-  const [items, total, rule] = await Promise.all([
+  const [items, total, rules] = await Promise.all([
     TrafficLead.find(q).sort({ receivedAt: -1 }).skip((opts.page - 1) * opts.limit).limit(opts.limit).lean(),
     TrafficLead.countDocuments(q),
-    getRule(opts.sheet),
+    getRules(),
   ]);
-  const teamName = (segment: string, key: string) =>
-    rule.segments.find((s) => s.key === segment)?.shares.find((s) => s.key === key)?.name ?? key;
+  // Each lead's team by its own sheet's split: on the All tab they come from several.
+  const teamName = (sheet: TrafficSheet, segment: string, key: string) =>
+    rules.get(sheet)?.segments.find((s) => s.key === segment)?.shares.find((s) => s.key === key)?.name ?? key;
   return {
     total,
     page: opts.page,
@@ -1090,7 +1149,7 @@ export async function listLeads(opts: {
       tab: d.tab,
       segment: d.segment,
       segmentLabel: segmentLabel(d.sheet, d.segment),
-      team: d.share ? teamName(d.segment, d.share) : "",
+      team: d.share ? teamName(d.sheet, d.segment, d.share) : "",
       destination: d.destination,
       reason: d.reason,
       status: d.status,

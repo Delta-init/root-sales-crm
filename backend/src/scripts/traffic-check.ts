@@ -792,6 +792,60 @@ async function main() {
   const backwards = await call("GET", "/traffic/leads?from=2026-09-30&to=2026-09-01", undefined, root);
   check("'from' after 'to' is refused", backwards.status === 400 && /after/.test(String(backwards.body?.message)), show(backwards.body));
 
+  step("The All tab — every sheet together (the user, 2026-10-06)");
+  const gulfNow = new Date(Date.now() + 4 * 60 * 60_000).toISOString().slice(0, 10);
+  const span = `from=2020-01-01&to=${gulfNow}`;
+  const inSpan = { receivedAt: { $gte: new Date("2019-12-31T20:00:00Z"), $lt: new Date(Date.parse(`${gulfNow}T00:00:00+04:00`) + 24 * 60 * 60_000) } };
+  const KEYS = ["abhin", "shoaib", "trading-leads-nitro"];
+  const TOTALS = ["received", "sent", "duplicates", "invalid", "waiting", "failed"];
+  const leadsIn = (q: Record<string, unknown>) => db.collection("trafficleads").countDocuments({ sheet: { $in: KEYS }, ...inSpan, ...q });
+  const allSum = (await call("GET", `/traffic/summary?sheet=all&${span}`, undefined, root)).body?.data;
+  const each = await Promise.all(KEYS.map(async (k) => (await call("GET", `/traffic/summary?sheet=${k}&${span}`, undefined, root)).body?.data));
+  check("All: every sheet, in the page's order", allSum?.sheet === "all" && show(allSum?.sheets?.map((s: Json) => s.key)) === show(KEYS),
+    show(allSum?.sheets?.map((s: Json) => s.key)));
+  check("…each with the totals its own tab has", KEYS.every((_, i) => show(allSum?.sheets?.[i]?.totals) === show(each[i]?.totals)),
+    show([allSum?.sheets?.map((s: Json) => s.totals), each.map((e) => e?.totals)]));
+  check("…the totals theirs added up — every lead on those days",
+    TOTALS.every((t) => allSum?.totals?.[t] === each.reduce((n, e) => n + (e?.totals?.[t] ?? 0), 0))
+    && allSum?.totals?.received === (await leadsIn({})) && allSum.totals.received > 0, show(allSum?.totals));
+  let byCrm = true;
+  for (const s of allSum?.sheets ?? []) {
+    for (const org of ["delta", "draw", "remote"]) {
+      const c = s.crms.find((x: Json) => x.org === org);
+      const went = await leadsIn({ sheet: s.key, destination: org });
+      const sent = await leadsIn({ sheet: s.key, destination: org, status: "sent" });
+      if ((c?.received ?? 0) !== went || (c?.sent ?? 0) !== sent) byCrm = false;
+    }
+  }
+  check("…each sheet's leads by the CRM they went to — only CRMs that got some",
+    byCrm && (allSum?.sheets ?? []).every((s: Json) => s.crms.every((c: Json) => c.received > 0 && typeof c.name === "string"))
+    && (allSum?.sheets ?? []).some((s: Json) => s.crms.length > 1), show(allSum?.sheets?.map((s: Json) => [s.key, s.crms])));
+  const rulesNow = await allRules();
+  check("…paused or routing, as each sheet's rule is", (allSum?.sheets ?? []).every((s: Json) => s.paused === sheetIn(rulesNow, s.key)?.paused));
+  check("the same days written ALL", (await call("GET", `/traffic/summary?sheet=ALL&${span}`, undefined, root)).body?.data?.totals?.received === allSum?.totals?.received);
+  const allList = (await call("GET", `/traffic/leads?sheet=all&limit=100&${span}`, undefined, root)).body?.data;
+  check("All's leads: every sheet's, newest first", allList?.total === allSum?.totals?.received
+    && new Set((allList?.items ?? []).map((l: Json) => l.sheet)).size > 1
+    && (allList?.items ?? []).every((l: Json, i: number, a: Json[]) => i === 0 || String(a[i - 1].receivedAt) >= String(l.receivedAt)), show(allList?.total));
+  const shOwn = (await call("GET", `/traffic/leads?sheet=shoaib&limit=100&${span}`, undefined, root)).body?.data;
+  const teamOnTab = new Map(((shOwn?.items ?? []) as Json[]).map((l) => [l.id, l.team]));
+  const shoaibOnAll = ((allList?.items ?? []) as Json[]).filter((l) => l.sheet === "shoaib" && l.team && teamOnTab.has(l.id));
+  check("…each lead's team named by its own sheet's split", shoaibOnAll.length > 0 && shoaibOnAll.every((l) => teamOnTab.get(l.id) === l.team),
+    show(shoaibOnAll.slice(0, 3)));
+  const sentToDelta = (await call("GET", `/traffic/leads?sheet=all&filter=sent&org=delta&limit=1&${span}`, undefined, root)).body?.data;
+  check("…the status and CRM filters work on it as on a sheet", sentToDelta?.total === (await leadsIn({ status: "sent", destination: "delta" })) && sentToDelta.total > 0,
+    show(sentToDelta?.total));
+  const intoAll = await post({ sheet: "all", rows: [srow("+966530000998")] });
+  check("nothing posts to \"all\": the intake refuses it", intoAll.status === 400, `${intoAll.status} ${show(intoAll.body)}`);
+  const pingAll = await call("GET", "/traffic/intake/ping?sheet=all", undefined, { "x-traffic-key": SHEET_KEY });
+  check("…nor does a sheet's Test connection take it", pingAll.status === 400, `${pingAll.status} ${show(pingAll.body)}`);
+  const splitAll = await call("PUT", "/traffic/rules/all", { paused: true, segments: {} }, root);
+  // As for any sheet that is not one: the split's route answers 404.
+  check("…and there is no split of \"all\" to change", splitAll.status === 404 && /Unknown sheet "all"/.test(String(splitAll.body?.message)),
+    `${splitAll.status} ${show(splitAll.body)}`);
+  check("and it needs lead-traffic access like a sheet", (await call("GET", "/traffic/summary?sheet=all", undefined, member)).status === 403
+    && (await call("GET", "/traffic/leads?sheet=all", undefined, member)).status === 403);
+
   console.log(`\n${checks - failures}/${checks} checks passed`);
   for (const s of servers) s.close();
   await mongoose.disconnect();

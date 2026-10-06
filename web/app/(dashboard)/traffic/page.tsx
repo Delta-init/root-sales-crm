@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
-import { AlertTriangle, Loader2, PauseCircle, PlayCircle, RotateCcw, Settings2, Shuffle } from "lucide-react";
+import { AlertTriangle, ArrowRight, Layers, Loader2, PauseCircle, PlayCircle, RotateCcw, Settings2, Shuffle } from "lucide-react";
 import { AxiosError } from "axios";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +15,9 @@ import { SplitDialog } from "@/components/traffic/SplitDialog";
 import { api, apiErrorMessage } from "@/lib/axios";
 import { useAuth } from "@/providers/AuthProvider";
 import { cn } from "@/lib/utils";
-import type { TrafficLeadPage, TrafficLeadRow, TrafficOrg, TrafficRules, TrafficSheetKey, TrafficSummary } from "@/lib/types";
+import type {
+  TrafficAllSummary, TrafficLeadPage, TrafficLeadRow, TrafficOrg, TrafficRules, TrafficSummary, TrafficTab,
+} from "@/lib/types";
 
 /** The days the page looks at, in Gulf time: the last few, this month so far, or any two dates. */
 const RANGES = [
@@ -55,13 +57,19 @@ const statusTone = (s: TrafficLeadRow["status"]): "success" | "warning" | "destr
 };
 
 const forbidden = (e: unknown) => e instanceof AxiosError && e.response?.status === 403;
+/** The All tab's answer, or one sheet's. */
+const isAll = (s: TrafficSummary | TrafficAllSummary | undefined): s is TrafficAllSummary => s?.sheet === "all";
+const isOneSheet = (s: TrafficSummary | TrafficAllSummary | undefined): s is TrafficSummary => !!s && s.sheet !== "all";
+/** The portal's server from before the All tab: it answers "all" with an unknown sheet. */
+const noAllYet = (e: unknown) =>
+  e instanceof AxiosError && e.response?.status === 400 && /unknown sheet "all"/i.test(String(e.response?.data?.message ?? ""));
 
 /** A colour per team, in the order the split lists them. */
 const TEAM_COLOURS = ["bg-primary", "bg-violet-500", "bg-amber-500", "bg-emerald-500", "bg-sky-500", "bg-rose-500"];
 
-/** The sheet last looked at, so whoever looks after one sheet lands on it. */
+/** The tab last looked at, so whoever looks after one sheet — or all of them — lands on it. */
 const SHEET_STORE = "root.traffic.sheet";
-const SHEET_KEYS: TrafficSheetKey[] = ["abhin", "shoaib", "trading-leads-nitro"];
+const SHEET_KEYS: TrafficTab[] = ["all", "abhin", "shoaib", "trading-leads-nitro"];
 
 /**
  * Lead traffic.
@@ -71,13 +79,16 @@ const SHEET_KEYS: TrafficSheetKey[] = ["abhin", "shoaib", "trading-leads-nitro"]
  * of it. The split itself is changed from here, and a lead a CRM could not
  * take can be sent again by hand — the worker would get to it anyway, this
  * just does not make anybody wait for it.
+ *
+ * The All tab (the user, 2026-10-06) is every sheet together: the totals, each
+ * sheet's own with the CRMs its leads went to, and one list of every lead.
  */
 export default function TrafficPage() {
   const qc = useQueryClient();
   const { admin } = useAuth();
   // Looking is enough to be here; changing the split and sending by hand is more.
   const canManage = admin?.role === "root_admin" || admin?.trafficAccess === "manage";
-  const [sheet, setSheet] = useState<TrafficSheetKey>("abhin");
+  const [sheet, setSheet] = useState<TrafficTab>("abhin");
   const [range, setRange] = useState<RangeKey>("today");
   // The two dates of Custom, filled from whatever was on show when it is picked.
   const [custom, setCustom] = useState({ from: "", to: "" });
@@ -96,7 +107,7 @@ export default function TrafficPage() {
       /* private window or blocked storage: start on the first sheet */
     }
   }, []);
-  const chooseSheet = (key: TrafficSheetKey) => {
+  const chooseSheet = (key: TrafficTab) => {
     setSheet(key);
     setPage(1);
     try {
@@ -133,7 +144,7 @@ export default function TrafficPage() {
   const summary = useQuery({
     queryKey: ["traffic-summary", sheet, from, to],
     queryFn: async () =>
-      (await api.get(`/traffic/summary?sheet=${sheet}&from=${from}&to=${to}`)).data.data as TrafficSummary,
+      (await api.get(`/traffic/summary?sheet=${sheet}&from=${from}&to=${to}`)).data.data as TrafficSummary | TrafficAllSummary,
     refetchInterval: 30_000,
   });
   const leads = useQuery({
@@ -179,11 +190,19 @@ export default function TrafficPage() {
   }
 
   const current = rules.data?.sheets.find((s) => s.key === sheet);
+  const sheetName = new Map((rules.data?.sheets ?? []).map((s) => [s.key, s.name]));
+  // What came back is for the tab on show: one sheet's split, or every sheet's totals.
+  const answer = summary.data;
+  const one = answer?.sheet === sheet && isOneSheet(answer) ? answer : null;
+  const all = sheet === "all" && isAll(answer) ? answer : null;
+  const allUnavailable = sheet === "all" && (noAllYet(summary.error) || noAllYet(leads.error));
+  // The CRMs the tab sends to: this sheet's, or on All every sheet's.
+  const uses = new Set(sheet === "all" ? (rules.data?.sheets ?? []).flatMap((s) => s.uses) : current?.uses ?? []);
   const setup = [
     ...(rules.data && !rules.data.sheetKeySet ? ["The sheets have no key to post with — set LEAD_TRAFFIC_SHEET_KEY on the portal's server."] : []),
     // Only the CRMs this sheet sends to: another CRM not being set up yet is
     // not this sheet's problem.
-    ...(rules.data?.crms ?? []).filter((c) => current?.uses.includes(c.code)).flatMap((c) => [
+    ...(rules.data?.crms ?? []).filter((c) => uses.has(c.code)).flatMap((c) => [
       ...(c.active ? [] : [`${c.name} is not active in the registry.`]),
       ...(c.missing.length ? [`${c.name} cannot be sent leads yet — set ${c.missing.join(" and ")}.`] : []),
     ]),
@@ -212,7 +231,8 @@ export default function TrafficPage() {
               {current.paused ? "Paused" : "Routing"}
             </Badge>
           )}
-          {canManage && (
+          {/* A split is one sheet's: nothing to edit on All. */}
+          {canManage && sheet !== "all" && (
             <Button variant="outline" size="sm" onClick={() => setEditing(true)} disabled={!current}>
               <Settings2 /> Edit split
             </Button>
@@ -223,6 +243,15 @@ export default function TrafficPage() {
       {/* Which sheet */}
       <div className="space-y-2">
         <div className="flex flex-wrap gap-2" role="tablist" aria-label="Lead sheet">
+          <Button
+            role="tab"
+            aria-selected={sheet === "all"}
+            size="sm"
+            variant={sheet === "all" ? "default" : "outline"}
+            onClick={() => chooseSheet("all")}
+          >
+            <Layers /> All
+          </Button>
           {(rules.data?.sheets ?? []).map((s) => (
             <Button
               key={s.key}
@@ -239,6 +268,11 @@ export default function TrafficPage() {
           {rules.isLoading && [0, 1].map((i) => <Skeleton key={i} className="h-9 w-40" />)}
         </div>
         {current && <p className="text-sm text-muted-foreground">{current.about}</p>}
+        {sheet === "all" && (
+          <p className="text-sm text-muted-foreground">
+            Every lead sheet together. A sheet&apos;s split — and changing it — is on its own tab.
+          </p>
+        )}
       </div>
 
       {setup.length > 0 && (
@@ -287,6 +321,16 @@ export default function TrafficPage() {
         </span>
       </div>
 
+      {allUnavailable && (
+        <Card>
+          <CardContent className="pt-6 text-sm text-muted-foreground">
+            The portal&apos;s server is still on the previous version of lead traffic, so All has nothing to show yet.
+            Each sheet&apos;s own tab works as before; All works once the server is updated.
+          </CardContent>
+        </Card>
+      )}
+
+      {!allUnavailable && (<>
       {/* Totals */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {(
@@ -312,9 +356,70 @@ export default function TrafficPage() {
         ))}
       </div>
 
+      {/* All: each sheet, and the CRMs its leads went to */}
+      {sheet === "all" && (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {(all?.sheets ?? []).map((s) => (
+            <Card key={s.key}>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-baseline justify-between gap-2 text-base">
+                  <span>{s.name}</span>
+                  <span className="shrink-0 text-sm font-normal text-muted-foreground">{s.totals.received} received</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-xs text-muted-foreground">
+                  {s.totals.sent} sent · {s.totals.duplicates} duplicates
+                  {s.totals.waiting ? <span className="text-amber-500"> · {s.totals.waiting} waiting</span> : null}
+                  {s.totals.failed ? <span className="text-rose-500"> · {s.totals.failed} failed</span> : null}
+                  {s.totals.invalid ? ` · ${s.totals.invalid} invalid` : null}
+                </p>
+                {s.crms.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No leads on these dates.</p>
+                ) : (
+                  s.crms.map((c, i) => {
+                    const pct = s.totals.received ? Math.round((c.received / s.totals.received) * 1000) / 10 : 0;
+                    return (
+                      <div key={c.org} className="space-y-1.5">
+                        <div className="flex items-baseline justify-between gap-2 text-sm">
+                          <span className="font-medium">{c.name}</span>
+                          <span className="shrink-0 font-semibold">
+                            {c.received} <span className="text-xs font-normal text-muted-foreground">({pct}%)</span>
+                          </span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-muted">
+                          <div className={cn("h-full rounded-full", TEAM_COLOURS[i % TEAM_COLOURS.length])} style={{ width: `${pct}%` }} />
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {c.sent} sent · {c.duplicates} duplicates
+                          {c.waiting ? <span className="text-amber-500"> · {c.waiting} waiting</span> : null}
+                          {c.failed ? <span className="text-rose-500"> · {c.failed} failed</span> : null}
+                          {c.invalid ? ` · ${c.invalid} turned down` : null}
+                        </p>
+                      </div>
+                    );
+                  })
+                )}
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <Badge variant={s.paused ? "warning" : "success"} className="gap-1">
+                    {s.paused ? <PauseCircle className="h-3.5 w-3.5" /> : <PlayCircle className="h-3.5 w-3.5" />}
+                    {s.paused ? "Paused" : "Routing"}
+                  </Badge>
+                  <Button size="sm" variant="ghost" onClick={() => chooseSheet(s.key)}>
+                    Open <ArrowRight />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+          {summary.isLoading && [0, 1, 2].map((i) => <Skeleton key={i} className="h-44 w-full" />)}
+        </div>
+      )}
+
       {/* The split, per segment */}
+      {sheet !== "all" && (
       <div className={cn("grid gap-4", (current?.segments.length ?? 3) > 1 ? "md:grid-cols-2 xl:grid-cols-3" : "max-w-3xl")}>
-        {(summary.data?.sheet === sheet ? summary.data.segments : []).map((seg) => (
+        {(one?.segments ?? []).map((seg) => (
           <Card key={seg.key}>
             <CardHeader className="pb-3">
               <CardTitle className="flex items-baseline justify-between gap-2 text-base">
@@ -376,6 +481,7 @@ export default function TrafficPage() {
         ))}
         {summary.isLoading && [0, 1, 2].map((i) => <Skeleton key={i} className="h-44 w-full" />)}
       </div>
+      )}
 
       {/* Every lead */}
       <Card>
@@ -434,6 +540,7 @@ export default function TrafficPage() {
                         <div className="font-mono text-xs text-muted-foreground">{l.phone}</div>
                       </td>
                       <td className="py-2.5 pr-3">
+                        {sheet === "all" && <div className="text-xs font-medium text-primary">{sheetName.get(l.sheet) ?? l.sheet}</div>}
                         <div>{l.segmentLabel}</div>
                         <div className="max-w-56 truncate text-xs text-muted-foreground" title={l.tab}>{l.tab}</div>
                       </td>
@@ -483,6 +590,7 @@ export default function TrafficPage() {
           )}
         </CardContent>
       </Card>
+      </>)}
 
       {current && (
         <p className="text-xs text-muted-foreground">

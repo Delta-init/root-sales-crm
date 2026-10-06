@@ -18,6 +18,12 @@ const sheetOf = (value: unknown): TrafficSheet | null => {
   const v = value === undefined || value === "" ? "abhin" : String(value).trim().toLowerCase().replace(/\s+/g, "-");
   return traffic.isSheet(v) ? v : null;
 };
+/**
+ * A sheet, or "all" — every sheet together, for the page's All tab. Only for
+ * looking (the summary and the leads): nothing posts to, or splits, all of them.
+ */
+const sheetOrAll = (value: unknown): TrafficSheet | "all" | null =>
+  String(value ?? "").trim().toLowerCase() === "all" ? "all" : sheetOf(value);
 const unknownSheet = (value: unknown) =>
   `Unknown sheet "${String(value)}" — it is one of: ${traffic.SHEETS.join(", ")}`;
 
@@ -119,7 +125,7 @@ export const putRules = async (req: AuthenticatedRequest, res: Response, next: N
 };
 
 export const summary = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  const sheet = sheetOf(req.query.sheet);
+  const sheet = sheetOrAll(req.query.sheet);
   if (!sheet) {
     sendError(res, unknownSheet(req.query.sheet), 400);
     return;
@@ -136,7 +142,7 @@ export const summary = async (req: AuthenticatedRequest, res: Response, next: Ne
     return;
   }
   try {
-    sendSuccess(res, "Lead traffic", await traffic.summary(sheet, from, to));
+    sendSuccess(res, "Lead traffic", sheet === "all" ? await traffic.summaryAll(from, to) : await traffic.summary(sheet, from, to));
   } catch (error) {
     next(error);
   }
@@ -163,7 +169,7 @@ export const leads = async (req: AuthenticatedRequest, res: Response, next: Next
     sendError(res, "'from' is after 'to'", 400);
     return;
   }
-  const sheet = sheetOf(parsed.data.sheet);
+  const sheet = sheetOrAll(parsed.data.sheet);
   if (!sheet) {
     sendError(res, unknownSheet(parsed.data.sheet), 400);
     return;
