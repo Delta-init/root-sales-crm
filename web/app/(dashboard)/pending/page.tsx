@@ -32,6 +32,8 @@ type View = (typeof VIEWS)[number]["key"];
 const FIRST = 8;
 
 const forbidden = (e: unknown) => e instanceof AxiosError && e.response?.status === 403;
+/** The portal's server from before this page: it has no /pending yet. */
+const notYet = (e: unknown) => e instanceof AxiosError && e.response?.status === 404;
 /** "1 reminder", "3 reminders": the kind's label, singular for one. */
 const howMany = (count: number, label: string) => `${count} ${(count === 1 ? label.replace(/s$/, "") : label).toLowerCase()}`;
 const time = (iso: string) =>
@@ -122,7 +124,9 @@ export default function PendingPage() {
         <Card className="border-rose-500/40 bg-rose-500/5">
           <CardContent className="flex gap-3 pt-6 text-sm">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-500" />
-            Could not load what is pending. Refresh in a moment.
+            {notYet(pending.error)
+              ? "The portal's server is still on the previous version, so it cannot answer this page yet. It works once the server is updated."
+              : "Could not load what is pending. Refresh in a moment."}
           </CardContent>
         </Card>
       ) : view === "portal" ? (
