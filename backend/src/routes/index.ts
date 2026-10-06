@@ -10,6 +10,7 @@ import serviceRoutes from "./serviceRoutes.js";
 import mentorRoutes from "./mentorRoutes.js";
 import taskRoutes from "./taskRoutes.js";
 import trafficRoutes from "./trafficRoutes.js";
+import pendingRoutes from "./pendingRoutes.js";
 
 const router = Router();
 
@@ -24,6 +25,7 @@ router.use("/service", serviceRoutes);
 router.use("/mentors", mentorRoutes);
 router.use("/tasks", taskRoutes);
 router.use("/traffic", trafficRoutes);
+router.use("/pending", pendingRoutes);
 
 router.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

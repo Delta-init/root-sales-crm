@@ -521,3 +521,51 @@ export interface CrmPerson {
   name: string;
   email: string;
 }
+
+// ── Pending: every portal's sidebar counts, and who they wait on ──────────────
+
+export interface PendingKind {
+  key: string;
+  label: string;
+  total: number;
+  /** Of those, how many are past their time (reminders). */
+  overdue?: number;
+}
+
+export interface PendingPerson {
+  id: string;
+  name: string;
+  email: string;
+  /** Still active in that portal; somebody who left can still have work sitting with them. */
+  active: boolean;
+  counts: Record<string, number>;
+  total: number;
+}
+
+export interface PendingPortal {
+  code: string;
+  name: string;
+  accent: string;
+  available: boolean;
+  error?: string;
+  kinds: PendingKind[];
+  people: PendingPerson[];
+  total: number;
+}
+
+/** One person across every portal, matched by email. */
+export interface PendingEveryone {
+  key: string;
+  name: string;
+  email: string;
+  total: number;
+  items: { portal: string; portalName: string; key: string; label: string; count: number; overdue?: number }[];
+}
+
+export interface PendingOverview {
+  generatedAt: string;
+  portals: PendingPortal[];
+  people: PendingEveryone[];
+  /** In the registry, not on the page yet. */
+  comingNext: { code: string; name: string }[];
+}

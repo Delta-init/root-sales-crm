@@ -8,7 +8,7 @@
  */
 import type { LucideIcon } from "lucide-react";
 import {
-  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, LayoutGrid, Shuffle, Users2,
+  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Inbox, LayoutGrid, Shuffle, Users2,
 } from "lucide-react";
 
 export interface NavLink {
@@ -30,6 +30,9 @@ export interface NavItem extends Partial<NavLink> {
 
 export const NAV: NavItem[] = [
   { href: "/dashboard", label: "Organisations", icon: LayoutGrid },
+  // What is waiting in every portal, and for whom — each portal's sidebar
+  // counts on one page. Root admins only: it is everybody's queue at once.
+  { href: "/pending", label: "Pending", icon: Inbox, rootOnly: true },
   /*
    * Sales, root admins only.
    *
