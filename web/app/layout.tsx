@@ -4,6 +4,7 @@ import NextTopLoader from "nextjs-toploader";
 import { Toaster } from "sonner";
 import { ThemeProvider } from "@/providers/ThemeProvider";
 import { Providers } from "@/providers/Providers";
+import { PwaRegister } from "@/components/PwaRegister";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -43,6 +44,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             showSpinner={false}
           />
           <Providers>{children}</Providers>
+          <PwaRegister />
           <Toaster richColors position="top-right" />
         </ThemeProvider>
       </body>
