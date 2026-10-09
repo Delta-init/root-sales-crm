@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { api, apiErrorMessage } from "@/lib/axios";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
+import { ClassInfo } from "@/components/mentors/ClassInfo";
 
 /**
  * When the academy's mentors are free, and what is already booked.
@@ -1133,6 +1134,8 @@ export default function MentorsPage() {
                     </div>
                   ) : null}
                 </div>
+                {/* Info: who booked, joined, cancelled and reviewed, and when it started and ended. */}
+                <ClassInfo c={c as Record<string, unknown>} tz={tz} />
               </>
             );
           })()}
