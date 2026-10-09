@@ -41,6 +41,11 @@ interface MentorClass {
   booked: number;
   capacity: number;
   mine: boolean;
+  /** The course and module it is a class of — the academy's own classes only (absent from an older LMS). */
+  courseId?: string | null;
+  course?: string | null;
+  moduleId?: string | null;
+  module?: string | null;
 }
 
 interface MentorMeeting {
@@ -169,14 +174,40 @@ export default function MentorsPage() {
    */
   const [query, setQuery] = useState("");
 
+  /*
+   * Search the sessions — a class by its title, course or module, a booked
+   * session by its title or who it is with — and narrow the classes to a course
+   * and its module (2026-10-09). Booked sessions belong to no course, so the
+   * course and module leave them be; the search does not.
+   */
+  const [find, setFind] = useState("");
+  const [course, setCourse] = useState("");
+  const [mod, setMod] = useState("");
+  const { courses, modules } = useMemo(() => {
+    const cs = new Map<string, string>(), ms = new Map<string, string>();
+    for (const m of schedule.data?.mentors ?? []) for (const c of m.classes ?? []) {
+      if (c.courseId) cs.set(c.courseId, c.course || "Course");
+      if (c.courseId === course && c.moduleId) ms.set(c.moduleId, c.module || "Module");
+    }
+    const sorted = (m: Map<string, string>) => Array.from(m).sort((a, b) => a[1].localeCompare(b[1]));
+    return { courses: sorted(cs), modules: sorted(ms) };
+  }, [schedule.data, course]);
+  const needle = find.trim().toLowerCase();
+  const filtering = !!(needle || course);
+  const has = (...vs: (string | null | undefined)[]) => vs.some((v) => String(v ?? "").toLowerCase().includes(needle));
+  const classShown = (c: MentorClass) =>
+    (!course || c.courseId === course) && (!mod || c.moduleId === mod) && (!needle || (c.mine && has(c.title, c.course, c.module)));
+  const meetingShown = (v: MentorMeeting) => !needle || has(v.title, ...(v.attendeeNames ?? []));
+
   const shown = useMemo(() => {
     const all = schedule.data?.mentors ?? [];
     const q = query.trim().toLowerCase();
-    if (!q) return all;
-    return all.filter(
-      (m) => m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q),
-    );
-  }, [schedule.data, query]);
+    const people = q ? all.filter((m) => m.name.toLowerCase().includes(q) || m.email.toLowerCase().includes(q)) : all;
+    // Searching or narrowing: only the mentors with something that matches this week.
+    return filtering
+      ? people.filter((m) => m.classes.some((c) => c.status !== "cancelled" && classShown(c)) || m.meetings.some(meetingShown))
+      : people;
+  }, [schedule.data, query, needle, course, mod]);
 
   /*
    * Booking an hour.
@@ -439,8 +470,8 @@ export default function MentorsPage() {
    */
   const dayCell = (m: Mentor, day: Date) => {
     const slots = m.slots.filter((s) => s.dayOfWeek === day.getDay());
-    const booked = m.classes.filter((c) => sameDay(c.startsAt, day));
-    const meetings = m.meetings.filter((v) => sameDay(v.startsAt, day));
+    const booked = m.classes.filter((c) => sameDay(c.startsAt, day) && classShown(c));
+    const meetings = m.meetings.filter((v) => sameDay(v.startsAt, day) && meetingShown(v));
     const empty = slots.length === 0 && booked.length === 0 && meetings.length === 0;
 
     if (empty) return null;
@@ -480,6 +511,9 @@ export default function MentorsPage() {
           >
             <span className="tabular-nums">{at(c.startsAt)}</span>{" "}
             {c.mine ? (c.title || "Class") : "Booked elsewhere"}
+            {c.mine && c.course && (
+              <span className="block truncate text-[10px] opacity-70">{c.course}{c.module ? ` · ${c.module}` : ""}</span>
+            )}
           </button>
         ))}
 
@@ -547,6 +581,27 @@ export default function MentorsPage() {
         </div>
       </div>
 
+      {/* Search and narrow the sessions — booked sessions have no course, so the course and module keep them. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[220px] flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input value={find} onChange={(e) => setFind(e.target.value)} placeholder="Search sessions — title, course, module, who it's with…" className="pl-9" />
+        </div>
+        <select value={course} onChange={(e) => { setCourse(e.target.value); setMod(""); }} aria-label="Course"
+          className="h-9 rounded-md border border-input bg-background px-2 text-sm">
+          <option value="">All courses</option>
+          {courses.map(([id, title]) => <option key={id} value={id}>{title}</option>)}
+        </select>
+        <select value={mod} onChange={(e) => setMod(e.target.value)} aria-label="Module" disabled={!course || !modules.length}
+          className="h-9 rounded-md border border-input bg-background px-2 text-sm disabled:opacity-50">
+          <option value="">{course && !modules.length ? "No modules" : "All modules"}</option>
+          {modules.map(([id, title]) => <option key={id} value={id}>{title}</option>)}
+        </select>
+        {filtering && (
+          <Button variant="ghost" size="sm" onClick={() => { setFind(""); setCourse(""); setMod(""); }}>Clear</Button>
+        )}
+      </div>
+
       {schedule.isPending && (
         <Card><CardContent className="space-y-3 py-6">
           {[0, 1, 2].map((i) => <Skeleton key={i} className="h-12 w-full" />)}
@@ -574,11 +629,11 @@ export default function MentorsPage() {
             box above. Saying the first when the second is true sends somebody
             off to investigate their own typo.
           */}
-          {query.trim() ? (
+          {query.trim() || filtering ? (
             <>
-              <p className="mt-3 text-sm font-medium">Nobody matches that</p>
+              <p className="mt-3 text-sm font-medium">{filtering ? "Nothing this week matches" : "Nobody matches that"}</p>
               <button
-                onClick={() => setQuery("")}
+                onClick={() => { setQuery(""); setFind(""); setCourse(""); setMod(""); }}
                 className="mt-2 text-xs text-primary hover:underline"
               >
                 Clear the search
