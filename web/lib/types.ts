@@ -569,3 +569,35 @@ export interface PendingOverview {
   /** In the registry, not on the page yet. */
   comingNext: { code: string; name: string }[];
 }
+
+/** One course's commission in a sales CRM, in AED per sale (creditUsd: the MT5 credit). */
+export interface CommissionPlanRow {
+  id: string;
+  name: string;
+  fee: number;
+  status: string;
+  sales: number;
+  tl: number;
+  sm: number;
+  creditUsd: number;
+}
+export interface CommissionSlabRow {
+  name: string;
+  target: number;
+  salary: number;
+  percent: number;
+}
+/** A sales CRM's commission plan, read only (2026-10-09). */
+export interface CrmCommissionPlan {
+  code: string;
+  name: string;
+  available: boolean;
+  error?: string;
+  tlRule: "zero_if_sm" | "never" | "always";
+  tlRuleLabel: string;
+  courses: CommissionPlanRow[];
+  salesManager: string | null;
+  excluded: string[];
+  /** The slabs in force this month; null while the CRM still uses its built-in ones. */
+  slabs: { from: string; sales: CommissionSlabRow[]; tl: CommissionSlabRow[]; sm: CommissionSlabRow[] } | null;
+}
