@@ -16,7 +16,7 @@ import { api, apiErrorMessage } from "@/lib/axios";
 import { useAuth } from "@/providers/AuthProvider";
 import { cn } from "@/lib/utils";
 import type {
-  TrafficAllSummary, TrafficLeadPage, TrafficLeadRow, TrafficOrg, TrafficRules, TrafficSummary, TrafficTab,
+  TrafficAllSummary, TrafficLeadPage, TrafficLeadRow, TrafficOrg, TrafficRules, TrafficSummary, TrafficTab, TrafficTotals,
 } from "@/lib/types";
 
 /** The days the page looks at, in Gulf time: the last few, this month so far, or any two dates. */
@@ -67,6 +67,16 @@ const noAllYet = (e: unknown) =>
 /** A colour per team, in the order the split lists them. */
 const TEAM_COLOURS = ["bg-primary", "bg-violet-500", "bg-amber-500", "bg-emerald-500", "bg-sky-500", "bg-rose-500"];
 
+/**
+ * Each CRM as the team it is, for the All tab's All sources card (the user,
+ * 2026-10-07): the Delta Sales CRM is Abrar's team, the Draw CRM the Draw team.
+ */
+const TEAMS: { org: TrafficOrg; label: string; colour: string }[] = [
+  { org: "delta", label: "Abrar team", colour: "bg-primary" },
+  { org: "draw", label: "Draw team", colour: "bg-violet-500" },
+  { org: "remote", label: "Remote CRM", colour: "bg-amber-500" },
+];
+
 /** The tab last looked at, so whoever looks after one sheet — or all of them — lands on it. */
 const SHEET_STORE = "root.traffic.sheet";
 const SHEET_KEYS: TrafficTab[] = ["all", "abhin", "shoaib", "trading-leads-nitro"];
@@ -80,8 +90,9 @@ const SHEET_KEYS: TrafficTab[] = ["all", "abhin", "shoaib", "trading-leads-nitro
  * take can be sent again by hand — the worker would get to it anyway, this
  * just does not make anybody wait for it.
  *
- * The All tab (the user, 2026-10-06) is every sheet together: the totals, each
- * sheet's own with the CRMs its leads went to, and one list of every lead.
+ * The All tab (the user, 2026-10-06) is every sheet together: the totals, all
+ * of them by the team their leads went to (2026-10-07), each sheet's own with
+ * the CRMs its leads went to, and one list of every lead.
  */
 export default function TrafficPage() {
   const qc = useQueryClient();
@@ -195,6 +206,23 @@ export default function TrafficPage() {
   const answer = summary.data;
   const one = answer?.sheet === sheet && isOneSheet(answer) ? answer : null;
   const all = sheet === "all" && isAll(answer) ? answer : null;
+  // Every sheet's leads added up by the team they went to; the invalid ones went to none.
+  const crmName = new Map((rules.data?.crms ?? []).map((c) => [c.code, c.name]));
+  const teams = TEAMS.map((t) => {
+    const went = (all?.sheets ?? []).flatMap((s) => s.crms.filter((c) => c.org === t.org));
+    const sum = (k: keyof TrafficTotals) => went.reduce((n, c) => n + c[k], 0);
+    return {
+      ...t,
+      crm: crmName.get(t.org) ?? went[0]?.name ?? "",
+      received: sum("received"),
+      sent: sum("sent"),
+      duplicates: sum("duplicates"),
+      waiting: sum("waiting"),
+      failed: sum("failed"),
+      invalid: sum("invalid"),
+    };
+  });
+  const toNoTeam = (all?.totals.received ?? 0) - teams.reduce((n, t) => n + t.received, 0);
   const allUnavailable = sheet === "all" && (noAllYet(summary.error) || noAllYet(leads.error));
   // The CRMs the tab sends to: this sheet's, or on All every sheet's.
   const uses = new Set(sheet === "all" ? (rules.data?.sheets ?? []).flatMap((s) => s.uses) : current?.uses ?? []);
@@ -355,6 +383,54 @@ export default function TrafficPage() {
           </Card>
         ))}
       </div>
+
+      {/* All: every sheet together, by the team its leads went to */}
+      {sheet === "all" && all && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-baseline justify-between gap-2 text-base">
+              <span>All sources</span>
+              <span className="shrink-0 text-sm font-normal text-muted-foreground">{all.totals.received} received</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Every lead sheet together, by the team its leads went to.
+              {toNoTeam > 0 ? ` ${toNoTeam} invalid went to no team.` : null}
+            </p>
+            <div className="grid gap-5 md:grid-cols-3">
+              {teams.map((t) => {
+                const pct = all.totals.received ? Math.round((t.received / all.totals.received) * 1000) / 10 : 0;
+                return (
+                  <div key={t.org} className="space-y-1.5">
+                    <div className="flex items-baseline justify-between gap-2 text-sm">
+                      <span className="min-w-0 truncate">
+                        <span className="font-medium">{t.label}</span>
+                        {t.crm && t.crm.toLowerCase() !== t.label.toLowerCase() && (
+                          <span className="ml-1.5 text-xs text-muted-foreground">{t.crm}</span>
+                        )}
+                      </span>
+                      <span className="shrink-0 font-semibold">
+                        {t.received} <span className="text-xs font-normal text-muted-foreground">({pct}%)</span>
+                      </span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <div className={cn("h-full rounded-full", t.colour)} style={{ width: `${pct}%` }} />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {t.sent} sent · {t.duplicates} duplicates
+                      {t.waiting ? <span className="text-amber-500"> · {t.waiting} waiting</span> : null}
+                      {t.failed ? <span className="text-rose-500"> · {t.failed} failed</span> : null}
+                      {t.invalid ? ` · ${t.invalid} turned down` : null}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {sheet === "all" && !all && summary.isLoading && <Skeleton className="h-36 w-full" />}
 
       {/* All: each sheet, and the CRMs its leads went to */}
       {sheet === "all" && (
