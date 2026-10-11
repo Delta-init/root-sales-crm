@@ -530,6 +530,8 @@ export interface PendingKind {
   total: number;
   /** Of those, how many are past their time (reminders). */
   overdue?: number;
+  /** Waits on anyone holding a permission: every holder is shown with all of it. */
+  shared?: boolean;
 }
 
 export interface PendingPerson {
@@ -559,7 +561,7 @@ export interface PendingEveryone {
   name: string;
   email: string;
   total: number;
-  items: { portal: string; portalName: string; key: string; label: string; count: number; overdue?: number }[];
+  items: { portal: string; portalName: string; key: string; label: string; count: number; overdue?: number; shared?: boolean }[];
 }
 
 export interface PendingOverview {

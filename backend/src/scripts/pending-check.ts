@@ -58,6 +58,41 @@ async function main() {
   const deltaDb = (await mongoose.createConnection(process.env.DELTA_MONGODB_URI!).asPromise()).db!;
   const drawDb = (await mongoose.createConnection(process.env.DRAW_MONGODB_URI!).asPromise()).db!;
 
+  // The other portals: one stand-in answering /…/api/v1/service/pending as each would.
+  const { createServer } = await import("node:http");
+  const SECRETS: Record<string, string> = {
+    commission: "pending-e2e-commission-secret", finance: "pending-e2e-finance-secret", lms: "pending-e2e-lms-secret", media: "pending-e2e-media-secret",
+  };
+  const ANSWERS: Record<string, unknown> = {
+    commission: {
+      kinds: [{ key: "new_students", label: "New students", total: 4 }, { key: "followups", label: "Follow-ups", total: 5, overdue: 2 }],
+      people: [
+        { id: "cs1", name: "Nusra", email: "NUSRA@shared-e2e.test", active: true, counts: { followups: 5, followups_overdue: 2 }, total: 5 },
+        { id: "cs2", name: "CS Two", email: "cs2@tetra-e2e.test", active: true, counts: { new_students: 4 }, total: 4 },
+      ],
+    },
+    finance: {
+      kinds: [{ key: "enrolments", label: "Enrolments", total: 4, shared: true }],
+      people: [
+        { id: "a1", name: "Accounts One", email: "accounts1@finance-e2e.test", active: true, counts: { enrolments: 4, mystery: 9 }, total: 13 },
+        { id: "a2", name: "Accounts Two", email: "accounts2@finance-e2e.test", active: true, counts: { enrolments: 4 }, total: 4 },
+        { id: "a3", name: "Idle", email: "idle@finance-e2e.test", active: true, counts: {}, total: 0 },
+      ],
+    },
+  };
+  const standinSaw: { path: string; secret: string }[] = [];
+  const standin = createServer((req, res) => {
+    const path = new URL(req.url ?? "/", "http://x").pathname;
+    const secret = String(req.headers["x-portal-secret"] ?? "");
+    standinSaw.push({ path, secret });
+    const portalKey = path.split("/")[1] ?? "";
+    const send = (status: number, body: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
+    if (secret !== SECRETS[portalKey]) return send(401, { success: false, message: "Bad portal secret" });
+    if (path !== `/${portalKey}/api/v1/service/pending` || !ANSWERS[portalKey]) return send(404, { success: false, message: "Route not found" });
+    return send(200, { success: true, data: ANSWERS[portalKey] });
+  });
+  await new Promise<void>((ok) => standin.listen(Number(process.env.E2E_STANDIN_PORT), "127.0.0.1", ok));
+
   step("Setting up: the registry, two admins, and two CRMs with people, leads and reminders");
   const { AdminUser } = await import("../models/AdminUser.js");
   const { Organization } = await import("../models/Organization.js");
@@ -67,6 +102,10 @@ async function main() {
     ["draw", "crm", "Draw CRM", 3],
     ["remote", "crm", "Remote CRM", 3.5],
     ["finance-hq", "finance", "Finance HQ", 4],
+    ["commission", "commission", "Tetra Commission", 5],
+    ["hrms", "hrms", "Delta HRMS", 6],
+    ["lms", "lms", "Delta LMS", 7],
+    ["media-erp", "erp", "Media ERP", 8],
   ];
   for (const [code, kind, name, sortOrder] of orgs) {
     await Organization.create({ code, kind, name, timezone: "Asia/Dubai", currency: "AED", fxToBase: 1, isActive: true, sortOrder, accent: "#2563eb" });
@@ -141,7 +180,8 @@ async function main() {
   check("Draw: Nusra's 2 new leads and 1 reminder", person("draw", "Nusra")?.counts?.new_leads === 2 && person("draw", "Nusra")?.counts?.reminders === 1);
   const nusra = (data?.people ?? []).find((p: Json) => p.email === "nusra@shared-e2e.test");
   check("one person across CRMs, by email whatever its case: Nusra 4, from Delta and Draw",
-    nusra?.total === 4 && new Set(nusra.items.map((i: Json) => i.portal)).size === 2
+    nusra.items.filter((i: Json) => i.portal !== "commission").reduce((n: number, i: Json) => n + i.count, 0) === 4
+    && new Set(nusra.items.filter((i: Json) => i.portal !== "commission").map((i: Json) => i.portal)).size === 2
     && (data?.people ?? []).filter((p: Json) => p.name === "Nusra").length === 1, show(nusra));
   check("across portals, the most waiting first", data?.people?.[0]?.name === "Asha" || data?.people?.[0]?.total >= data?.people?.[1]?.total);
 
@@ -156,20 +196,44 @@ async function main() {
   r = await call("GET", "/pending", root);
   data = r.body?.data;
   check("Draw with nothing pending: 0, and nobody listed", portal("draw")?.available === true && portal("draw")?.total === 0 && portal("draw")?.people?.length === 0, show(portal("draw")));
-  check("…and Nusra is down to her one Delta lead", (data?.people ?? []).find((p: Json) => p.email === "nusra@shared-e2e.test")?.total === 1);
+  check("…and Nusra is down to her one Delta lead (beside what Tetra Commission has for her)",
+    ((data?.people ?? []).find((p: Json) => p.email === "nusra@shared-e2e.test")?.items ?? [])
+      .filter((i: Json) => ["delta", "draw", "banglore", "remote"].includes(i.portal)).reduce((n: number, i: Json) => n + i.count, 0) === 1);
 
   step("Case 3 — a portal that cannot be read says so; the rest stand");
   check("Remote, with no database set: says which setting is missing", portal("remote")?.available === false && /REMOTE_MONGODB_URI/.test(portal("remote")?.error ?? ""), show(portal("remote")));
   check("Banglore, not answering: says it could not be reached", portal("banglore")?.available === false && !!portal("banglore")?.error, show(portal("banglore")));
   check("…and Delta and Draw are there all the same", portal("delta")?.available === true && portal("draw")?.available === true);
-  check("in the registry's order", show((data?.portals ?? []).map((p: Json) => p.code)) === show(["delta", "banglore", "draw", "remote"]), show((data?.portals ?? []).map((p: Json) => p.code)));
-  check("the portals not on the page yet are listed as coming", (data?.comingNext ?? []).some((c: Json) => c.code === "finance-hq") && !(data?.portals ?? []).some((p: Json) => p.code === "finance-hq"), show(data?.comingNext));
+  check("in the registry's order, every portal on the page", show((data?.portals ?? []).map((p: Json) => p.code))
+    === show(["delta", "banglore", "draw", "remote", "finance-hq", "commission", "hrms", "lms", "media-erp"]), show((data?.portals ?? []).map((p: Json) => p.code)));
+  check("none left as coming", (data?.comingNext ?? []).length === 0, show(data?.comingNext));
+
+  step("Case 5 — the other portals answer for themselves (a stand-in, with each one's secret)");
+  check("Tetra Commission: its badges, with overdue, and its CS", portal("commission")?.available === true && portal("commission")?.total === 9
+    && kind("commission", "followups")?.overdue === 2 && (portal("commission")?.people ?? []).find((p: Json) => p.email === "nusra@shared-e2e.test")?.counts?.followups_overdue === 2,
+    show(portal("commission")));
+  check("…asked with its own secret, at /api/v1/service/pending", standinSaw.some((x) => x.path === "/commission/api/v1/service/pending" && x.secret === "pending-e2e-commission-secret"), show(standinSaw));
+  check("Finance: a shared approval, every holder with all of it", kind("finance-hq", "enrolments")?.shared === true && portal("finance-hq")?.total === 4
+    && (portal("finance-hq")?.people ?? []).filter((p: Json) => p.counts?.enrolments === 4).length === 2, show(portal("finance-hq")));
+  check("…an address given with /api/v1 is called the same", standinSaw.some((x) => x.path === "/finance/api/v1/service/pending"), show(standinSaw.map((x) => x.path)));
+  check("…counts a portal sent for no badge it named, and people with nothing, are dropped",
+    !(portal("finance-hq")?.people ?? []).some((p: Json) => p.counts?.mystery || p.email === "idle@finance-e2e.test"), show(portal("finance-hq")?.people));
+  check("HRMS not set up here: says which settings", portal("hrms")?.available === false && /HRMS_(API_URL|SSO_SECRET)/.test(portal("hrms")?.error ?? ""), show(portal("hrms")));
+  check("the LMS on its old server: says it needs updating", portal("lms")?.available === false && /needs updating/.test(portal("lms")?.error ?? ""), show(portal("lms")));
+  check("Media ERP refusing the secret: says so", portal("media-erp")?.available === false && !!portal("media-erp")?.error && !/needs updating/.test(portal("media-erp")?.error ?? ""), show(portal("media-erp")));
+  const nusraAll = (data?.people ?? []).find((p: Json) => p.email === "nusra@shared-e2e.test");
+  check("By person: one row across the CRMs and Tetra Commission, matched by email",
+    (nusraAll?.items ?? []).some((i: Json) => i.portal === "commission" && i.key === "followups" && i.count === 5 && i.overdue === 2) && (nusraAll?.items ?? []).some((i: Json) => i.portal === "delta"),
+    show(nusraAll));
+  const acct = (data?.people ?? []).find((p: Json) => p.email === "accounts1@finance-e2e.test");
+  check("…a shared count says so", (acct?.items ?? []).some((i: Json) => i.portal === "finance-hq" && i.shared === true && i.count === 4), show(acct));
 
   step("Case 4 — root admins only");
   check("no session: 401", (await call("GET", "/pending")).status === 401);
   check("an admin who is not a root admin: 403", (await call("GET", "/pending", member)).status === 403);
 
   console.log(`\n${checks - failures}/${checks} checks passed`);
+  standin.close();
   await mongoose.disconnect();
   process.exit(failures ? 1 : 0);
 }

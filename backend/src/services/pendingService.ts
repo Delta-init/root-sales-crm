@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import { Organization } from "../models/Organization.js";
 import { getSources, type CrmSource } from "./crmConnections.js";
+import { resolveTarget, callTarget } from "../lib/targetClient.js";
 
 /*
  * Pending, every portal at once (the user, 2026-10-06): the counts each
@@ -13,9 +14,12 @@ import { getSources, type CrmSource } from "./crmConnections.js";
  *     "assigned"): the Leads badge;
  *   - Reminders — reminders they set that are not done, overdue ones among
  *     them counted apart: the Reminders badge.
- * Finance, Tetra Commission, HRMS, LMS and Media ERP come next, each through
- * an endpoint of its own — they keep their own logic, Root does not copy it.
- * Until then they are listed as coming.
+ * Every other portal — Tetra Commission, Finance, HRMS, LMS, Media ERP (the
+ * user, 2026-10-11) — answers for itself: GET /api/v1/service/pending with the
+ * portal secret Root already holds for it, its own sidebar's badges and whom
+ * each waits on. Root does not copy their logic. A badge that waits on anyone
+ * holding a permission ("shared") is listed in full against every holder (the
+ * user's choice), so people's figures can add up to more than the card's.
  */
 
 export interface PendingKind {
@@ -24,6 +28,8 @@ export interface PendingKind {
   total: number;
   /** Of those, how many are past their time (reminders). */
   overdue?: number;
+  /** Waits on anyone holding a permission: every holder is shown with all of it. */
+  shared?: boolean;
 }
 
 export interface PendingPerson {
@@ -151,13 +157,71 @@ async function crmPending(src: CrmSource, now: Date): Promise<PendingPortal> {
   };
 }
 
+/** What a portal's /service/pending answers (see the comment at the top). */
+interface ServicePending {
+  kinds?: { key?: unknown; label?: unknown; total?: unknown; overdue?: unknown; shared?: unknown }[];
+  people?: { id?: unknown; name?: unknown; email?: unknown; active?: unknown; counts?: Record<string, unknown>; total?: unknown }[];
+}
+
+const int = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
+
+/** A portal that answers for itself, read into the same shape as a CRM's. */
+async function servicePending(org: { code: string; name: string; accent?: string | null }): Promise<PendingPortal> {
+  const target = await resolveTarget(org.code);
+  let answer: ServicePending;
+  try {
+    answer = await callTarget<ServicePending>(target, "/pending", { method: "GET", verb: "share what is pending" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not be read";
+    // Its server from before this page: the route is not there yet.
+    throw new Error(/404|not found/i.test(message) ? `${org.name}'s server needs updating — it has no pending endpoint yet` : message);
+  }
+  const kinds: PendingKind[] = (Array.isArray(answer?.kinds) ? answer.kinds : [])
+    .filter((k) => typeof k?.key === "string" && k.key)
+    .map((k) => ({
+      key: String(k.key),
+      label: String(k.label ?? k.key),
+      total: int(k.total),
+      ...(int(k.overdue) ? { overdue: int(k.overdue) } : {}),
+      ...(k.shared === true ? { shared: true } : {}),
+    }));
+  const keys = new Set(kinds.map((k) => k.key));
+  const people: PendingPerson[] = (Array.isArray(answer?.people) ? answer.people : [])
+    .map((x) => {
+      const counts: Record<string, number> = {};
+      for (const [key, v] of Object.entries(x?.counts ?? {})) {
+        const base = key.endsWith("_overdue") ? key.slice(0, -"_overdue".length) : key;
+        if (keys.has(base) && int(v)) counts[key] = int(v);
+      }
+      return {
+        id: String(x?.id ?? ""),
+        name: String(x?.name ?? "") || "Unknown user",
+        email: String(x?.email ?? "").trim().toLowerCase(),
+        active: x?.active !== false,
+        counts,
+        total: kinds.reduce((n, k) => n + (counts[k.key] ?? 0), 0),
+      };
+    })
+    .filter((x) => x.total > 0)
+    .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+  return {
+    code: org.code,
+    name: org.name,
+    accent: org.accent ?? "",
+    available: true,
+    kinds,
+    people,
+    total: kinds.reduce((n, k) => n + k.total, 0),
+  };
+}
+
 /** One person, everywhere: matched by email across portals, else per portal. */
 export interface PendingEveryone {
   key: string;
   name: string;
   email: string;
   total: number;
-  items: { portal: string; portalName: string; key: string; label: string; count: number; overdue?: number }[];
+  items: { portal: string; portalName: string; key: string; label: string; count: number; overdue?: number; shared?: boolean }[];
 }
 
 /**
@@ -188,24 +252,37 @@ export async function pendingOverview() {
   for (const f of failures) {
     portals.push({ code: f.code, name: f.name, accent: orgOf.get(f.code)?.accent ?? "", available: false, error: f.error, kinds: [], people: [], total: 0 });
   }
+  // Every other portal answers for itself, all at once; one that cannot leaves the rest standing.
+  const others = orgs.filter((o) => o.kind !== "crm");
+  portals.push(...(await Promise.all(others.map(async (o) => {
+    try {
+      return await servicePending({ code: o.code, name: o.name, accent: o.accent });
+    } catch (error) {
+      return {
+        code: o.code, name: o.name, accent: o.accent ?? "", available: false,
+        error: error instanceof Error ? error.message : "Could not be read", kinds: [], people: [], total: 0,
+      } satisfies PendingPortal;
+    }
+  }))));
   portals.sort((a, b) => order(a.code) - order(b.code));
 
-  const labelOf = new Map(CRM_KINDS.map((k) => [k.key as string, k.label as string]));
   const everyone = new Map<string, PendingEveryone>();
   for (const portal of portals) {
     for (const p of portal.people) {
       const key = p.email || `${portal.code}:${p.id}`;
       const row = everyone.get(key) ?? { key, name: p.name, email: p.email, total: 0, items: [] };
-      for (const kind of CRM_KINDS) {
+      for (const kind of portal.kinds) {
         const count = p.counts[kind.key] ?? 0;
         if (!count) continue;
+        const overdue = p.counts[`${kind.key}_overdue`] ?? 0;
         row.items.push({
           portal: portal.code,
           portalName: portal.name,
           key: kind.key,
-          label: labelOf.get(kind.key) ?? kind.key,
+          label: kind.label,
           count,
-          ...(kind.key === "reminders" && p.counts.reminders_overdue ? { overdue: p.counts.reminders_overdue } : {}),
+          ...(overdue ? { overdue } : {}),
+          ...(kind.shared ? { shared: true } : {}),
         });
         row.total += count;
       }
@@ -217,7 +294,7 @@ export async function pendingOverview() {
     generatedAt: now.toISOString(),
     portals,
     people: [...everyone.values()].filter((p) => p.total > 0).sort((a, b) => b.total - a.total || a.name.localeCompare(b.name)),
-    /** In the registry, not on this page yet: they need an endpoint of their own. */
-    comingNext: orgs.filter((o) => o.kind !== "crm").map((o) => ({ code: o.code, name: o.name })),
+    /** Every portal in the registry is on the page now; kept for the page from before. */
+    comingNext: [] as { code: string; name: string }[],
   };
 }

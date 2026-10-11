@@ -21,6 +21,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MONGO_PORT="${PENDING_MONGO_PORT:-27088}"
 API_PORT="${PENDING_API_PORT:-5191}"
+STANDIN_PORT="${PENDING_STANDIN_PORT:-5192}"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/pending-check.XXXXXX")"
 
 release_port() {
@@ -44,7 +45,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-for port in "$MONGO_PORT" "$API_PORT"; do
+for port in "$MONGO_PORT" "$API_PORT" "$STANDIN_PORT"; do
   if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
     echo "Port $port is already in use. Set PENDING_MONGO_PORT / PENDING_API_PORT." >&2
     exit 1
@@ -70,6 +71,15 @@ export DELTA_MONGODB_URI="$MONGO/delta-crm-pending-e2e" DRAW_MONGODB_URI="$MONGO
 # Nothing listens on port 1: Banglore cannot be reached. Remote has no database set.
 export BANGLORE_MONGODB_URI="mongodb://127.0.0.1:1/banglore-crm-pending-e2e" REMOTE_MONGODB_URI=""
 export LEAD_TRAFFIC_SHEET_KEY="" TRAFFIC_WORKER=false
+# The other portals answer for themselves: a stand-in, inside the check, on its own port.
+# HRMS is left unset (not configured); the LMS's stand-in has no pending route (an old server).
+STANDIN="http://127.0.0.1:$STANDIN_PORT"
+export COMMISSION_API_URL="$STANDIN/commission" COMMISSION_SSO_SECRET="pending-e2e-commission-secret"
+export FINANCE_HQ_API_URL="$STANDIN/finance/api/v1" FINANCE_HQ_SSO_SECRET="pending-e2e-finance-secret"
+export LMS_API_URL="$STANDIN/lms" LMS_SSO_SECRET="pending-e2e-lms-secret"
+export MEDIA_ERP_API_URL="$STANDIN/media" MEDIA_ERP_SSO_SECRET="pending-e2e-media-secret-that-it-refuses"
+export HRMS_SSO_SECRET=""
+export E2E_STANDIN_PORT="$STANDIN_PORT"
 export E2E_API_PORT="$API_PORT"
 
 # From the scratch directory, so dotenv finds no .env to fill the gaps with.

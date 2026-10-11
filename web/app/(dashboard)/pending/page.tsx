@@ -18,8 +18,10 @@ import type { PendingOverview, PendingPortal } from "@/lib/types";
 /**
  * Pending (the user, 2026-10-06): what is waiting in every portal, and for
  * whom — each portal's own sidebar counts on one page, per person, and one
- * person's across all of them. The sales CRMs first; the other portals join as
- * each gets an endpoint of its own. Root admins only.
+ * person's across all of them: the sales CRMs, then Tetra Commission, Finance,
+ * HRMS, LMS and Media ERP (2026-10-11), each answering for itself. A count that
+ * waits on anyone holding a permission is "shared": every holder is listed with
+ * all of it. Root admins only.
  */
 
 const VIEWS = [
@@ -185,6 +187,7 @@ export default function PendingPage() {
                                 <span className="text-muted-foreground">{it.portalName}</span>
                                 <span className="font-medium">{howMany(it.count, it.label)}</span>
                                 {it.overdue ? <span className="text-rose-500">· {it.overdue} overdue</span> : null}
+                                {it.shared ? <span className="text-muted-foreground" title="Waits on anyone who can do it — shown in full for each of them">· shared</span> : null}
                               </span>
                             ))}
                           </div>
@@ -211,7 +214,8 @@ function PortalCard({ portal: p, index, matches }: {
   const [all, setAll] = useState(false);
   const people = p.people.filter((x) => matches(x.name, x.email));
   const shown = all ? people : people.slice(0, FIRST);
-  const reminders = p.kinds.find((k) => k.key === "reminders");
+  const anyOverdue = p.kinds.some((k) => k.overdue);
+  const anyShared = p.kinds.some((k) => k.shared);
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 }}>
@@ -245,6 +249,7 @@ function PortalCard({ portal: p, index, matches }: {
                   <Badge key={k.key} variant="outline" className="gap-1 py-1">
                     {k.label} <span className="font-semibold">{k.total}</span>
                     {k.overdue ? <span className="text-rose-500">· {k.overdue} overdue</span> : null}
+                    {k.shared ? <span className="text-muted-foreground">· shared</span> : null}
                   </Badge>
                 ))}
               </div>
@@ -253,12 +258,14 @@ function PortalCard({ portal: p, index, matches }: {
                   {p.people.length ? "Nobody by that name here." : "Nothing pending."}
                 </p>
               ) : (
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border/40 text-left text-xs text-muted-foreground">
                       <th className="pb-2 pr-2 font-medium">Person</th>
-                      <th className="pb-2 pr-2 text-right font-medium">New leads</th>
-                      <th className="pb-2 pr-2 text-right font-medium">Reminders</th>
+                      {p.kinds.map((k) => (
+                        <th key={k.key} className="pb-2 pr-2 text-right font-medium">{k.label}</th>
+                      ))}
                       <th className="pb-2 text-right font-medium">Total</th>
                     </tr>
                   </thead>
@@ -269,31 +276,38 @@ function PortalCard({ portal: p, index, matches }: {
                           <span className={cn("font-medium", !x.active && "text-muted-foreground")}>{x.name}</span>
                           {!x.active && <span className="ml-1.5 text-xs text-muted-foreground">(left)</span>}
                         </td>
-                        <td className="py-2 pr-2 text-right tabular-nums">{x.counts.new_leads || <span className="text-muted-foreground/60">—</span>}</td>
-                        <td className="py-2 pr-2 text-right tabular-nums">
-                          {x.counts.reminders || <span className="text-muted-foreground/60">—</span>}
-                          {x.counts.reminders_overdue ? (
-                            <span className="ml-1 inline-flex items-center gap-0.5 text-xs text-rose-500">
-                              <Clock className="h-3 w-3" />
-                              {x.counts.reminders_overdue}
-                            </span>
-                          ) : null}
-                        </td>
+                        {p.kinds.map((k) => (
+                          <td key={k.key} className="py-2 pr-2 text-right tabular-nums">
+                            {x.counts[k.key] || <span className="text-muted-foreground/60">—</span>}
+                            {x.counts[`${k.key}_overdue`] ? (
+                              <span className="ml-1 inline-flex items-center gap-0.5 text-xs text-rose-500">
+                                <Clock className="h-3 w-3" />
+                                {x.counts[`${k.key}_overdue`]}
+                              </span>
+                            ) : null}
+                          </td>
+                        ))}
                         <td className="py-2 text-right font-semibold tabular-nums">{x.total}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                </div>
               )}
               {people.length > FIRST && (
                 <Button size="sm" variant="ghost" className="w-full" onClick={() => setAll((v) => !v)}>
                   {all ? "Show fewer" : `Show all ${people.length}`}
                 </Button>
               )}
-              {reminders?.overdue ? (
+              {anyOverdue ? (
                 <p className="text-xs text-muted-foreground">
                   <Clock className="mr-1 inline h-3 w-3 text-rose-500" />
-                  Overdue reminders are counted inside Reminders, as the portal&apos;s badge counts them.
+                  Overdue ones are counted inside their column, as the portal&apos;s badge counts them.
+                </p>
+              ) : null}
+              {anyShared ? (
+                <p className="text-xs text-muted-foreground">
+                  &ldquo;Shared&rdquo; waits on anyone who can do it, so each of them is shown with all of it — people&apos;s figures add up to more than the card&apos;s.
                 </p>
               ) : null}
             </>
