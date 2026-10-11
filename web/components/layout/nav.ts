@@ -8,7 +8,7 @@
  */
 import type { LucideIcon } from "lucide-react";
 import {
-  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, Inbox, LayoutGrid, Shuffle, Users2,
+  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, Headset, Inbox, LayoutGrid, Shuffle, Users2,
 } from "lucide-react";
 
 export interface NavLink {
@@ -33,6 +33,8 @@ export const NAV: NavItem[] = [
   // What is waiting in every portal, and for whom — each portal's sidebar
   // counts on one page. Root admins only: it is everybody's queue at once.
   { href: "/pending", label: "Pending", icon: Inbox, rootOnly: true },
+  // Tetra Commission's CSEs: students, deposits, commission and what waits on each (2026-10-11).
+  { href: "/cses", label: "CSEs", icon: Headset, rootOnly: true },
   /*
    * Sales, root admins only.
    *

@@ -14,7 +14,7 @@ const GST = "+04:00";
 const query = z.object({ from: z.string().optional(), to: z.string().optional(), status: z.string().max(40).optional() });
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
-function periodOf(q: unknown): Period | { error: string } {
+export function periodOf(q: unknown): Period | { error: string } {
   const parsed = query.safeParse(q);
   if (!parsed.success) return { error: "Invalid query parameters" };
   const { from, to } = parsed.data;

@@ -647,3 +647,47 @@ export interface SalespersonLead {
   createdAt: string | null;
   updatedAt: string | null;
 }
+
+// ── CSEs: Tetra Commission's customer success people (GET /cses) ─────────────
+
+export type MoneyByCurrency = Record<string, number>;
+
+export interface CseFigures {
+  students: number;
+  deposits: { count: number; usd: number };
+  commissionUsd: number;
+  followupsToday: number;
+  followupsOverdue: number;
+  upcoming: { count: number; amount: MoneyByCurrency };
+  overdueDues: { count: number; amount: MoneyByCurrency };
+  balance: { students: number; amount: MoneyByCurrency };
+  bonus: { clients: number; usd: number; needsCall: number; withFinance: number; waitingBroker: number };
+  notOnboarded: number;
+  notOnboardedLate: number;
+}
+
+export interface CsePerson { id: string; name: string; email: string; role: string; active: boolean; team: string }
+
+export interface CseList {
+  today: string;
+  upcomingDays: number;
+  rows: (CsePerson & CseFigures)[];
+  /** Prefix for a student's page in Tetra Commission; "" when its address is not set. */
+  studentLink: string;
+}
+
+export interface CseStudentRef { studentId: string; student: string; code: string }
+
+export interface CseDetail {
+  person: CsePerson;
+  today: string;
+  upcomingDays: number;
+  summary: CseFigures;
+  followups: (CseStudentRef & { stage: string; title: string; due: string; overdue: boolean })[];
+  dues: (CseStudentRef & { course: string; currency: string; balance: number; nextDueOn: string | null; state: string; daysLeft: number | null })[];
+  bonus: (CseStudentRef & { count: number; usd: number; stage: string; since: string | null })[];
+  notOnboarded: (CseStudentRef & { since: string; late: boolean })[];
+  deposits: { studentId: string; student: string; usd: number; at: string }[];
+  commission: (CseStudentRef & { usd: number; level: number | null; type: string; status: string; at: string })[];
+  studentLink: string;
+}
