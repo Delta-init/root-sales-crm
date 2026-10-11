@@ -553,6 +553,8 @@ export interface PendingPortal {
   kinds: PendingKind[];
   people: PendingPerson[];
   total: number;
+  /** A sales CRM: its people have a salesperson page. */
+  crm?: boolean;
 }
 
 /** One person across every portal, matched by email. */
@@ -561,7 +563,7 @@ export interface PendingEveryone {
   name: string;
   email: string;
   total: number;
-  items: { portal: string; portalName: string; key: string; label: string; count: number; overdue?: number; shared?: boolean }[];
+  items: { portal: string; portalName: string; personId: string; crm?: boolean; key: string; label: string; count: number; overdue?: number; shared?: boolean }[];
 }
 
 export interface PendingOverview {
@@ -602,4 +604,46 @@ export interface CrmCommissionPlan {
   excluded: string[];
   /** The slabs in force this month; null while the CRM still uses its built-in ones. */
   slabs: { from: string; sales: CommissionSlabRow[]; tl: CommissionSlabRow[]; sm: CommissionSlabRow[] } | null;
+}
+
+// ── Salespeople: each sales CRM's people, and one person's figures ────────────
+
+export interface SalespersonRow {
+  id: string;
+  name: string;
+  email: string;
+  active: boolean;
+  teams: string[];
+  leads: number;
+  closings: number;
+  revenue: number;
+}
+
+export interface SalespeopleList {
+  crms: { code: string; name: string; currency: string; people: SalespersonRow[] }[];
+  failures: { code: string; name: string; error: string }[];
+}
+
+export interface SalespersonDetail {
+  crm: { code: string; name: string; currency: string };
+  person: { id: string; name: string; email: string; designation: string; active: boolean; teams: string[] };
+  period: { from: string | null; to: string | null };
+  summary: { leads: number; closings: number; revenue: number; followUps: number; conversion: number };
+  pendingNow: { newLeads: number; reminders: number; overdue: number };
+  statuses: { status: string; label: string; count: number; percent: number }[];
+  closings: { id: string; name: string; course: string; fee: number; paid: number; balance: number; date: string | null; status: string }[];
+  payments: { leadId: string; name: string; amount: number; date: string | null; note: string }[];
+  truncated: { closings: boolean; payments: boolean };
+}
+
+export interface SalespersonLead {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  source: string;
+  status: string;
+  statusLabel: string;
+  createdAt: string | null;
+  updatedAt: string | null;
 }

@@ -17,6 +17,7 @@ export type RangeKey =
   | "yesterday"
   | "week"
   | "month"
+  | "lastMonth"
   | "30d"
   | "90d"
   | "12m"
@@ -63,6 +64,7 @@ export const RANGES: { key: RangeKey; label: string; group: "quick" | "long" }[]
   { key: "yesterday", label: "Yesterday", group: "quick" },
   { key: "week", label: "This week", group: "quick" },
   { key: "month", label: "This month", group: "quick" },
+  { key: "lastMonth", label: "Last month", group: "quick" },
   { key: "30d", label: "Last 30 days", group: "long" },
   { key: "90d", label: "Last 90 days", group: "long" },
   { key: "12m", label: "Last 12 months", group: "long" },
@@ -108,6 +110,15 @@ export const resolveRange = (key: RangeKey, custom?: Range): Range => {
       from: startOfLocalDay(first).toISOString(),
       to: endOfLocalDay(now).toISOString(),
     };
+  }
+
+  if (key === "lastMonth") {
+    // The whole previous month, Gulf time.
+    const local = shift(now, TZ_OFFSET_MIN);
+    const firstThis = addDays(now, -(local.getUTCDate() - 1));
+    const lastPrev = addDays(firstThis, -1);
+    const firstPrev = addDays(lastPrev, -(shift(lastPrev, TZ_OFFSET_MIN).getUTCDate() - 1));
+    return { from: startOfLocalDay(firstPrev).toISOString(), to: endOfLocalDay(lastPrev).toISOString() };
   }
 
   const d = new Date();

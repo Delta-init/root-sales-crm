@@ -50,6 +50,8 @@ export const NAV: NavItem[] = [
     icon: BarChart3,
     children: [
       { href: "/reports", label: "Group report", icon: BarChart3, rootOnly: true },
+      // Everyone in the sales CRMs, each with their own page (2026-10-11).
+      { href: "/salespeople", label: "Salespeople", icon: Users2, rootOnly: true },
       { href: "/tracker", label: "Daily tracker", icon: ClipboardList, rootOnly: true },
       // Where the Meta lead sheet's leads go: split between Delta and Draw.
       // Also for anybody a root admin has given lead-traffic access.

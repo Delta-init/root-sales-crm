@@ -11,6 +11,7 @@ import mentorRoutes from "./mentorRoutes.js";
 import taskRoutes from "./taskRoutes.js";
 import trafficRoutes from "./trafficRoutes.js";
 import pendingRoutes from "./pendingRoutes.js";
+import salespersonRoutes from "./salespersonRoutes.js";
 import commissionPlanRoutes from "./commissionPlanRoutes.js";
 
 const router = Router();
@@ -27,6 +28,7 @@ router.use("/mentors", mentorRoutes);
 router.use("/tasks", taskRoutes);
 router.use("/traffic", trafficRoutes);
 router.use("/pending", pendingRoutes);
+router.use("/salespeople", salespersonRoutes);
 router.use("/commission-plans", commissionPlanRoutes);
 
 router.get("/health", (_req, res) => {

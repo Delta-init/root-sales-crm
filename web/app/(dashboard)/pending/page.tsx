@@ -174,7 +174,15 @@ export default function PendingPage() {
                         className="border-b border-border/20 align-top"
                       >
                         <td className="py-2.5 pr-3">
-                          <div className="font-medium">{p.name}</div>
+                          {(() => {
+                            // A salesperson's name opens their page (in the first CRM they have work in).
+                            const crmItem = p.items.find((it) => it.crm);
+                            return crmItem ? (
+                              <Link href={`/salespeople/${crmItem.portal}/${crmItem.personId}`} className="font-medium hover:underline">{p.name}</Link>
+                            ) : (
+                              <div className="font-medium">{p.name}</div>
+                            );
+                          })()}
                           {p.email && <div className="text-xs text-muted-foreground">{p.email}</div>}
                         </td>
                         <td className="py-2.5 pr-3">
@@ -273,7 +281,11 @@ function PortalCard({ portal: p, index, matches }: {
                     {shown.map((x) => (
                       <tr key={x.id} className="border-b border-border/20 last:border-0">
                         <td className="py-2 pr-2">
-                          <span className={cn("font-medium", !x.active && "text-muted-foreground")}>{x.name}</span>
+                          {p.crm ? (
+                            <Link href={`/salespeople/${p.code}/${x.id}`} className={cn("font-medium hover:underline", !x.active && "text-muted-foreground")}>{x.name}</Link>
+                          ) : (
+                            <span className={cn("font-medium", !x.active && "text-muted-foreground")}>{x.name}</span>
+                          )}
                           {!x.active && <span className="ml-1.5 text-xs text-muted-foreground">(left)</span>}
                         </td>
                         {p.kinds.map((k) => (

@@ -52,6 +52,8 @@ export interface PendingPortal {
   kinds: PendingKind[];
   people: PendingPerson[];
   total: number;
+  /** A sales CRM: its people have a salesperson page in Root. */
+  crm?: boolean;
 }
 
 /** What a CRM's sidebar badges are called, in the order it shows them. */
@@ -151,6 +153,7 @@ async function crmPending(src: CrmSource, now: Date): Promise<PendingPortal> {
     name: src.org.name,
     accent: src.org.accent ?? "",
     available: true,
+    crm: true,
     kinds,
     people: list,
     total: kinds.reduce((n, k) => n + k.total, 0),
@@ -221,7 +224,7 @@ export interface PendingEveryone {
   name: string;
   email: string;
   total: number;
-  items: { portal: string; portalName: string; key: string; label: string; count: number; overdue?: number; shared?: boolean }[];
+  items: { portal: string; portalName: string; personId: string; crm?: boolean; key: string; label: string; count: number; overdue?: number; shared?: boolean }[];
 }
 
 /**
@@ -278,6 +281,8 @@ export async function pendingOverview() {
         row.items.push({
           portal: portal.code,
           portalName: portal.name,
+          personId: p.id,
+          ...(portal.crm ? { crm: true } : {}),
           key: kind.key,
           label: kind.label,
           count,
