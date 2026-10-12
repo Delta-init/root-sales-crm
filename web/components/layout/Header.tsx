@@ -25,19 +25,21 @@ export function Header() {
 
   return (
     <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between border-b border-border/40 bg-background/80 px-4 backdrop-blur-sm md:px-6">
-      <div className="flex items-center gap-3">
-        <Logo width={132} />
-        <div className="hidden h-8 w-px bg-border sm:block" />
-        <div className="hidden leading-tight lg:block">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <div className="shrink-0"><Logo width={132} /></div>
+        <div className="hidden h-8 w-px shrink-0 bg-border sm:block" />
+        <div className="hidden shrink-0 leading-tight lg:block">
           <div className="text-sm font-semibold">Root Sales CRM</div>
           <div className="text-xs text-muted-foreground">Delta · Banglore · Draw</div>
         </div>
 
-        <div className="hidden h-8 w-px bg-border md:block" />
+        <div className="hidden h-8 w-px shrink-0 bg-border md:block" />
 
         {/* Wide screens only. On a phone these live in the bar along the
-            bottom, where a thumb reaches — see MobileNav. */}
-        <nav className="hidden items-center gap-1 md:flex">
+            bottom, where a thumb reaches — see MobileNav. Between a tablet and
+            a wide laptop the tabs outgrow the bar: they scroll sideways rather
+            than run under the avatar (2026-10-11). */}
+        <nav className="no-scrollbar hidden min-w-0 items-center gap-1 overflow-x-auto md:flex">
           {navFor(admin).map((item) => {
             // startsWith so a drill-down like /tracker/delta keeps the tab lit
             const lit = (href: string) =>
@@ -47,7 +49,7 @@ export function Header() {
               : lit(item.href ?? "");
 
             const tab = cn(
-              "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors",
+              "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-sm transition-colors",
               active
                 ? "bg-accent font-medium text-foreground"
                 : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
@@ -88,7 +90,7 @@ export function Header() {
         </nav>
       </div>
 
-      <div className="flex items-center gap-1.5">
+      <div className="flex shrink-0 items-center gap-1.5 pl-2">
         <ThemeToggle />
 
         <DropdownMenu>

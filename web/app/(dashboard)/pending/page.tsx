@@ -11,9 +11,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { resolveRange } from "@/components/reports/RangePicker";
 import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
-import type { PendingOverview, PendingPortal } from "@/lib/types";
+import type { PendingOverview, PendingPortal, SalespeopleList } from "@/lib/types";
 
 /**
  * Pending (the user, 2026-10-06): what is waiting in every portal, and for
@@ -22,6 +23,10 @@ import type { PendingOverview, PendingPortal } from "@/lib/types";
  * HRMS, LMS and Media ERP (2026-10-11), each answering for itself. A count that
  * waits on anyone holding a permission is "shared": every holder is listed with
  * all of it. Root admins only.
+ *
+ * Each sales CRM's card also shows this month's closings and revenue per
+ * person (Gulf time, the CRM's own currency — the Salespeople page's figures),
+ * and lists those who closed this month with nothing pending (2026-10-11).
  */
 
 const VIEWS = [
@@ -38,6 +43,9 @@ const forbidden = (e: unknown) => e instanceof AxiosError && e.response?.status 
 const notYet = (e: unknown) => e instanceof AxiosError && e.response?.status === 404;
 /** "1 reminder", "3 reminders": the kind's label, singular for one. */
 const howMany = (count: number, label: string) => `${count} ${(count === 1 ? label.replace(/s$/, "") : label).toLowerCase()}`;
+/** A CRM's closings and revenue this month, by person id. */
+type SalesMonth = { currency: string; byId: Map<string, { closings: number; revenue: number; name: string; email: string; active: boolean }> };
+const money = (currency: string, n: number) => `${currency} ${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
 const time = (iso: string) =>
   new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 
@@ -50,6 +58,17 @@ export default function PendingPage() {
     refetchInterval: 60_000,
   });
   const data = pending.data;
+  // This month's closings and revenue for the CRM cards — the Salespeople page's figures.
+  const month = useMemo(() => resolveRange("month", {}), []);
+  const sales = useQuery({
+    queryKey: ["salespeople", month],
+    queryFn: async () => (await api.get("/salespeople", { params: month })).data.data as SalespeopleList,
+    refetchInterval: 5 * 60_000,
+  });
+  const salesByCrm = useMemo(() => new Map<string, SalesMonth>((sales.data?.crms ?? []).map((c) => [c.code, {
+    currency: c.currency,
+    byId: new Map(c.people.map((x) => [x.id, { closings: x.closings, revenue: x.revenue, name: x.name, email: x.email, active: x.active }])),
+  }])), [sales.data]);
 
   const needle = search.trim().toLowerCase();
   const matches = (name: string, email: string) => !needle || name.toLowerCase().includes(needle) || email.includes(needle);
@@ -119,7 +138,7 @@ export default function PendingPage() {
       </div>
 
       {pending.isLoading ? (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-64 w-full" />)}
         </div>
       ) : pending.isError || !data ? (
@@ -133,9 +152,10 @@ export default function PendingPage() {
         </Card>
       ) : view === "portal" ? (
         <div className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
+          {/* grid-cols-1: a column that may shrink below its table, which scrolls inside the card instead of pushing it off a phone's screen. */}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {data.portals.map((p, i) => (
-              <PortalCard key={p.code} portal={p} index={i} matches={matches} />
+              <PortalCard key={p.code} portal={p} index={i} matches={matches} sales={p.crm ? salesByCrm.get(p.code) : undefined} />
             ))}
           </div>
           {data.comingNext.length > 0 && (
@@ -214,19 +234,30 @@ export default function PendingPage() {
   );
 }
 
-function PortalCard({ portal: p, index, matches }: {
+function PortalCard({ portal: p, index, matches, sales }: {
   portal: PendingPortal;
   index: number;
   matches: (name: string, email: string) => boolean;
+  /** A sales CRM's closings and revenue this month; not yet loaded, or not a CRM: none. */
+  sales?: SalesMonth;
 }) {
   const [all, setAll] = useState(false);
-  const people = p.people.filter((x) => matches(x.name, x.email));
+  // Those who closed this month with nothing pending join the list, after those with something.
+  const closersOnly = sales
+    ? Array.from(sales.byId).filter(([id, x]) => x.closings > 0 && !p.people.some((y) => y.id === id))
+        .sort(([, a], [, b]) => b.closings - a.closings || b.revenue - a.revenue)
+        .map(([id, x]) => ({ id, name: x.name, email: x.email, active: x.active, counts: {} as Record<string, number>, total: 0 }))
+    : [];
+  const people = [...p.people, ...closersOnly].filter((x) => matches(x.name, x.email));
+  const monthTotals = sales
+    ? Array.from(sales.byId.values()).reduce((t, x) => ({ closings: t.closings + x.closings, revenue: t.revenue + x.revenue }), { closings: 0, revenue: 0 })
+    : null;
   const shown = all ? people : people.slice(0, FIRST);
   const anyOverdue = p.kinds.some((k) => k.overdue);
   const anyShared = p.kinds.some((k) => k.shared);
 
   return (
-    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 }}>
+    <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 }} className="min-w-0">
       <Card className="h-full">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center justify-between gap-2 text-base">
@@ -260,6 +291,16 @@ function PortalCard({ portal: p, index, matches }: {
                     {k.shared ? <span className="text-muted-foreground">· shared</span> : null}
                   </Badge>
                 ))}
+                {monthTotals && sales && (
+                  <>
+                    <Badge variant="outline" className="gap-1 border-emerald-500/40 py-1">
+                      Closings this month <span className="font-semibold text-emerald-500">{monthTotals.closings}</span>
+                    </Badge>
+                    <Badge variant="outline" className="gap-1 border-emerald-500/40 py-1">
+                      Revenue <span className="font-semibold text-emerald-500">{money(sales.currency, monthTotals.revenue)}</span>
+                    </Badge>
+                  </>
+                )}
               </div>
               {people.length === 0 ? (
                 <p className="py-4 text-center text-sm text-muted-foreground">
@@ -274,7 +315,13 @@ function PortalCard({ portal: p, index, matches }: {
                       {p.kinds.map((k) => (
                         <th key={k.key} className="pb-2 pr-2 text-right font-medium">{k.label}</th>
                       ))}
-                      <th className="pb-2 text-right font-medium">Total</th>
+                      <th className="pb-2 pr-2 text-right font-medium">Total</th>
+                      {sales && (
+                        <>
+                          <th className="whitespace-nowrap border-l border-border/40 pb-2 pl-3 pr-2 text-right font-medium">Closings</th>
+                          <th className="whitespace-nowrap pb-2 text-right font-medium">Revenue</th>
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -299,7 +346,20 @@ function PortalCard({ portal: p, index, matches }: {
                             ) : null}
                           </td>
                         ))}
-                        <td className="py-2 text-right font-semibold tabular-nums">{x.total}</td>
+                        <td className="py-2 pr-2 text-right font-semibold tabular-nums">{x.total || <span className="font-normal text-muted-foreground/60">—</span>}</td>
+                        {sales && (() => {
+                          const m = sales.byId.get(x.id);
+                          return (
+                            <>
+                              <td className="border-l border-border/40 py-2 pl-3 pr-2 text-right tabular-nums">
+                                {m?.closings ? <span className="font-medium text-emerald-500">{m.closings}</span> : <span className="text-muted-foreground/60">—</span>}
+                              </td>
+                              <td className="whitespace-nowrap py-2 text-right tabular-nums">
+                                {m?.revenue ? money(sales.currency, m.revenue) : <span className="text-muted-foreground/60">—</span>}
+                              </td>
+                            </>
+                          );
+                        })()}
                       </tr>
                     ))}
                   </tbody>
@@ -311,6 +371,11 @@ function PortalCard({ portal: p, index, matches }: {
                   {all ? "Show fewer" : `Show all ${people.length}`}
                 </Button>
               )}
+              {sales ? (
+                <p className="text-xs text-muted-foreground">
+                  Closings and revenue are this month&apos;s, in Gulf time — the Salespeople page&apos;s figures.
+                </p>
+              ) : null}
               {anyOverdue ? (
                 <p className="text-xs text-muted-foreground">
                   <Clock className="mr-1 inline h-3 w-3 text-rose-500" />

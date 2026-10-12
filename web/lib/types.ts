@@ -664,6 +664,8 @@ export interface CseFigures {
   bonus: { clients: number; usd: number; needsCall: number; withFinance: number; waitingBroker: number };
   notOnboarded: number;
   notOnboardedLate: number;
+  /** Started in the period, and the AED finance approved on them in it. Missing from a Tetra Commission before 2026-10-11. */
+  upgrades?: { count: number; paidAed: number; payments: number };
 }
 
 export interface CsePerson { id: string; name: string; email: string; role: string; active: boolean; team: string }
@@ -672,6 +674,8 @@ export interface CseList {
   today: string;
   upcomingDays: number;
   rows: (CsePerson & CseFigures)[];
+  /** The team's figures, each student once however many CSEs share them. Missing from a Tetra Commission before 2026-10-11. */
+  totals?: CseFigures;
   /** Prefix for a student's page in Tetra Commission; "" when its address is not set. */
   studentLink: string;
 }
@@ -689,5 +693,7 @@ export interface CseDetail {
   notOnboarded: (CseStudentRef & { since: string; late: boolean })[];
   deposits: { studentId: string; student: string; usd: number; at: string }[];
   commission: (CseStudentRef & { usd: number; level: number | null; type: string; status: string; at: string })[];
+  /** Started or paid on in the period. Missing from a Tetra Commission before 2026-10-11. */
+  upgrades?: (CseStudentRef & { course: string; plan: string; status: string; dueAed: number; paidAed: number; at: string; startedBy: string })[];
   studentLink: string;
 }

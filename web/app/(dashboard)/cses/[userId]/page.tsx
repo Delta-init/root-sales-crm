@@ -5,12 +5,13 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { AlertTriangle, ArrowLeft, CalendarClock, CircleDollarSign, Coins, Gift, GraduationCap, PhoneCall, UserX, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowUpCircle, CalendarClock, CircleDollarSign, Coins, Gift, GraduationCap, PhoneCall, UserX, Wallet } from "lucide-react";
 import { AxiosError } from "axios";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { CseStatCard } from "@/components/cses/CseStatCard";
 import { RangePicker, resolveRange, REPORT_TZ_LABEL, type Range, type RangeKey } from "@/components/reports/RangePicker";
 import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
@@ -19,7 +20,8 @@ import type { CseDetail, MoneyByCurrency } from "@/lib/types";
 /**
  * One CSE (the user, 2026-10-11): their figures and the lists behind them —
  * today's and overdue follow-ups, instalments due and overdue, bonuses waiting,
- * students not onboarded, and the period's deposits and commission. Gulf time.
+ * students not onboarded, and the period's deposits, commission and course
+ * upgrades (2026-10-11). Gulf time.
  */
 
 const usd = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
@@ -33,6 +35,8 @@ const gst = (iso: string | null, withTime = false) => {
     ...(withTime ? { hour: "2-digit", minute: "2-digit", hour12: true } : {}),
   }).format(d) + (withTime ? " GST" : "");
 };
+const aed = (n: number) => `AED ${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+const UPGRADE_STATUS: Record<string, string> = { open: "In progress", done: "Paid in full", cancelled: "Cancelled" };
 const STAGE: Record<string, string> = { needs_call: "Needs call + MT5", with_finance: "With finance", waiting_broker: "Waiting for broker admin" };
 
 export default function CsePage() {
@@ -79,24 +83,26 @@ export default function CsePage() {
             </div>
             <div className="flex flex-col items-end gap-1">
               <RangePicker value={range} custom={custom} onChange={(k, c) => { setRange(k); if (c) setCustom(c); }} />
-              <span className="text-xs text-muted-foreground">Deposits and commission in the period · the rest as of now · {REPORT_TZ_LABEL}</span>
+              <span className="text-xs text-muted-foreground">Deposits, commission and upgrades in the period · the rest as of now · {REPORT_TZ_LABEL}</span>
             </div>
           </motion.div>
 
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Stat icon={GraduationCap} label="Students" value={String(d.summary.students)} />
-            <Stat icon={CircleDollarSign} label="Deposits" value={usd(d.summary.deposits.usd)} hint={`${d.summary.deposits.count} in the period`} />
-            <Stat icon={Coins} label="Commission earned" value={usd(d.summary.commissionUsd)} hint="credited in the period" tone="text-primary" />
-            <Stat icon={PhoneCall} label="Follow-ups today" value={String(d.summary.followupsToday)}
-              hint={d.summary.followupsOverdue ? `${d.summary.followupsOverdue} overdue` : "none overdue"} tone={d.summary.followupsOverdue ? "text-rose-500" : undefined} />
-            <Stat icon={CalendarClock} label={`Due in ${d.upcomingDays} days`} value={String(d.summary.upcoming.count)}
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+            <CseStatCard icon={CircleDollarSign} accent="emerald" title="Total deposits" value={usd(d.summary.deposits.usd)} hint={`${d.summary.deposits.count} in the period`} delay={0.05} />
+            <CseStatCard icon={Coins} accent="cyan" title="Commission earned" value={usd(d.summary.commissionUsd)} hint="credited in the period" delay={0.1} />
+            <CseStatCard icon={ArrowUpCircle} accent="violet" title="Course upgrades" value={d.summary.upgrades ? String(d.summary.upgrades.count) : "—"}
+              hint={d.summary.upgrades ? `started · ${aed(d.summary.upgrades.paidAed)} paid in the period` : "after Tetra Commission's update"} delay={0.15} />
+            <CseStatCard icon={GraduationCap} title="Students" value={String(d.summary.students)} hint="theirs now, Common CS too" delay={0.2} />
+            <CseStatCard icon={PhoneCall} title="Follow-ups today" value={String(d.summary.followupsToday)}
+              hint={d.summary.followupsOverdue ? `${d.summary.followupsOverdue} overdue` : "none overdue"} alert={!!d.summary.followupsOverdue} delay={0.25} />
+            <CseStatCard icon={CalendarClock} accent="amber" title={`Due in ${d.upcomingDays} days`} value={String(d.summary.upcoming.count)}
               hint={`${moneyList(d.summary.upcoming.amount)}${d.summary.overdueDues.count ? ` · ${d.summary.overdueDues.count} overdue` : ""}`}
-              tone={d.summary.overdueDues.count ? "text-rose-500" : undefined} />
-            <Stat icon={Wallet} label="Balance due" value={moneyList(d.summary.balance.amount)} hint={`${d.summary.balance.students} students owing`} />
-            <Stat icon={Gift} label="Bonus due" value={usd(d.summary.bonus.usd)}
-              hint={`${d.summary.bonus.clients} clients · ${d.summary.bonus.needsCall} need a call · ${d.summary.bonus.withFinance} with finance · ${d.summary.bonus.waitingBroker} with a broker admin`} />
-            <Stat icon={UserX} label="Not onboarded" value={String(d.summary.notOnboarded)}
-              hint={d.summary.notOnboardedLate ? `${d.summary.notOnboardedLate} waiting 6h+` : undefined} tone={d.summary.notOnboardedLate ? "text-rose-500" : undefined} />
+              alert={!!d.summary.overdueDues.count} delay={0.3} />
+            <CseStatCard icon={Wallet} accent="amber" title="Balance due" value={moneyList(d.summary.balance.amount)} hint={`${d.summary.balance.students} students owing`} delay={0.35} />
+            <CseStatCard icon={Gift} accent="rose" title="Bonus due" value={usd(d.summary.bonus.usd)}
+              hint={`${d.summary.bonus.clients} clients · ${d.summary.bonus.needsCall} need a call · ${d.summary.bonus.withFinance} with finance · ${d.summary.bonus.waitingBroker} with a broker admin`} delay={0.4} />
+            <CseStatCard icon={UserX} accent="amber" title="Not onboarded" value={String(d.summary.notOnboarded)}
+              hint={d.summary.notOnboardedLate ? `${d.summary.notOnboardedLate} waiting 6h+` : "none waiting 6h+"} alert={!!d.summary.notOnboardedLate} delay={0.45} />
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
@@ -154,6 +160,21 @@ export default function CsePage() {
               ))}</tbody>
             </Section>
 
+            {d.upgrades && (
+              <Section title={`Course upgrades · ${d.upgrades.length}`} empty="No course upgrades started or paid on in this period." rows={d.upgrades.length}>
+                <thead><tr><Th>Student</Th><Th right>Paid in period</Th><Th>Started</Th></tr></thead>
+                <tbody>{d.upgrades.map((x, i) => (
+                  <tr key={i} className="border-b border-border/20 last:border-0">
+                    <Td>{student(x)}<div className="text-xs text-muted-foreground">
+                      {[x.course, x.plan === "full" ? "full payment" : "instalments", UPGRADE_STATUS[x.status] ?? x.status].filter(Boolean).join(" · ")}
+                    </div></Td>
+                    <Td right>{aed(x.paidAed)}<div className="text-xs text-muted-foreground">of {aed(x.dueAed)}</div></Td>
+                    <Td>{gst(x.at)}{x.startedBy && <div className="text-xs text-muted-foreground">by {x.startedBy}</div>}</Td>
+                  </tr>
+                ))}</tbody>
+              </Section>
+            )}
+
             <Section title={`Commission in the period · ${usd(d.summary.commissionUsd)}`} empty="No commission credited in this period." rows={d.commission.length}>
               <thead><tr><Th>Student</Th><Th right>Commission</Th><Th>Credited</Th></tr></thead>
               <tbody>{d.commission.map((x, i) => (
@@ -167,18 +188,6 @@ export default function CsePage() {
         </>
       )}
     </div>
-  );
-}
-
-function Stat({ icon: Icon, label, value, hint, tone }: { icon: typeof Coins; label: string; value: string; hint?: string; tone?: string }) {
-  return (
-    <Card>
-      <CardContent className="space-y-1 pt-4">
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Icon className="h-3.5 w-3.5" />{label}</p>
-        <p className={cn("text-xl font-bold tabular-nums", tone)}>{value}</p>
-        {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-      </CardContent>
-    </Card>
   );
 }
 

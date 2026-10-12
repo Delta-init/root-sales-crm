@@ -133,3 +133,11 @@
 ::-webkit-scrollbar-thumb:hover {
   background: transparent;
 }
+
+/* A row that scrolls sideways without a bar under it — the navigation. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
