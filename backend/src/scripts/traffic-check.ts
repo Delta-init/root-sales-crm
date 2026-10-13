@@ -846,6 +846,30 @@ async function main() {
   check("and it needs lead-traffic access like a sheet", (await call("GET", "/traffic/summary?sheet=all", undefined, member)).status === 403
     && (await call("GET", "/traffic/leads?sheet=all", undefined, member)).status === 403);
 
+  // ── The same hours of each day (the user, 2026-10-13) ───────────────────
+  {
+    // Two quiet days of their own, Gulf time: 08:30, 09:00, 13:59, 14:00, 23:30 on 5 Jan; 10:15 and 02:00 on 6 Jan.
+    const gulf = (day: string, hm: string) => new Date(new Date(`${day}T${hm}:00Z`).getTime() - 4 * 60 * 60_000);
+    const at = [["2026-01-05", "08:30"], ["2026-01-05", "09:00"], ["2026-01-05", "13:59"], ["2026-01-05", "14:00"], ["2026-01-05", "23:30"], ["2026-01-06", "10:15"], ["2026-01-06", "02:00"]];
+    await TrafficLead.collection.insertMany(at.map(([d, hm], i) => {
+      const t = gulf(d!, hm!);
+      return { ...legacyLead(`hours-${i}`, `+97150990${String(i).padStart(4, "0")}`), sheet: "abhin", share: "delta", receivedAt: t, createdTime: t, createdAt: t, updatedAt: t };
+    }));
+    const days = "from=2026-01-05&to=2026-01-06";
+    const received = async (q: string) => (await call("GET", `/traffic/summary?${days}${q}`, undefined, root)).body?.data?.totals?.received;
+    check("hours: the whole two days first — all seven", (await received("")) === 7, String(await received("")));
+    check("09:00–14:00 each day: 09:00 and 13:59 on the 5th, 10:15 on the 6th — the start in, the end out", (await received("&fromTime=09:00&toTime=14:00")) === 3, String(await received("&fromTime=09:00&toTime=14:00")));
+    check("22:00–06:00 runs overnight: 23:30 and 02:00", (await received("&fromTime=22:00&toTime=06:00")) === 2, String(await received("&fromTime=22:00&toTime=06:00")));
+    check("the same time twice is the whole day", (await received("&fromTime=10:00&toTime=10:00")) === 7);
+    const allTab = (await call("GET", `/traffic/summary?sheet=all&${days}&fromTime=09:00&toTime=14:00`, undefined, root)).body?.data;
+    check("the All tab takes the same hours", JSON.stringify(allTab).includes("\"received\":3") || allTab?.totals?.received === 3, JSON.stringify(allTab?.totals ?? allTab).slice(0, 200));
+    const listed = (await call("GET", `/traffic/leads?${days}&fromTime=09:00&toTime=14:00&limit=50`, undefined, root)).body?.data;
+    check("…and so does the list of leads", listed?.total === 3 && (listed?.items ?? []).length === 3, `${listed?.total}`);
+    const bad = await call("GET", `/traffic/summary?${days}&fromTime=9am&toTime=14:00`, undefined, root);
+    check("a time that is not HH:MM is refused", bad.status === 400 && /HH:MM/.test(String(bad.body?.message)), `${bad.status} ${show(bad.body)}`);
+    check("…and so is one time without the other", (await call("GET", `/traffic/leads?${days}&fromTime=09:00`, undefined, root)).status === 400);
+  }
+
   console.log(`\n${checks - failures}/${checks} checks passed`);
   for (const s of servers) s.close();
   await mongoose.disconnect();

@@ -103,6 +103,10 @@ export default function TrafficPage() {
   const [range, setRange] = useState<RangeKey>("today");
   // The two dates of Custom, filled from whatever was on show when it is picked.
   const [custom, setCustom] = useState({ from: "", to: "" });
+  // The same hours of every day on show (the user, 2026-10-13), Gulf time — used once both are filled.
+  const [hours, setHours] = useState({ from: "", to: "" });
+  const hoursOn = Boolean(hours.from && hours.to && hours.from !== hours.to);
+  const hoursQs = hoursOn ? `&fromTime=${hours.from}&toTime=${hours.to}` : "";
   const [filter, setFilter] = useState<FilterKey>("all");
   const [org, setOrg] = useState<"all" | TrafficOrg>("all");
   const [page, setPage] = useState(1);
@@ -153,15 +157,15 @@ export default function TrafficPage() {
     queryFn: async () => (await api.get("/traffic/rules")).data.data as TrafficRules,
   });
   const summary = useQuery({
-    queryKey: ["traffic-summary", sheet, from, to],
+    queryKey: ["traffic-summary", sheet, from, to, hoursQs],
     queryFn: async () =>
-      (await api.get(`/traffic/summary?sheet=${sheet}&from=${from}&to=${to}`)).data.data as TrafficSummary | TrafficAllSummary,
+      (await api.get(`/traffic/summary?sheet=${sheet}&from=${from}&to=${to}${hoursQs}`)).data.data as TrafficSummary | TrafficAllSummary,
     refetchInterval: 30_000,
   });
   const leads = useQuery({
-    queryKey: ["traffic-leads", sheet, filter, org, from, to, page],
+    queryKey: ["traffic-leads", sheet, filter, org, from, to, hoursQs, page],
     queryFn: async () =>
-      (await api.get(`/traffic/leads?sheet=${sheet}&filter=${filter}&org=${org}&from=${from}&to=${to}&page=${page}&limit=25`))
+      (await api.get(`/traffic/leads?sheet=${sheet}&filter=${filter}&org=${org}&from=${from}&to=${to}${hoursQs}&page=${page}&limit=25`))
         .data.data as TrafficLeadPage,
     refetchInterval: 30_000,
   });
@@ -344,8 +348,37 @@ export default function TrafficPage() {
             />
           </div>
         )}
+        {/* The same hours on every day on show: 09:00 → 14:00 is the mornings; 22:00 → 06:00 runs overnight. */}
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Hours</span>
+          <input
+            type="time"
+            value={hours.from}
+            onChange={(e) => { setHours((h) => ({ ...h, from: e.target.value })); setPage(1); }}
+            className="rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-primary"
+            aria-label="From time (Gulf)"
+          />
+          <span className="text-muted-foreground">to</span>
+          <input
+            type="time"
+            value={hours.to}
+            onChange={(e) => { setHours((h) => ({ ...h, to: e.target.value })); setPage(1); }}
+            className="rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-primary"
+            aria-label="To time (Gulf)"
+          />
+          {(hours.from || hours.to) && (
+            <button
+              type="button"
+              onClick={() => { setHours({ from: "", to: "" }); setPage(1); }}
+              className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              All day
+            </button>
+          )}
+        </div>
         <span className="text-xs text-muted-foreground">
-          {from === to ? from : `${from} → ${to}`} · Gulf time
+          {from === to ? from : `${from} → ${to}`}
+          {hoursOn ? `, ${hours.from}–${hours.to} each day${hours.from > hours.to ? " (overnight)" : ""}` : ""} · Gulf time
         </span>
       </div>
 

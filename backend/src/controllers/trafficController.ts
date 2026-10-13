@@ -141,12 +141,26 @@ export const summary = async (req: AuthenticatedRequest, res: Response, next: Ne
     sendError(res, "'from' is after 'to'", 400);
     return;
   }
+  const hours = hoursOf(req.query.fromTime, req.query.toTime);
+  if (hours === false) {
+    sendError(res, "fromTime and toTime are HH:MM, and come together", 400);
+    return;
+  }
   try {
-    sendSuccess(res, "Lead traffic", sheet === "all" ? await traffic.summaryAll(from, to) : await traffic.summary(sheet, from, to));
+    sendSuccess(res, "Lead traffic", sheet === "all" ? await traffic.summaryAll(from, to, hours) : await traffic.summary(sheet, from, to, hours));
   } catch (error) {
     next(error);
   }
 };
+
+/** HH:MM, 00:00–23:59. */
+const TIME = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "a time is HH:MM");
+/** The hours asked for (the user, 2026-10-13): both, or neither; false when they are not times, or only one came. */
+function hoursOf(fromTime: unknown, toTime: unknown): traffic.Hours | false {
+  if ((fromTime === undefined || fromTime === "") && (toTime === undefined || toTime === "")) return null;
+  const f = TIME.safeParse(fromTime), t = TIME.safeParse(toTime);
+  return f.success && t.success ? { from: f.data, to: t.data } : false;
+}
 
 const leadsQuery = z.object({
   sheet: z.string().default("abhin"),
@@ -157,12 +171,19 @@ const leadsQuery = z.object({
   // The days the page is looking at, as the summary takes them (Gulf time); without them, every lead.
   from: DATE.optional(),
   to: DATE.optional(),
+  // The same hours of each of those days (Gulf time), both or neither.
+  fromTime: TIME.optional(),
+  toTime: TIME.optional(),
 });
 
 export const leads = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   const parsed = leadsQuery.safeParse(req.query);
   if (!parsed.success) {
     sendError(res, parsed.error.issues[0]?.message ?? "Invalid query", 400);
+    return;
+  }
+  if (Boolean(parsed.data.fromTime) !== Boolean(parsed.data.toTime)) {
+    sendError(res, "fromTime and toTime are HH:MM, and come together", 400);
     return;
   }
   if (parsed.data.from && parsed.data.to && parsed.data.from > parsed.data.to) {

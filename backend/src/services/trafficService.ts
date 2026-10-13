@@ -952,13 +952,28 @@ export async function rulesView() {
 // ── Reading back ─────────────────────────────────────────────────────────────
 
 const GULF_MS = 4 * 60 * 60_000;
+
+/**
+ * The same hours on every day looked at (the user, 2026-10-13): from and to,
+ * HH:MM Gulf time, the start included and the end not — 09:00–14:00 is the
+ * mornings. A start after the end runs overnight (22:00–06:00). None, or the
+ * same time twice, is the whole day.
+ */
+export type Hours = { from: string; to: string } | null;
+export function hoursMatch(hours?: Hours): Record<string, unknown> {
+  if (!hours || hours.from === hours.to) return {};
+  const t = { $dateToString: { date: "$receivedAt", format: "%H:%M", timezone: "+04:00" } };
+  const after = { $gte: [t, hours.from] };
+  const before = { $lt: [t, hours.to] };
+  return { $expr: hours.from < hours.to ? { $and: [after, before] } : { $or: [after, before] } };
+}
 /** Midnight Gulf time on that day, as an instant. */
 const gulfStart = (day: string) => new Date(new Date(`${day}T00:00:00Z`).getTime() - GULF_MS);
 export const gulfToday = () => new Date(Date.now() + GULF_MS).toISOString().slice(0, 10);
 
 const WAITING: TrafficStatus[] = ["queued", "held", "sending", "retrying"];
 
-export async function summary(sheet: TrafficSheet, from: string, to: string) {
+export async function summary(sheet: TrafficSheet, from: string, to: string, hours: Hours = null) {
   const cfg = SHEET_CONFIG[sheet];
   const start = gulfStart(from);
   const end = new Date(gulfStart(to).getTime() + 24 * 60 * 60_000);
@@ -968,7 +983,7 @@ export async function summary(sheet: TrafficSheet, from: string, to: string) {
     n: number;
   };
   const rows = await TrafficLead.aggregate<Row>([
-    { $match: { sheet, receivedAt: { $gte: start, $lt: end } } },
+    { $match: { sheet, receivedAt: { $gte: start, $lt: end }, ...hoursMatch(hours) } },
     {
       $group: {
         _id: { segment: "$segment", share: "$share", destination: "$destination", status: "$status", counted: "$counted" },
@@ -1066,13 +1081,13 @@ function tally(of: TallyRow[]) {
  * by the split, or back to where the person already was. A split belongs to one
  * sheet, so there is none here.
  */
-export async function summaryAll(from: string, to: string) {
+export async function summaryAll(from: string, to: string, hours: Hours = null) {
   const start = gulfStart(from);
   const end = new Date(gulfStart(to).getTime() + 24 * 60 * 60_000);
   type Row = { _id: { sheet: TrafficSheet; destination: TrafficOrg | null; status: TrafficStatus }; n: number };
   const [rows, rules, orgs] = await Promise.all([
     TrafficLead.aggregate<Row>([
-      { $match: { sheet: { $in: SHEETS }, receivedAt: { $gte: start, $lt: end } } },
+      { $match: { sheet: { $in: SHEETS }, receivedAt: { $gte: start, $lt: end }, ...hoursMatch(hours) } },
       { $group: { _id: { sheet: "$sheet", destination: "$destination", status: "$status" }, n: { $sum: 1 } } },
     ]),
     getRules(),
@@ -1116,11 +1131,15 @@ export async function listLeads(opts: {
   /** Received on these Gulf days, YYYY-MM-DD, both included; either left out, no bound that side. */
   from?: string;
   to?: string;
+  /** …and in these hours of each of them (HH:MM, Gulf time) — see hoursMatch. */
+  fromTime?: string;
+  toTime?: string;
 }) {
   const q: Record<string, unknown> = { sheet: opts.sheet === "all" ? { $in: SHEETS } : opts.sheet };
   if (opts.filter === "waiting") q.status = { $in: WAITING };
   else if (opts.filter !== "all") q.status = opts.filter;
   if (opts.org !== "all") q.destination = opts.org;
+  if (opts.fromTime && opts.toTime) Object.assign(q, hoursMatch({ from: opts.fromTime, to: opts.toTime }));
   if (opts.from || opts.to) {
     q.receivedAt = {
       ...(opts.from ? { $gte: gulfStart(opts.from) } : {}),
