@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { Response, NextFunction } from "express";
 import { Organization } from "../models/Organization.js";
-import { allServiceSecrets } from "../config/targets.js";
+import { allServiceSecrets, targetConfig, envKeyFor } from "../config/targets.js";
 import { sendError } from "../utils/response.js";
 import type { AuthenticatedRequest } from "../types/index.js";
 
@@ -67,3 +67,44 @@ export const authenticateOrgService = async (
     next(error);
   }
 };
+
+/**
+ * Authenticate one named portal calling in — the LMS asking which sales CRMs
+ * its students are leads in, say. No user session: the portal proves itself
+ * with `x-portal-secret`, the very value this portal sends it outbound
+ * (`{CODE}_SSO_SECRET`, the "shared secret, both directions" in
+ * config/targets.ts), so nothing new has to be set on either side.
+ *
+ * Fails closed. No secret configured here is a 503 naming the variable — never
+ * an open door, and never an empty secret that an empty header would match.
+ * An organization switched off in the registry is closed the same way, as
+ * authenticateOrgService closes it for the CRMs.
+ */
+export const authenticatePortalService = (code: string) =>
+  async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const secret = targetConfig(code).ssoSecret;
+      const org = secret ? await Organization.findOne({ code }).select("name isActive").lean() : null;
+      if (!secret || !org?.isActive) {
+        sendError(
+          res,
+          secret ? `${org?.name ?? code} is not active on this server` : `Not configured on this server — set ${envKeyFor(code)}_SSO_SECRET`,
+          503,
+        );
+        return;
+      }
+
+      const presented = req.headers["x-portal-secret"];
+      if (typeof presented !== "string" || !presented) {
+        sendError(res, "Missing service credential", 401);
+        return;
+      }
+      if (!safeEqual(secret, presented)) {
+        sendError(res, "Invalid service credential", 401);
+        return;
+      }
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
