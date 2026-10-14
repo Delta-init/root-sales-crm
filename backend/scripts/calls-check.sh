@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# End-to-end check of the Pending page's API: every CRM's sidebar counts, per
-# salesperson, read from the CRMs' databases by the real portal backend.
+# End-to-end check of the 3CX calls page and each person's calls on Pending
+# (GET /calls, /calls/:portal/:id/recording-link, /pending/calls).
 #
-# Stands up a throwaway mongod holding the portal's database and two scratch
-# CRM databases, starts the backend against them, and drives it. Banglore is
-# pointed at a port nothing listens on, and Remote has no database at all, so
-# both "cannot be read" paths are taken. Tears everything down afterwards.
+# Stands up a throwaway mongod holding the portal's database and a scratch
+# Banglore database (its call-recorder calls), starts the real backend against
+# them, and drives it; the portals that sync 3CX are a stand-in inside the
+# check. Tears everything down afterwards.
 #
 # Nothing here touches a configured database. backend/.env names the real
 # ones, and src/config/env.ts loads it through dotenv whatever bun is told —

@@ -15,7 +15,8 @@ import { AED_PER_USD, FundingTable, UpgradesTable, money, moneyOfUsd } from "@/c
 import { RangePicker, resolveRange, REPORT_TZ_LABEL, type Range, type RangeKey } from "@/components/reports/RangePicker";
 import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
-import type { CseFigures, CseList, CseLocation, MoneyByCurrency } from "@/lib/types";
+import type { CseFigures, CseList, CseLocation, EnrolmentFlow, MoneyByCurrency } from "@/lib/types";
+import { CseEnrolments } from "@/components/pending/EnrolmentFlow";
 
 /**
  * CSEs (the user, 2026-10-11): Tetra Commission's customer success people —
@@ -97,6 +98,12 @@ export default function CsesPage() {
   const list = useQuery({
     queryKey: ["cses", period],
     queryFn: async () => (await api.get("/cses", { params: period })).data.data as CseList,
+  });
+  // The sales CRMs' enrolments waiting on CSEs (2026-10-14) — the Pending page's workflow.
+  const flow = useQuery({
+    queryKey: ["pending-enrolments"],
+    queryFn: async () => (await api.get("/pending/enrolments")).data.data as EnrolmentFlow,
+    refetchInterval: 3 * 60_000,
   });
   const needle = search.trim().toLowerCase();
   const rows = useMemo(() => (list.data?.rows ?? [])
@@ -229,6 +236,15 @@ export default function CsesPage() {
             <FundingTable rows={list.data.funding.rows} total={list.data.funding.total}
               studentHref={(id) => (list.data?.studentLink && id ? `${list.data.studentLink}${id}` : null)} />
           </CardContent>
+        </Card>
+      )}
+
+      {flow.data && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base"><UserX className="h-4 w-4" /> Enrolments waiting on CSEs</CardTitle>
+          </CardHeader>
+          <CardContent><CseEnrolments flow={flow.data} /></CardContent>
         </Card>
       )}
 

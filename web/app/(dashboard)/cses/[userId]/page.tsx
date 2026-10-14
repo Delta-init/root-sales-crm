@@ -16,7 +16,8 @@ import { AED_PER_USD, FundingTable, money, moneyOfUsd } from "@/components/cses/
 import { RangePicker, resolveRange, REPORT_TZ_LABEL, type Range, type RangeKey } from "@/components/reports/RangePicker";
 import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
-import type { CseDetail, MoneyByCurrency } from "@/lib/types";
+import type { CseDetail, EnrolmentFlow, MoneyByCurrency } from "@/lib/types";
+import { CseEnrolments } from "@/components/pending/EnrolmentFlow";
 
 /**
  * One CSE (the user, 2026-10-11): their figures and the lists behind them —
@@ -50,6 +51,12 @@ export default function CsePage() {
     queryFn: async () => (await api.get(`/cses/${userId}`, { params: period })).data.data as CseDetail,
   });
   const d = q.data;
+  // The sales CRMs' enrolments waiting on them (2026-10-14), matched by name.
+  const flow = useQuery({
+    queryKey: ["pending-enrolments"],
+    queryFn: async () => (await api.get("/pending/enrolments")).data.data as EnrolmentFlow,
+    refetchInterval: 3 * 60_000,
+  });
   // Their money in their currency (2026-10-14): AED, or INR for a Bangalore team's CSE — as Tetra Commission shows it them.
   const loc = d?.person.location ?? "dubai";
   const inLocal = (aedAmount: number) => money(aedAmount, loc);
@@ -115,6 +122,16 @@ export default function CsePage() {
                 alert={!!d.summary.funding.sentBack} delay={0.5} />
             )}
           </div>
+
+          {flow.data && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base"><UserX className="h-4 w-4" /> Enrolments waiting on them</CardTitle>
+                <p className="text-xs text-muted-foreground">Sales CRM closes whose next step is theirs — the welcome, the MT5 to log — or with a broker admin for their bonus.</p>
+              </CardHeader>
+              <CardContent><CseEnrolments flow={flow.data} only={d.person.name} /></CardContent>
+            </Card>
+          )}
 
           {d.funding && (
             <Card>

@@ -834,3 +834,55 @@ export interface CallsOverview extends CallsByPerson {
   limit: number;
   capped: boolean;
 }
+
+// ── Enrolment workflow, every sales CRM (GET /pending/enrolments, 2026-10-14) ──
+// Each CRM's My Enrolments steps: finance approved → LMS account → CS assigned → onboarded → MT5 bonus (Banglore the first two).
+
+export type FlowStep = "finance" | "lms" | "cs" | "onboarded" | "bonus";
+export type FlowRole = "finance" | "salesperson" | "lms" | "cs_manager" | "cs" | "broker_admin" | "tetra";
+
+export interface FlowCounts {
+  total: number;
+  finished: number;
+  open: number;
+  atStep: Record<FlowStep, { waiting: number; failed: number }>;
+  byRole: Record<FlowRole, number>;
+}
+
+export interface FlowClose {
+  portal: string;
+  portalName: string;
+  id: string;
+  name: string;
+  enrollmentNumber: string;
+  course: string;
+  academy: string;
+  closedBy: { id: string; name: string; email: string };
+  team: string;
+  closedAt: string;
+  invoiceNumber: string;
+  stage: FlowStep;
+  stageState: string;
+  detail: string;
+  waitingOn: { role: FlowRole; name: string };
+  cs: string;
+  since: string;
+  steps: { key: FlowStep; state: string }[];
+}
+
+export interface FlowWaitingOn {
+  key: string;
+  role: FlowRole;
+  name: string;
+  email: string;
+  count: number;
+  portals: Record<string, number>;
+}
+
+export interface EnrolmentFlow {
+  generatedAt: string;
+  portals: { code: string; name: string; accent: string; available: boolean; error: string; financeAnswered: boolean; counts: FlowCounts }[];
+  all: FlowCounts;
+  waitingOn: FlowWaitingOn[];
+  open: FlowClose[];
+}

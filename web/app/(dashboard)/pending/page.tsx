@@ -14,7 +14,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { resolveRange } from "@/components/reports/RangePicker";
 import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
-import type { CallsByPerson, PendingOverview, PendingPortal, SalespeopleList } from "@/lib/types";
+import type { CallsByPerson, EnrolmentFlow, PendingOverview, PendingPortal, SalespeopleList } from "@/lib/types";
+import { EnrolmentFlowView } from "@/components/pending/EnrolmentFlow";
 import { CALL_PERIODS, periodDays, talkTime, type CallPeriod } from "@/lib/calls";
 
 /**
@@ -35,11 +36,18 @@ import { CALL_PERIODS, periodDays, talkTime, type CallPeriod } from "@/lib/calls
  * pending listed after the rest. Calls come from the Sales CRM, Draw and Tetra
  * Commission (3CX) and Banglore's call recorder; one person's are put together
  * by email. The 3CX calls page (Sales) has every call and its recording.
+ *
+ * And the enrolment workflow (2026-10-14): every sales CRM's unfinished closes
+ * as a chart of their My Enrolments steps — where each stands, the biggest
+ * pile, who holds the most (finance, broker admins, each CS, each salesperson)
+ * — and in By person what each of them holds: a salesperson's closes sent
+ * back, a CS's welcomes to send and MT5s to log (a CS matched by name).
  */
 
 const VIEWS = [
   { key: "portal", label: "By portal" },
   { key: "person", label: "By person" },
+  { key: "enrolments", label: "Enrolments" },
 ] as const;
 type View = (typeof VIEWS)[number]["key"];
 
@@ -103,6 +111,30 @@ export default function PendingPage() {
   }, [calls.data]);
   const callSummaryOf = useMemo(() => new Map((calls.data?.portals ?? []).map((x) => [x.code, x])), [calls.data]);
 
+  // Every sales CRM's enrolment workflow.
+  const flow = useQuery({
+    queryKey: ["pending-enrolments"],
+    queryFn: async () => (await api.get("/pending/enrolments")).data.data as EnrolmentFlow,
+    refetchInterval: 3 * 60_000,
+  });
+  /** What each person holds of the workflow: a salesperson by email, a CS by name. */
+  const flowByPerson = useMemo(() => {
+    const out = new Map<string, { name: string; email: string; sentBack: number; onboard: number; mt5: number }>();
+    for (const c of flow.data?.open ?? []) {
+      const r = c.waitingOn.role;
+      if (r !== "salesperson" && r !== "cs") continue;
+      const key = r === "salesperson" ? (c.closedBy.email || `name:${c.waitingOn.name.toLowerCase()}`) : `name:${c.waitingOn.name.toLowerCase()}`;
+      if (key === "name:") continue;
+      const x = out.get(key) ?? { name: c.waitingOn.name, email: r === "salesperson" ? c.closedBy.email : "", sentBack: 0, onboard: 0, mt5: 0 };
+      if (r === "salesperson") x.sentBack++;
+      else if (c.stage === "onboarded") x.onboard++;
+      else x.mt5++;
+      out.set(key, x);
+    }
+    return out;
+  }, [flow.data]);
+  const flowOf = (email: string, name: string) => (email && flowByPerson.get(email)) || flowByPerson.get(`name:${name.toLowerCase()}`);
+
   const needle = search.trim().toLowerCase();
   const matches = (name: string, email: string) => !needle || name.toLowerCase().includes(needle) || email.includes(needle);
   const people = useMemo(() => {
@@ -112,8 +144,12 @@ export default function PendingPage() {
     const callersOnly = (calls.data?.people ?? [])
       .filter((x) => x.email && x.calls > 0 && !seen.has(x.email))
       .map((x) => ({ key: x.email, name: x.name, email: x.email, total: 0, items: [] as PendingOverview["people"][number]["items"] }));
-    return [...pendingPeople, ...callersOnly].filter((p) => matches(p.name, p.email));
-  }, [data, calls.data, needle]); // eslint-disable-line react-hooks/exhaustive-deps
+    // …and those an enrolment waits on with nothing else (a CS by name, a salesperson by email).
+    const listed = new Set([...pendingPeople, ...callersOnly].flatMap((p) => [p.email, `name:${p.name.toLowerCase()}`]).filter(Boolean));
+    const flowOnly = Array.from(flowByPerson).filter(([key, x]) => !listed.has(key) && !(x.email && listed.has(x.email)))
+      .map(([key, x]) => ({ key: `flow:${key}`, name: x.name, email: x.email, total: 0, items: [] as PendingOverview["people"][number]["items"] }));
+    return [...pendingPeople, ...callersOnly, ...flowOnly].filter((p) => matches(p.name, p.email));
+  }, [data, calls.data, flowByPerson, needle]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (forbidden(pending.error)) {
     return (
@@ -187,7 +223,22 @@ export default function PendingPage() {
         </div>
       </div>
 
-      {pending.isLoading ? (
+      {view === "enrolments" ? (
+        flow.isLoading ? (
+          <Skeleton className="h-96 w-full" />
+        ) : flow.isError || !flow.data ? (
+          <Card className="border-rose-500/40 bg-rose-500/5">
+            <CardContent className="flex gap-3 pt-6 text-sm">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-500" />
+              {notYet(flow.error)
+                ? "Root's server is still on the previous version — the workflow shows once it is updated."
+                : "Could not load the enrolment workflow. Refresh in a moment."}
+            </CardContent>
+          </Card>
+        ) : (
+          <EnrolmentFlowView flow={flow.data} />
+        )
+      ) : pending.isLoading ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-64 w-full" />)}
         </div>
@@ -275,6 +326,21 @@ export default function PendingPage() {
                         </td>
                         <td className="py-2.5 pr-3">
                           <div className="flex flex-wrap gap-1.5">
+                            {(() => {
+                              const f = flowOf(p.email, p.name);
+                              if (!f) return null;
+                              const parts = [
+                                f.sentBack && `${f.sentBack} sent back to correct`,
+                                f.onboard && `${f.onboard} to onboard`,
+                                f.mt5 && `${f.mt5} MT5 / bonus`,
+                              ].filter(Boolean);
+                              return (
+                                <span className="inline-flex items-center gap-1 rounded-md border border-violet-500/40 bg-violet-500/5 px-2 py-0.5 text-xs">
+                                  <span className="text-muted-foreground">Enrolments</span>
+                                  <span className="font-medium">{parts.join(" · ")}</span>
+                                </span>
+                              );
+                            })()}
                             {p.items.map((it) => (
                               <span
                                 key={`${it.portal}-${it.key}`}
