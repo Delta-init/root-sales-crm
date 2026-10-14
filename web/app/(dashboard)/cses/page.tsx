@@ -11,11 +11,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CseStatCard } from "@/components/cses/CseStatCard";
-import { FundingTable, UpgradesTable, UsdAed, aedOfUsd } from "@/components/cses/CseFunding";
+import { AED_PER_USD, FundingTable, UpgradesTable, money, moneyOfUsd } from "@/components/cses/CseFunding";
 import { RangePicker, resolveRange, REPORT_TZ_LABEL, type Range, type RangeKey } from "@/components/reports/RangePicker";
 import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
-import type { CseFigures, CseList, MoneyByCurrency } from "@/lib/types";
+import type { CseFigures, CseList, CseLocation, MoneyByCurrency } from "@/lib/types";
 
 /**
  * CSEs (the user, 2026-10-11): Tetra Commission's customer success people —
@@ -29,44 +29,58 @@ import type { CseFigures, CseList, MoneyByCurrency } from "@/lib/types";
  * Commission counts those, each student once: rows added up would count a
  * student shared with a Common CS twice.
  *
- * Dollars with their AED at Tetra Commission's fixed 3.67, as its Funding
- * Requests shows them; the funding requests waiting — with finance, with a
- * broker admin, sent back — and the period's, with the commission each
- * earned; and the period's course upgrades (2026-10-14).
+ * Money fully in AED, as Tetra Commission's Funding Requests shows it — a
+ * Bangalore team's CSEs in INR, and the team's Bangalore figures beside
+ * Dubai's, never added together (the fixed rates: 1 USD = 3.67 AED, 1 INR =
+ * 0.010 USD); the funding requests waiting — with finance, with a broker
+ * admin, sent back — and the period's, with the commission each earned; and
+ * the period's course upgrades (2026-10-14).
  */
 
-const usd = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 /** AED 3,000 · USD 500 — never adding one currency to another. */
 const moneyList = (m: MoneyByCurrency) =>
   Object.entries(m).filter(([, v]) => v).map(([c, v]) => `${c} ${v.toLocaleString("en-US", { maximumFractionDigits: 2 })}`).join(" · ");
 const dash = <span className="text-muted-foreground/60">—</span>;
-const aed = (n: number) => `AED ${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
-/** The team's cards. Before Tetra Commission sends totals, only what rows add up to exactly. */
+/** A deposit total's AED: as recorded (2026-10-14), else its USD at 3.67. */
+const depositAed = (f: CseFigures) => f.deposits.aed ?? f.deposits.usd * AED_PER_USD;
+
+/** The team's cards: Dubai in AED, Bangalore's INR beside it. Before Tetra Commission sends totals, only what rows add up to exactly. */
 function TeamTotals({ list }: { list: CseList }) {
   const t: CseFigures | undefined = list.totals;
+  const by = list.totalsByLocation;
   const later = "after Tetra Commission's update";
-  const deposits = t?.deposits ?? list.rows.reduce((m, r) => ({ count: m.count + r.deposits.count, usd: m.usd + r.deposits.usd }), { count: 0, usd: 0 });
-  const commission = t?.commissionUsd ?? list.rows.reduce((n, r) => n + r.commissionUsd, 0);
+  /** One figure (in AED) for each location — or, before Tetra Commission splits them, all of it as Dubai's. */
+  const split = (aedOf: (f: CseFigures) => number): Record<CseLocation, number> =>
+    by ? { dubai: aedOf(by.dubai), bangalore: aedOf(by.bangalore) }
+      : { dubai: t ? aedOf(t) : list.rows.reduce((n, r) => n + aedOf(r), 0), bangalore: 0 };
+  const value = (x: Record<CseLocation, number>) => money(x.dubai, "dubai");
+  const withBlr = (x: Record<CseLocation, number>, rest: string) => [rest, x.bangalore ? `Bangalore ${money(x.bangalore, "bangalore")}` : ""].filter(Boolean).join(" · ");
+  const depositCount = t?.deposits.count ?? list.rows.reduce((n, r) => n + r.deposits.count, 0);
+  const deposits = split(depositAed);
+  const commission = split((f) => f.commissionUsd * AED_PER_USD);
+  const upgrades = split((f) => f.upgrades?.paidAed ?? 0);
+  const bonus = split((f) => f.bonus.usd * AED_PER_USD);
+  const waiting = split((f) => f.funding?.pendingAed ?? 0);
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      <CseStatCard icon={CircleDollarSign} accent="emerald" title="Total deposits" value={usd(deposits.usd)} hint={`${aedOfUsd(deposits.usd)} · ${plural(deposits.count, "deposit")} in the period`} delay={0.05} />
-      <CseStatCard icon={Coins} accent="cyan" title="Total commission" value={usd(commission)} hint={`${aedOfUsd(commission)} · credited in the period`} delay={0.1} />
+      <CseStatCard icon={CircleDollarSign} accent="emerald" title="Total deposits" value={value(deposits)} hint={withBlr(deposits, `${plural(depositCount, "deposit")} in the period`)} delay={0.05} />
+      <CseStatCard icon={Coins} accent="cyan" title="Total commission" value={value(commission)} hint={withBlr(commission, "credited in the period")} delay={0.1} />
       <CseStatCard icon={ArrowUpCircle} accent="violet" title="Course upgrades" value={t?.upgrades ? String(t.upgrades.count) : "—"}
-        hint={t?.upgrades ? `started · ${aed(t.upgrades.paidAed)} paid in the period` : later} delay={0.15} />
+        hint={t?.upgrades ? `started · ${withBlr(upgrades, `${money(upgrades.dubai)} paid in the period`)}` : later} delay={0.15} />
       <CseStatCard icon={GraduationCap} title="Students" value={t ? String(t.students) : "—"} hint={t ? "with a CSE, now" : later} delay={0.2} />
       <CseStatCard icon={Wallet} accent="amber" title="Balance due" value={t ? moneyList(t.balance.amount) || "—" : "—"}
         hint={t ? `${plural(t.balance.students, "student")} owing · ${t.upcoming.count} due in ${list.upcomingDays} days` : later}
         alert={!!t?.overdueDues.count} delay={0.25} />
-      <CseStatCard icon={Gift} accent="rose" title="Bonus due" value={t ? usd(t.bonus.usd) : "—"} hint={t ? `${aedOfUsd(t.bonus.usd)} · ${plural(t.bonus.clients, "client")} waiting` : later} delay={0.3} />
+      <CseStatCard icon={Gift} accent="rose" title="Bonus due" value={t ? value(bonus) : "—"} hint={t ? withBlr(bonus, `${plural(t.bonus.clients, "client")} waiting`) : later} delay={0.3} />
       <CseStatCard icon={PhoneCall} title="Follow-ups today" value={t ? String(t.followupsToday) : "—"}
         hint={t ? (t.followupsOverdue ? `${t.followupsOverdue} overdue` : "none overdue") : later} alert={!!t?.followupsOverdue} delay={0.35} />
       <CseStatCard icon={UserX} accent="amber" title="Not onboarded" value={t ? String(t.notOnboarded) : "—"}
         hint={t ? (t.notOnboardedLate ? `${t.notOnboardedLate} waiting 6h+` : "none waiting 6h+") : later} alert={!!t?.notOnboardedLate} delay={0.4} />
       <CseStatCard icon={HandCoins} accent="violet" title="Funding requests waiting" value={t?.funding ? String(t.funding.pending) : "—"}
         hint={t?.funding
-          ? `${usd(t.funding.pendingUsd)} · ${aedOfUsd(t.funding.pendingUsd)} — ${t.funding.withFinance} with finance · ${t.funding.waitingBroker} broker admin · ${t.funding.sentBack} sent back`
+          ? `${withBlr(waiting, money(waiting.dubai))} — ${t.funding.withFinance} with finance · ${t.funding.waitingBroker} broker admin · ${t.funding.sentBack} sent back`
           : later}
         alert={!!t?.funding?.sentBack} delay={0.45} />
     </div>
@@ -154,15 +168,15 @@ export default function CsesPage() {
                     <td className="py-2.5 pr-3">
                       <Link href={`/cses/${r.id}`} className={cn("font-medium hover:underline", !r.active && "text-muted-foreground")}>{r.name}</Link>
                       {!r.active && <span className="ml-1.5 text-xs text-muted-foreground">(left)</span>}
-                      <div className="text-xs text-muted-foreground">{r.team || r.email}</div>
+                      <div className="text-xs text-muted-foreground">{r.team || r.email}{r.location === "bangalore" && <span className="ml-1 rounded bg-amber-500/15 px-1 text-[10px] text-amber-500">Bangalore · INR</span>}</div>
                     </td>
                     <td className="py-2.5 pr-3 text-right font-semibold tabular-nums">{r.students || dash}</td>
                     <td className="py-2.5 pr-3 text-right tabular-nums">
-                      {r.deposits.usd ? <><UsdAed usd={r.deposits.usd} /><div className="text-xs text-muted-foreground">{r.deposits.count} deposit{r.deposits.count === 1 ? "" : "s"}</div></> : dash}
+                      {r.deposits.usd ? <>{money(depositAed(r), r.location)}<div className="text-xs text-muted-foreground">{r.deposits.count} deposit{r.deposits.count === 1 ? "" : "s"}</div></> : dash}
                     </td>
-                    <td className="py-2.5 pr-3 text-right tabular-nums text-primary">{r.commissionUsd ? <UsdAed usd={r.commissionUsd} /> : dash}</td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums text-primary">{r.commissionUsd ? moneyOfUsd(r.commissionUsd, r.location) : dash}</td>
                     <td className="py-2.5 pr-3 text-right tabular-nums">
-                      {r.upgrades?.count || r.upgrades?.paidAed ? <>{r.upgrades.count}<div className="text-xs text-muted-foreground">{aed(r.upgrades.paidAed)} paid</div></> : dash}
+                      {r.upgrades?.count || r.upgrades?.paidAed ? <>{r.upgrades.count}<div className="text-xs text-muted-foreground">{money(r.upgrades.paidAed, r.location)} paid</div></> : dash}
                     </td>
                     <td className="py-2.5 pr-3 text-right tabular-nums">
                       {r.followupsToday || dash}
@@ -176,7 +190,7 @@ export default function CsesPage() {
                       {r.balance.students ? <>{moneyList(r.balance.amount)}<div className="text-xs text-muted-foreground">{r.balance.students} student{r.balance.students === 1 ? "" : "s"}</div></> : dash}
                     </td>
                     <td className="py-2.5 pr-3 text-right tabular-nums">
-                      {r.bonus.clients ? <><UsdAed usd={r.bonus.usd} /><div className="text-xs text-muted-foreground">{r.bonus.clients} client{r.bonus.clients === 1 ? "" : "s"}</div></> : dash}
+                      {r.bonus.clients ? <>{moneyOfUsd(r.bonus.usd, r.location)}<div className="text-xs text-muted-foreground">{r.bonus.clients} client{r.bonus.clients === 1 ? "" : "s"}</div></> : dash}
                     </td>
                     <td className="py-2.5 pr-3 text-right tabular-nums">
                       {r.notOnboarded || dash}
@@ -186,6 +200,7 @@ export default function CsesPage() {
                       {r.funding?.pending ? (
                         <>
                           {r.funding.pending}
+                          <div className="text-xs text-muted-foreground">{money(r.funding.pendingAed, r.location)}</div>
                           <div className="text-xs text-muted-foreground">
                             {[r.funding.withFinance && `${r.funding.withFinance} finance`, r.funding.waitingBroker && `${r.funding.waitingBroker} broker`].filter(Boolean).join(" · ")}
                           </div>
@@ -207,7 +222,7 @@ export default function CsesPage() {
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base"><HandCoins className="h-4 w-4" /> Funding requests</CardTitle>
             <p className="text-xs text-muted-foreground">
-              Every one still waiting, from any date, and those raised in the period — where each is paused, the amount in USD and AED (3.67), and the commission it earned.
+              Every one still waiting, from any date, and those raised in the period — where each is paused, the amount in AED (a Bangalore CSE&apos;s in INR), and the commission it earned.
             </p>
           </CardHeader>
           <CardContent>

@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CseStatCard } from "@/components/cses/CseStatCard";
-import { FundingTable, UsdAed, aedOfUsd } from "@/components/cses/CseFunding";
+import { AED_PER_USD, FundingTable, money, moneyOfUsd } from "@/components/cses/CseFunding";
 import { RangePicker, resolveRange, REPORT_TZ_LABEL, type Range, type RangeKey } from "@/components/reports/RangePicker";
 import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
@@ -25,7 +25,6 @@ import type { CseDetail, MoneyByCurrency } from "@/lib/types";
  * upgrades (2026-10-11). Gulf time.
  */
 
-const usd = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 const moneyList = (m: MoneyByCurrency) =>
   Object.entries(m).filter(([, v]) => v).map(([c, v]) => `${c} ${v.toLocaleString("en-US", { maximumFractionDigits: 2 })}`).join(" · ") || "—";
 const gst = (iso: string | null, withTime = false) => {
@@ -36,7 +35,6 @@ const gst = (iso: string | null, withTime = false) => {
     ...(withTime ? { hour: "2-digit", minute: "2-digit", hour12: true } : {}),
   }).format(d) + (withTime ? " GST" : "");
 };
-const aed = (n: number) => `AED ${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 const UPGRADE_STATUS: Record<string, string> = { open: "In progress", done: "Paid in full", cancelled: "Cancelled" };
 const STAGE: Record<string, string> = {
   sent_back: "Sent back to the CSE", needs_call: "Needs call + MT5", with_finance: "With finance", waiting_broker: "Waiting for broker admin",
@@ -52,6 +50,10 @@ export default function CsePage() {
     queryFn: async () => (await api.get(`/cses/${userId}`, { params: period })).data.data as CseDetail,
   });
   const d = q.data;
+  // Their money in their currency (2026-10-14): AED, or INR for a Bangalore team's CSE — as Tetra Commission shows it them.
+  const loc = d?.person.location ?? "dubai";
+  const inLocal = (aedAmount: number) => money(aedAmount, loc);
+  const inLocalUsd = (usdAmount: number) => moneyOfUsd(usdAmount, loc);
   const student = (r: { studentId: string; student: string; code?: string }) => {
     const label = <>{r.student || "—"}{r.code ? <span className="ml-1 text-xs text-muted-foreground">{r.code}</span> : null}</>;
     return d?.studentLink && r.studentId
@@ -82,6 +84,7 @@ export default function CsePage() {
               <div className="mt-2 flex flex-wrap gap-1.5">
                 <Badge variant="secondary">Tetra Commission</Badge>
                 {d.person.team && <Badge variant="outline">{d.person.team}</Badge>}
+                {d.person.location === "bangalore" && <Badge variant="outline" className="border-amber-500/40 text-amber-500">Bangalore · money in INR</Badge>}
               </div>
             </div>
             <div className="flex flex-col items-end gap-1">
@@ -91,10 +94,10 @@ export default function CsePage() {
           </motion.div>
 
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-            <CseStatCard icon={CircleDollarSign} accent="emerald" title="Total deposits" value={usd(d.summary.deposits.usd)} hint={`${aedOfUsd(d.summary.deposits.usd)} · ${d.summary.deposits.count} in the period`} delay={0.05} />
-            <CseStatCard icon={Coins} accent="cyan" title="Commission earned" value={usd(d.summary.commissionUsd)} hint={`${aedOfUsd(d.summary.commissionUsd)} · credited in the period`} delay={0.1} />
+            <CseStatCard icon={CircleDollarSign} accent="emerald" title="Total deposits" value={inLocal(d.summary.deposits.aed ?? d.summary.deposits.usd * AED_PER_USD)} hint={`${d.summary.deposits.count} in the period`} delay={0.05} />
+            <CseStatCard icon={Coins} accent="cyan" title="Commission earned" value={inLocalUsd(d.summary.commissionUsd)} hint="credited in the period" delay={0.1} />
             <CseStatCard icon={ArrowUpCircle} accent="violet" title="Course upgrades" value={d.summary.upgrades ? String(d.summary.upgrades.count) : "—"}
-              hint={d.summary.upgrades ? `started · ${aed(d.summary.upgrades.paidAed)} paid in the period` : "after Tetra Commission's update"} delay={0.15} />
+              hint={d.summary.upgrades ? `started · ${inLocal(d.summary.upgrades.paidAed)} paid in the period` : "after Tetra Commission's update"} delay={0.15} />
             <CseStatCard icon={GraduationCap} title="Students" value={String(d.summary.students)} hint="theirs now, Common CS too" delay={0.2} />
             <CseStatCard icon={PhoneCall} title="Follow-ups today" value={String(d.summary.followupsToday)}
               hint={d.summary.followupsOverdue ? `${d.summary.followupsOverdue} overdue` : "none overdue"} alert={!!d.summary.followupsOverdue} delay={0.25} />
@@ -102,13 +105,13 @@ export default function CsePage() {
               hint={`${moneyList(d.summary.upcoming.amount)}${d.summary.overdueDues.count ? ` · ${d.summary.overdueDues.count} overdue` : ""}`}
               alert={!!d.summary.overdueDues.count} delay={0.3} />
             <CseStatCard icon={Wallet} accent="amber" title="Balance due" value={moneyList(d.summary.balance.amount)} hint={`${d.summary.balance.students} students owing`} delay={0.35} />
-            <CseStatCard icon={Gift} accent="rose" title="Bonus due" value={usd(d.summary.bonus.usd)}
-              hint={`${aedOfUsd(d.summary.bonus.usd)} · ${d.summary.bonus.clients} clients · ${d.summary.bonus.needsCall} need a call · ${d.summary.bonus.withFinance} with finance · ${d.summary.bonus.waitingBroker} with a broker admin`} delay={0.4} />
+            <CseStatCard icon={Gift} accent="rose" title="Bonus due" value={inLocalUsd(d.summary.bonus.usd)}
+              hint={`${d.summary.bonus.clients} clients · ${d.summary.bonus.needsCall} need a call · ${d.summary.bonus.withFinance} with finance · ${d.summary.bonus.waitingBroker} with a broker admin`} delay={0.4} />
             <CseStatCard icon={UserX} accent="amber" title="Not onboarded" value={String(d.summary.notOnboarded)}
               hint={d.summary.notOnboardedLate ? `${d.summary.notOnboardedLate} waiting 6h+` : "none waiting 6h+"} alert={!!d.summary.notOnboardedLate} delay={0.45} />
             {d.summary.funding && (
               <CseStatCard icon={HandCoins} accent="violet" title="Funding requests waiting" value={String(d.summary.funding.pending)}
-                hint={`${usd(d.summary.funding.pendingUsd)} · ${aedOfUsd(d.summary.funding.pendingUsd)} — ${d.summary.funding.withFinance} with finance · ${d.summary.funding.waitingBroker} broker admin · ${d.summary.funding.sentBack} sent back`}
+                hint={`${inLocal(d.summary.funding.pendingAed)} — ${d.summary.funding.withFinance} with finance · ${d.summary.funding.waitingBroker} broker admin · ${d.summary.funding.sentBack} sent back`}
                 alert={!!d.summary.funding.sentBack} delay={0.5} />
             )}
           </div>
@@ -120,7 +123,7 @@ export default function CsePage() {
                 <p className="text-xs text-muted-foreground">Theirs still waiting, from any date, and those raised in the period — with the commission each earned, and their own share.</p>
               </CardHeader>
               <CardContent>
-                <FundingTable rows={d.funding.rows} total={d.funding.total} showCs={false}
+                <FundingTable rows={d.funding.rows} total={d.funding.total} showCs={false} location={loc}
                   studentHref={(id) => (d.studentLink && id ? `${d.studentLink}${id}` : null)} />
               </CardContent>
             </Card>
@@ -156,7 +159,7 @@ export default function CsePage() {
               <tbody>{d.bonus.map((x, i) => (
                 <tr key={i} className="border-b border-border/20 last:border-0">
                   <Td>{student(x)}</Td>
-                  <Td right><UsdAed usd={x.usd} />{x.count > 1 ? <span className="ml-1 text-xs text-muted-foreground">({x.count})</span> : null}</Td>
+                  <Td right>{inLocalUsd(x.usd)}{x.count > 1 ? <span className="ml-1 text-xs text-muted-foreground">({x.count})</span> : null}</Td>
                   <Td>{STAGE[x.stage] ?? x.stage}</Td>
                 </tr>
               ))}</tbody>
@@ -172,11 +175,11 @@ export default function CsePage() {
               ))}</tbody>
             </Section>
 
-            <Section title={`Deposits in the period · ${usd(d.summary.deposits.usd)}`} empty="No deposits in this period." rows={d.deposits.length}>
+            <Section title={`Deposits in the period · ${inLocal(d.summary.deposits.aed ?? d.summary.deposits.usd * AED_PER_USD)}`} empty="No deposits in this period." rows={d.deposits.length}>
               <thead><tr><Th>Student</Th><Th right>Amount</Th><Th>Approved</Th></tr></thead>
               <tbody>{d.deposits.map((x, i) => (
                 <tr key={i} className="border-b border-border/20 last:border-0">
-                  <Td>{student(x)}</Td><Td right><UsdAed usd={x.usd} /></Td><Td>{gst(x.at, true)}</Td>
+                  <Td>{student(x)}</Td><Td right>{inLocal(x.aed ?? x.usd * AED_PER_USD)}</Td><Td>{gst(x.at, true)}</Td>
                 </tr>
               ))}</tbody>
             </Section>
@@ -189,19 +192,19 @@ export default function CsePage() {
                     <Td>{student(x)}<div className="text-xs text-muted-foreground">
                       {[x.course, x.plan === "full" ? "full payment" : "instalments", UPGRADE_STATUS[x.status] ?? x.status].filter(Boolean).join(" · ")}
                     </div></Td>
-                    <Td right>{aed(x.paidAed)}<div className="text-xs text-muted-foreground">of {aed(x.dueAed)}</div></Td>
+                    <Td right>{inLocal(x.paidAed)}<div className="text-xs text-muted-foreground">of {inLocal(x.dueAed)}</div></Td>
                     <Td>{gst(x.at)}{x.startedBy && <div className="text-xs text-muted-foreground">by {x.startedBy}</div>}</Td>
                   </tr>
                 ))}</tbody>
               </Section>
             )}
 
-            <Section title={`Commission in the period · ${usd(d.summary.commissionUsd)}`} empty="No commission credited in this period." rows={d.commission.length}>
+            <Section title={`Commission in the period · ${inLocalUsd(d.summary.commissionUsd)}`} empty="No commission credited in this period." rows={d.commission.length}>
               <thead><tr><Th>Student</Th><Th right>Commission</Th><Th>Credited</Th></tr></thead>
               <tbody>{d.commission.map((x, i) => (
                 <tr key={i} className="border-b border-border/20 last:border-0">
                   <Td>{student(x)}<div className="text-xs text-muted-foreground">{[x.type, x.level ? `level ${x.level}` : "", x.status].filter(Boolean).join(" · ")}</div></Td>
-                  <Td right><UsdAed usd={x.usd} /></Td><Td>{gst(x.at, true)}</Td>
+                  <Td right>{inLocalUsd(x.usd)}</Td><Td>{gst(x.at, true)}</Td>
                 </tr>
               ))}</tbody>
             </Section>

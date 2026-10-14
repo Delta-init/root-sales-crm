@@ -652,9 +652,13 @@ export interface SalespersonLead {
 
 export type MoneyByCurrency = Record<string, number>;
 
+/** Where a CSE works — their team's, as Tetra Commission shows money: Bangalore in INR, everyone else in AED. */
+export type CseLocation = "dubai" | "bangalore";
+
 export interface CseFigures {
   students: number;
-  deposits: { count: number; usd: number };
+  /** `aed`: as recorded, else USD at 3.67 (2026-10-14; missing before). */
+  deposits: { count: number; usd: number; aed?: number };
   commissionUsd: number;
   followupsToday: number;
   followupsOverdue: number;
@@ -696,9 +700,16 @@ export interface CseFundingRow {
   csId: string;
   cs: string;
   usd: number;
+  /** Fully in AED, as Funding Requests shows it: what the student paid with it (0 for a bonus credit, paid through finance). */
   aed: number;
+  /** A bonus's MT5 bonus in AED (2026-10-14); 0 otherwise. */
+  bonusAed?: number;
   /** What the student paid with it, in AED (a course payment); 0 when none. */
   receivedAed: number;
+  /** Typed in rupees: the amount as typed (2026-10-14). */
+  typedInr?: number;
+  /** Its CSE's location (2026-10-14). */
+  location?: CseLocation;
   requestedAt: string;
   decidedAt: string;
   commissionUsd: number;
@@ -715,9 +726,10 @@ export interface CseUpgradeRow extends CseStudentRef {
   at: string;
   csId: string;
   cs: string;
+  location?: CseLocation;
 }
 
-export interface CsePerson { id: string; name: string; email: string; role: string; active: boolean; team: string }
+export interface CsePerson { id: string; name: string; email: string; role: string; active: boolean; team: string; location?: CseLocation }
 
 export interface CseList {
   today: string;
@@ -725,6 +737,8 @@ export interface CseList {
   rows: (CsePerson & CseFigures)[];
   /** The team's figures, each student once however many CSEs share them. Missing from a Tetra Commission before 2026-10-11. */
   totals?: CseFigures;
+  /** Each location's team figures apart — AED for Dubai, INR for Bangalore, never added together (2026-10-14). */
+  totalsByLocation?: Record<CseLocation, CseFigures>;
   /** The period's funding requests and every one still waiting (at most 300), and how many there are. Since 2026-10-14. */
   funding?: { rows: CseFundingRow[]; total: number };
   /** The period's course upgrades, newest first, with who started them. Since 2026-10-14. */
@@ -744,7 +758,7 @@ export interface CseDetail {
   dues: (CseStudentRef & { course: string; currency: string; balance: number; nextDueOn: string | null; state: string; daysLeft: number | null })[];
   bonus: (CseStudentRef & { count: number; usd: number; stage: string; since: string | null })[];
   notOnboarded: (CseStudentRef & { since: string; late: boolean })[];
-  deposits: { studentId: string; student: string; usd: number; at: string }[];
+  deposits: { studentId: string; student: string; usd: number; aed?: number; at: string }[];
   commission: (CseStudentRef & { usd: number; level: number | null; type: string; status: string; at: string })[];
   /** Started or paid on in the period. Missing from a Tetra Commission before 2026-10-11. */
   upgrades?: (CseStudentRef & { course: string; plan: string; status: string; dueAed: number; paidAed: number; at: string; startedBy: string })[];
