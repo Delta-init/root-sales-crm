@@ -21,6 +21,7 @@ import { api, apiErrorMessage } from "@/lib/axios";
 import { cn } from "@/lib/utils";
 import { gulfToday } from "@/components/tracker/DayPicker";
 import type { MetricDef, UserTracker, UserTrackerDay } from "@/lib/types";
+import { BreakdownDialog, Bars, BreakdownHint, cardButton } from "@/components/common/Breakdown";
 
 const shiftDay = (date: string, days: number) =>
   new Date(new Date(`${date}T12:00:00Z`).getTime() + days * 86_400_000)
@@ -60,14 +61,18 @@ function Stat({
   value,
   sub,
   tone,
+  onClick,
 }: {
   label: string;
   value: string;
   sub?: string;
   tone?: string;
+  /** Opens the figure day by day (2026-10-14). */
+  onClick?: () => void;
 }) {
   return (
-    <div className="rounded-lg border border-border/50 bg-card p-4">
+    <div className={cn("group relative rounded-lg border border-border/50 bg-card p-4", onClick && "cursor-pointer pb-6 transition-colors hover:border-primary/40")} {...cardButton(onClick)}>
+      {onClick && <BreakdownHint />}
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className={cn("mt-1 text-2xl font-bold tabular-nums", tone)}>{value}</p>
       {sub && <p className="mt-0.5 text-[11px] text-muted-foreground">{sub}</p>}
@@ -79,6 +84,7 @@ export default function UserTrackerPage() {
   const params = useParams<{ code: string; userId: string }>();
   const [days, setDays] = useState(14);
   const [showAll, setShowAll] = useState(false);
+  const [card, setCard] = useState<"score" | "leadsContacted" | "closings" | "revenueCollected" | null>(null);
 
   const to = gulfToday();
   const from = shiftDay(to, -(days - 1));
@@ -205,22 +211,26 @@ export default function UserTrackerPage() {
           >
             <Stat
               label="Average score"
+              onClick={() => setCard("score")}
               value={`${data.averageScore}`}
               sub={`across ${data.activeDays} active day${data.activeDays === 1 ? "" : "s"}`}
               tone={scoreTone(data.averageScore)}
             />
             <Stat
               label="Leads contacted"
+              onClick={() => setCard("leadsContacted")}
               value={num(data.totals.leadsContacted ?? 0)}
               sub={`${num(data.totals.followUpsDone ?? 0)} follow-ups`}
             />
             <Stat
               label="Closings"
+              onClick={() => setCard("closings")}
               value={num(data.totals.closings ?? 0)}
               sub={`${data.totals.convRate ?? 0}% conversion`}
             />
             <Stat
               label="Revenue collected"
+              onClick={() => setCard("revenueCollected")}
               value={money(data.totals.revenueCollected ?? 0, data.org.currency)}
               sub={
                 summary.best.score > 0
@@ -229,6 +239,23 @@ export default function UserTrackerPage() {
               }
             />
           </motion.div>
+
+          {card && (() => {
+            const days = [...data.rows].sort((a, b) => a.date.localeCompare(b.date));
+            const val = (d: (typeof days)[number]) => (card === "score" ? d.score : Number(d.values[card] ?? 0));
+            const show = (n: number) => (card === "revenueCollected" ? money(n, data.org.currency) : card === "score" ? `${n}/100` : num(n));
+            const label = { score: "Score", leadsContacted: "Leads contacted", closings: "Closings", revenueCollected: "Revenue collected" }[card];
+            const total = card === "score" ? data.averageScore : Number(data.totals[card] ?? 0);
+            return (
+              <BreakdownDialog open onClose={() => setCard(null)} title={`${label} · ${card === "score" ? `${total} average` : show(total)}`}
+                description={`${data.user.name}, day by day — ${dayLabel(data.from)} to ${dayLabel(data.to)}.`}
+                tabs={[
+                  { key: "day", label: "By day", content: <Bars sort={false} rows={days.map((d) => ({ key: d.date, label: dayLabel(d.date), value: val(d), display: show(val(d)),
+                    sub: card === "leadsContacted" ? `${num(Number(d.values.followUpsDone ?? 0))} follow-ups` : card === "closings" ? money(Number(d.values.revenueCollected ?? 0), data.org.currency) : undefined }))} empty="No days." /> },
+                  { key: "best", label: "Best days first", content: <Bars rows={days.filter((d) => val(d)).map((d) => ({ key: d.date, label: dayLabel(d.date), value: val(d), display: show(val(d)) }))} empty="Nothing yet." /> },
+                ]} />
+            );
+          })()}
 
           {/* ── Trend ───────────────────────────────────────────────── */}
           <motion.div

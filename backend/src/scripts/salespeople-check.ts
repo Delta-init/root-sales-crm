@@ -155,6 +155,32 @@ async function main() {
   check("no session: 401", (await call("GET", "/salespeople")).status === 401 && (await call("GET", `/salespeople/delta/${ria}`)).status === 401);
   check("an admin who is not a root admin: 403", (await call("GET", "/salespeople", member)).status === 403 && (await call("GET", `/salespeople/delta/${ria}`, member)).status === 403);
 
+  step("Case 6 — commission (2026-10-14): sales closed in the period, counted; their own not counted yet");
+  await deltaDb.collection("commissionsales").insertMany([
+    { student: new Types.ObjectId(), studentName: "Asha", invoiceNumber: "IN-00001", courseName: "MBT", closer: ria, closerName: "Ria", teamName: "Falcons",
+      saleDate: z("2026-10-02T08:00:00Z"), month: "2026-10", fee: 2250, state: "counted", countedAt: z("2026-10-09T08:00:00Z"),
+      lines: [{ role: "sales", user: ria, userName: "Ria", amount: 100 }, { role: "tl", user: gopika, userName: "Gopika", amount: 30 }] },
+    { student: new Types.ObjectId(), studentName: "Sept Sam", closer: ria, saleDate: z("2026-09-10T08:00:00Z"), month: "2026-09", fee: 1000, state: "counted",
+      lines: [{ role: "sales", user: ria, amount: 999 }] },
+    { student: new Types.ObjectId(), studentName: "Bilal", invoiceNumber: "IN-00002", closer: ria, saleDate: z("2026-10-12T08:00:00Z"), month: "2026-10", fee: 1500, state: "progress", lines: [] },
+    { student: new Types.ObjectId(), studentName: "Test Tom", closer: ria, saleDate: z("2026-10-13T08:00:00Z"), month: "2026-10", fee: 900, state: "excluded", reason: "Not a commissioned course", lines: [] },
+  ]);
+  r = await call("GET", `/salespeople?${OCT}`, root);
+  const dl = (r.body?.data?.crms ?? []).find((c: Json) => c.code === "delta");
+  check("the list: commission credited for October's sales — Ria AED 100, Gopika (her TL) AED 30, not September's", dl?.people?.find((p: Json) => p.id === String(ria))?.commission === 100
+    && dl.people.find((p: Json) => p.id === String(gopika))?.commission === 30, show(dl?.people?.map((p: Json) => [p.name, p.commission])));
+  r = await call("GET", `/salespeople/delta/${ria}?${OCT}`, root);
+  check("her page: AED 100 from 1 sale; 2 of her closes not counted (finishing steps, left out)", show(r.body?.data?.commission) === show({ earned: 100, sales: 1, notCounted: 2 }), show(r.body?.data?.commission));
+  r = await call("GET", `/salespeople/delta/${ria}/breakdown/commission?${OCT}`, root);
+  let cb = r.body?.data;
+  check("the breakdown: the sale with course, invoice, fee, her role and amount; by month; by role; the two not counted with why", r.status === 200 && cb?.rows?.length === 1
+    && cb.rows[0].student === "Asha" && cb.rows[0].role === "sales" && cb.rows[0].amount === 100 && cb.rows[0].fee === 2250 && cb.rows[0].invoiceNumber === "IN-00001"
+    && show(cb.byMonth) === show([{ key: "2026-10", label: "2026-10", amount: 100 }]) && cb.byRole[0].key === "sales"
+    && cb.notCounted.length === 2 && cb.notCounted.some((x: Json) => x.state === "excluded" && x.reason === "Not a commissioned course"), show(cb));
+  r = await call("GET", `/salespeople/delta/${gopika}/breakdown/commission?${OCT}`, root);
+  cb = r.body?.data;
+  check("her TL: the same sale, as TL, AED 30", cb?.rows?.length === 1 && cb.rows[0].role === "tl" && cb.rows[0].amount === 30 && cb.rows[0].closer === "Ria", show(cb));
+
   step("Case 5 — a stat card's breakdown (2026-10-14)");
   r = await call("GET", `/salespeople/delta/${ria}/breakdown/leads?${OCT}`, root);
   let b = r.body?.data;

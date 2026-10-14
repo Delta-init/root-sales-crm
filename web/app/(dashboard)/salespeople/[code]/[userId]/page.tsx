@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { AlertTriangle, ArrowLeft, Bell, CircleDollarSign, Clock, GraduationCap, Inbox, PhoneCall, Target, Users } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Bell, CircleDollarSign, Clock, Coins, GraduationCap, Inbox, PhoneCall, Target, Users } from "lucide-react";
 import { AxiosError } from "axios";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -96,7 +96,7 @@ export default function SalespersonPage() {
             </div>
           </motion.div>
 
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+          <div className={cn("grid grid-cols-2 gap-3", d.commission ? "lg:grid-cols-6" : "lg:grid-cols-5")}>
             <Stat icon={Inbox} label="Total leads" value={d.summary.leads.toLocaleString("en-US")} hint="reached them in the period" onClick={() => setCard("leads")} />
             <Stat icon={GraduationCap} label="Closings" value={d.summary.closings.toLocaleString("en-US")} hint={`${d.summary.conversion}% of those leads`} tone="text-emerald-500" onClick={() => setCard("closings")} />
             <Stat icon={CircleDollarSign} label="Revenue" value={money(d.summary.revenue, cur)} hint="payments dated in the period" tone="text-primary" onClick={() => setCard("revenue")} />
@@ -104,6 +104,10 @@ export default function SalespersonPage() {
             <Stat icon={Bell} label="Pending now" value={(d.pendingNow.newLeads + d.pendingNow.reminders).toLocaleString("en-US")} onClick={() => setCard("pending")}
               hint={`${d.pendingNow.newLeads} new leads · ${d.pendingNow.reminders} reminders${d.pendingNow.overdue ? ` · ${d.pendingNow.overdue} overdue` : ""}`}
               tone={d.pendingNow.overdue ? "text-rose-500" : undefined} />
+            {d.commission && (
+              <Stat icon={Coins} label="Commission" value={money(d.commission.earned, "AED")} tone="text-emerald-500" onClick={() => setCard("commission")}
+                hint={`${d.commission.sales} sale${d.commission.sales === 1 ? "" : "s"} counted${d.commission.notCounted ? ` · ${d.commission.notCounted} not yet` : ""}`} />
+            )}
           </div>
 
           <SalespersonBreakdown card={card} d={d} code={code} userId={userId} period={period} money={(n) => money(n, cur)} onClose={() => setCard(null)} />

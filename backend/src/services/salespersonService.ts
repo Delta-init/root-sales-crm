@@ -70,7 +70,7 @@ export async function listSalespeople(period: Period) {
   const { sources, failures } = await getSources();
   const crms = await Promise.all(sources.map(async (src) => {
     const leads = src.conn.collection("leads");
-    const [users, leadRows, closingRows, revenueRows] = await Promise.all([
+    const [users, leadRows, closingRows, revenueRows, commissionRows] = await Promise.all([
       src.conn.collection("users").find({}, { projection: { name: 1, email: 1, status: 1 }, maxTimeMS: QUERY_MS }).toArray(),
       leads.aggregate<{ _id: unknown; n: number }>([
         { $match: { assignedTo: { $ne: null }, ...within("createdAt", period) } },
@@ -86,9 +86,15 @@ export async function listSalespeople(period: Period) {
         { $match: within("payments.paidAt", period) },
         { $group: { _id: "$assignedTo", n: { $sum: "$payments.amount" } } },
       ], { maxTimeMS: QUERY_MS }).toArray(),
+      // Commission credited for the sales closed in the period (2026-10-14) — a CRM without commission has none.
+      src.conn.collection("commissionsales").aggregate<{ _id: unknown; n: number }>([
+        { $match: { state: "counted", ...within("saleDate", period) } },
+        { $unwind: "$lines" },
+        { $group: { _id: "$lines.user", n: { $sum: "$lines.amount" } } },
+      ], { maxTimeMS: QUERY_MS }).toArray(),
     ]);
     const teams = await teamsOf(src, users.map((u) => u._id as Types.ObjectId));
-    const l = byId(leadRows), c = byId(closingRows), r = byId(revenueRows);
+    const l = byId(leadRows), c = byId(closingRows), r = byId(revenueRows), k = byId(commissionRows);
     return {
       code: src.org.code,
       name: src.org.name,
@@ -104,6 +110,7 @@ export async function listSalespeople(period: Period) {
           leads: l.get(id) ?? 0,
           closings: c.get(id) ?? 0,
           revenue: Math.round((r.get(id) ?? 0) * 100) / 100,
+          commission: Math.round((k.get(id) ?? 0) * 100) / 100,
         };
       }),
     };
@@ -122,7 +129,7 @@ export async function getSalesperson(code: string, userId: string, period: Perio
   const leads = src.conn.collection("leads");
   const students = src.conn.collection("students");
   const now = new Date();
-  const [statusRows, closings, payments, followUps, pendingLeads, reminders, teams] = await Promise.all([
+  const [statusRows, closings, payments, followUps, pendingLeads, reminders, teams, commission] = await Promise.all([
     leads.aggregate<{ _id: string | null; n: number }>([
       { $match: { assignedTo: uid, ...within("createdAt", period) } },
       { $group: { _id: "$status", n: { $sum: 1 } } },
@@ -151,6 +158,7 @@ export async function getSalesperson(code: string, userId: string, period: Perio
       { $group: { _id: null, n: { $sum: 1 }, overdue: { $sum: { $cond: [{ $lt: ["$reminders.remindAt", now] }, 1, 0] } } } },
     ], { maxTimeMS: QUERY_MS }).toArray(),
     teamsOf(src, [uid]),
+    commissionOf(src, uid, period),
   ]);
 
   // Course names for the closings — one course, or several on an older Draw enrolment.
@@ -185,6 +193,10 @@ export async function getSalesperson(code: string, userId: string, period: Perio
       conversion: totalLeads ? Math.round((closings.length / totalLeads) * 1000) / 10 : 0,
     },
     pendingNow: { newLeads: pendingLeads, reminders: reminders[0]?.n ?? 0, overdue: reminders[0]?.overdue ?? 0 },
+    // Commission (2026-10-14): credited for sales closed in the period, and their own sales not counted yet. Absent where the CRM has none.
+    commission: commission.has
+      ? { earned: commission.earned, sales: commission.lines.length, notCounted: commission.notCounted.length }
+      : null,
     statuses: statuses.map((s) => ({ ...s, percent: totalLeads ? Math.round((s.count / totalLeads) * 1000) / 10 : 0 })),
     closings: closings.map((s) => ({
       id: String(s._id),
@@ -218,6 +230,35 @@ export async function salespersonLeads(code: string, userId: string, status: str
     status: String(l.status ?? ""), statusLabel: statusLabel(String(l.status ?? "")),
     createdAt: l.createdAt ? new Date(l.createdAt).toISOString() : null, updatedAt: l.updatedAt ? new Date(l.updatedAt).toISOString() : null,
   }));
+}
+
+/* ── Commission (the user, 2026-10-14: "show each employee getting commissions") ──
+ *
+ * From each CRM's own commission records (commissionsales — what its Commission
+ * and My Pay pages read): a sale is counted once its five steps are done, and
+ * then has a line for each person it pays (Sales, the TL, the SM) with the
+ * amount, in AED as the plans are. A sale counts in the period it was closed in
+ * (saleDate), as My Pay counts it. Not counted yet: their own closes still
+ * finishing their steps (progress, waiting), and those left out (excluded,
+ * with why). The Banglore CRM has no commission. */
+async function commissionOf(src: CrmSource, uid: Types.ObjectId, period: Period) {
+  const col = src.conn.collection("commissionsales");
+  const has = (await src.conn.db!.listCollections({ name: "commissionsales" }, { nameOnly: true }).toArray()).length > 0;
+  if (!has) return { has: false, earned: 0, lines: [] as Record<string, any>[], notCounted: [] as Record<string, any>[] };
+  const [lines, notCounted] = await Promise.all([
+    col.aggregate<Record<string, any>>([
+      { $match: { state: "counted", "lines.user": uid, ...within("saleDate", period) } },
+      { $unwind: "$lines" },
+      { $match: { "lines.user": uid } },
+      { $project: { _id: 0, id: "$_id", studentName: 1, enrollmentNumber: 1, invoiceNumber: 1, courseName: 1, closerName: 1, teamName: 1, saleDate: 1, month: 1,
+        fee: 1, countedAt: 1, role: "$lines.role", amount: "$lines.amount", note: "$lines.note" } },
+      { $sort: { saleDate: -1 } },
+    ], { maxTimeMS: QUERY_MS }).toArray(),
+    col.find({ closer: uid, state: { $in: ["progress", "waiting", "excluded"] }, ...within("saleDate", period) },
+      { projection: { studentName: 1, invoiceNumber: 1, courseName: 1, saleDate: 1, month: 1, fee: 1, state: 1, reason: 1 }, maxTimeMS: QUERY_MS })
+      .sort({ saleDate: -1 }).toArray(),
+  ]);
+  return { has, earned: Math.round(lines.reduce((n, x) => n + (Number(x.amount) || 0), 0) * 100) / 100, lines, notCounted };
 }
 
 /* ── A stat card's breakdown (the user, 2026-10-14: "when click on the stats card it need to show the breakdown") ── */
@@ -317,5 +358,29 @@ export async function salespersonBreakdown(code: string, userId: string, kind: s
     };
   }
 
-  throw httpError("Unknown breakdown — leads, followups or pending", 400);
+  if (kind === "commission") {
+    const c = await commissionOf(src, uid, period);
+    const iso = (v: unknown) => (v ? new Date(v as string).toISOString() : null);
+    const byMonth = new Map<string, number>();
+    for (const x of c.lines) byMonth.set(String(x.month ?? ""), (byMonth.get(String(x.month ?? "")) ?? 0) + (Number(x.amount) || 0));
+    return {
+      kind,
+      has: c.has,
+      earned: c.earned,
+      byMonth: [...byMonth].map(([month, amount]) => ({ key: month, label: month, amount: Math.round(amount * 100) / 100 })).sort((a, b) => a.key.localeCompare(b.key)),
+      byRole: ["sales", "tl", "sm"].map((role) => ({ key: role, amount: Math.round(c.lines.filter((x) => x.role === role).reduce((n, x) => n + (Number(x.amount) || 0), 0) * 100) / 100,
+        count: c.lines.filter((x) => x.role === role).length })).filter((x) => x.count),
+      rows: c.lines.map((x) => ({
+        id: `${x.id}:${x.role}`, student: String(x.studentName ?? ""), enrollmentNumber: String(x.enrollmentNumber ?? ""), invoiceNumber: String(x.invoiceNumber ?? ""),
+        course: String(x.courseName ?? ""), closer: String(x.closerName ?? ""), team: String(x.teamName ?? ""), saleDate: iso(x.saleDate), countedAt: iso(x.countedAt),
+        fee: Number(x.fee) || 0, role: String(x.role ?? ""), amount: Number(x.amount) || 0, note: String(x.note ?? ""),
+      })),
+      notCounted: c.notCounted.map((x) => ({
+        id: String(x._id), student: String(x.studentName ?? ""), invoiceNumber: String(x.invoiceNumber ?? ""), course: String(x.courseName ?? ""),
+        saleDate: iso(x.saleDate), fee: Number(x.fee) || 0, state: String(x.state ?? ""), reason: String(x.reason ?? ""),
+      })),
+    };
+  }
+
+  throw httpError("Unknown breakdown — leads, followups, pending or commission", 400);
 }

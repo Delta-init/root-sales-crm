@@ -26,6 +26,7 @@ import { DayPicker, gulfToday } from "@/components/tracker/DayPicker";
 import { TargetProgress } from "@/components/tracker/TargetProgress";
 import { TargetsDialog } from "@/components/tracker/TargetsDialog";
 import type { MetricDef, OrgTracker, TrackerRow } from "@/lib/types";
+import { BreakdownDialog, Bars, BreakdownHint, ListTable, cardButton, type BreakdownTab } from "@/components/common/Breakdown";
 
 // Standard notation throughout: compact with maximumFractionDigits:0 renders
 // 1,490,000 as "AED 1M", a 33% understatement, and switching notation partway
@@ -67,6 +68,7 @@ function Stat({
   suffix,
   sub,
   tone,
+  onClick,
 }: {
   label: string;
   value: string;
@@ -75,9 +77,12 @@ function Stat({
   suffix?: string;
   sub?: string;
   tone?: string;
+  /** Opens the figure's breakdown, rep by rep (2026-10-14). */
+  onClick?: () => void;
 }) {
   return (
-    <div className="rounded-lg border border-border/50 bg-card p-4">
+    <div className={cn("group relative rounded-lg border border-border/50 bg-card p-4", onClick && "cursor-pointer pb-6 transition-colors hover:border-primary/40")} {...cardButton(onClick)}>
+      {onClick && <BreakdownHint />}
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className={cn("mt-1 text-2xl font-bold tabular-nums", tone)}>
         {value}
@@ -231,6 +236,7 @@ export default function OrgTrackerPage() {
 
   const [date, setDate] = useState(gulfToday());
   const [editing, setEditing] = useState<string | null>(null);
+  const [card, setCard] = useState<"score" | "working" | "contacted" | "closings" | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [targetsOpen, setTargetsOpen] = useState(false);
@@ -348,6 +354,7 @@ export default function OrgTrackerPage() {
           >
             <Stat
               label="Team score"
+              onClick={() => setCard("score")}
               value={`${data.teamScore}`}
               suffix="/100"
               sub={`${data.counts.reported} of ${data.counts.total} reps filed figures`}
@@ -355,20 +362,25 @@ export default function OrgTrackerPage() {
             />
             <Stat
               label="Working today"
+              onClick={() => setCard("working")}
               value={`${data.counts.working}`}
               sub={`of ${data.counts.total} reps · ${data.counts.dormant} dormant`}
             />
             <Stat
               label="Leads contacted"
+              onClick={() => setCard("contacted")}
               value={num(data.totals.leadsContacted ?? 0)}
               sub={`${num(data.totals.followUpsDone ?? 0)} follow-ups`}
             />
             <Stat
               label="Closings"
+              onClick={() => setCard("closings")}
               value={num(data.totals.closings ?? 0)}
               sub={`${data.totals.convRate ?? 0}% · ${money(data.totals.revenueCollected ?? 0, currency)} collected`}
             />
           </motion.div>
+
+          {card && <OrgCardBreakdown card={card} data={data} onClose={() => setCard(null)} />}
 
           {/* ── Targets ─────────────────────────────────────────────── */}
           <motion.div
@@ -690,4 +702,49 @@ export default function OrgTrackerPage() {
       )}
     </div>
   );
+}
+
+/** A summary card opened rep by rep (the user, 2026-10-14: "the stats breakdown in the daily tracker also"). */
+function OrgCardBreakdown({ card, data, onClose }: { card: "score" | "working" | "contacted" | "closings"; data: OrgTracker; onClose: () => void }) {
+  const cur = data.org.currency;
+  const v = (r: TrackerRow, k: string) => Number(r.values[k] ?? 0);
+  const state = (r: TrackerRow) => (r.accountStatus !== "active" ? "deactivated" : r.dormant ? `dormant · ${r.daysSinceActive ?? "?"} days` : r.reportedManual ? "filed" : "not filed");
+  let title = "", description = "", tabs: BreakdownTab[] = [];
+  if (card === "score") {
+    title = `Team score · ${data.teamScore}/100`;
+    description = `${dayLabel(data.date)} — each rep's score against their share of the targets, and who has not filed their figures.`;
+    tabs = [
+      { key: "rep", label: "By rep", content: <Bars rows={data.rows.filter((r) => r.accountStatus === "active").map((r) => ({ key: r.userId, label: r.name, value: r.score, display: `${r.score}/100`, sub: state(r) }))} /> },
+      { key: "unfiled", label: `Not filed · ${data.counts.total - data.counts.reported}`, content: <ListTable head={["Rep", "Email", "Last active"]}
+        rows={data.rows.filter((r) => r.accountStatus === "active" && !r.reportedManual).map((r) => [<span key="n" className="font-medium">{r.name}</span>, r.email, r.lastActiveOn ? dayLabel(r.lastActiveOn) : "—"])} empty="Everyone filed." /> },
+    ];
+  } else if (card === "working") {
+    const working = data.rows.filter((r) => !r.dormant && r.accountStatus === "active");
+    const dormant = data.rows.filter((r) => r.dormant && r.accountStatus === "active");
+    const off = data.rows.filter((r) => r.accountStatus !== "active");
+    title = `Working today · ${data.counts.working}`;
+    description = `Of ${data.counts.total} reps: working, dormant (nothing for ${data.dormantAfterDays}+ days), and deactivated.`;
+    const listOf = (rows: TrackerRow[]) => <ListTable head={["Rep", "Email", "Last active", "Score"]}
+      rows={rows.map((r) => [<span key="n" className="font-medium">{r.name}</span>, r.email, r.lastActiveOn ? `${dayLabel(r.lastActiveOn)}${r.daysSinceActive ? ` · ${r.daysSinceActive} days ago` : ""}` : "—", `${r.score}/100`])} empty="Nobody." />;
+    tabs = [
+      { key: "working", label: `Working · ${working.length}`, content: listOf(working) },
+      { key: "dormant", label: `Dormant · ${dormant.length}`, content: listOf(dormant) },
+      { key: "off", label: `Deactivated · ${off.length}`, content: listOf(off) },
+    ];
+  } else if (card === "contacted") {
+    title = `Leads contacted · ${num(data.totals.leadsContacted ?? 0)}`;
+    description = `${dayLabel(data.date)} — by rep, and their follow-ups.`;
+    tabs = [
+      { key: "contacted", label: "Leads contacted", content: <Bars rows={data.rows.filter((r) => v(r, "leadsContacted")).map((r) => ({ key: r.userId, label: r.name, value: v(r, "leadsContacted"), sub: `${num(v(r, "followUpsDone"))} follow-ups` }))} empty="Nobody contacted a lead." /> },
+      { key: "followups", label: "Follow-ups", content: <Bars rows={data.rows.filter((r) => v(r, "followUpsDone")).map((r) => ({ key: r.userId, label: r.name, value: v(r, "followUpsDone") }))} empty="No follow-ups." /> },
+    ];
+  } else {
+    title = `Closings · ${num(data.totals.closings ?? 0)}`;
+    description = `${dayLabel(data.date)} — by rep, with the revenue they collected.`;
+    tabs = [
+      { key: "closings", label: "Closings", content: <Bars rows={data.rows.filter((r) => v(r, "closings")).map((r) => ({ key: r.userId, label: r.name, value: v(r, "closings"), sub: `${money(v(r, "revenueCollected"), cur)} collected` }))} empty="No closings." /> },
+      { key: "revenue", label: "Revenue collected", content: <Bars rows={data.rows.filter((r) => v(r, "revenueCollected")).map((r) => ({ key: r.userId, label: r.name, value: v(r, "revenueCollected"), display: money(v(r, "revenueCollected"), cur) }))} empty="Nothing collected." /> },
+    ];
+  }
+  return <BreakdownDialog open onClose={onClose} title={title} description={description} tabs={tabs} />;
 }

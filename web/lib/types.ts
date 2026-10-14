@@ -617,6 +617,8 @@ export interface SalespersonRow {
   leads: number;
   closings: number;
   revenue: number;
+  /** AED credited for the period's sales (2026-10-14); missing from a server before. */
+  commission?: number;
 }
 
 export interface SalespeopleList {
@@ -630,6 +632,8 @@ export interface SalespersonDetail {
   period: { from: string | null; to: string | null };
   summary: { leads: number; closings: number; revenue: number; followUps: number; conversion: number };
   pendingNow: { newLeads: number; reminders: number; overdue: number };
+  /** AED credited for their sales closed in the period, and their closes not counted yet (2026-10-14). Null: the CRM has no commission. */
+  commission?: { earned: number; sales: number; notCounted: number } | null;
   statuses: { status: string; label: string; count: number; percent: number }[];
   closings: { id: string; name: string; course: string; fee: number; paid: number; balance: number; date: string | null; status: string }[];
   payments: { leadId: string; name: string; amount: number; date: string | null; note: string }[];

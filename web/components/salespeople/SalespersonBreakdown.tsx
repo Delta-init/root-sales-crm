@@ -14,13 +14,22 @@ import type { SalespersonDetail } from "@/lib/types";
  * cut from what the page already has. Gulf time.
  */
 
-export type SalesCard = "leads" | "closings" | "revenue" | "followups" | "pending";
+export type SalesCard = "leads" | "closings" | "revenue" | "followups" | "pending" | "commission";
 
 type Group = { key: string; label: string; count: number };
 type LeadsBreakdown = { bySource: Group[]; byStatus: Group[]; byDay: Group[]; truncated: boolean;
   rows: { id: string; name: string; phone: string; source: string; statusLabel: string; at: string | null; updatedAt: string | null }[] };
 type FollowupsBreakdown = { byDay: Group[]; byStatus: Group[]; truncated: boolean;
   rows: { id: string; name: string; phone: string; statusLabel: string; at: string | null; note: string; next: string | null }[] };
+type CommissionBreakdown = {
+  earned: number;
+  byMonth: { key: string; label: string; amount: number }[];
+  byRole: { key: string; amount: number; count: number }[];
+  rows: { id: string; student: string; invoiceNumber: string; course: string; closer: string; team: string; saleDate: string | null; countedAt: string | null; fee: number; role: string; amount: number; note: string }[];
+  notCounted: { id: string; student: string; invoiceNumber: string; course: string; saleDate: string | null; fee: number; state: string; reason: string }[];
+};
+const ROLE: Record<string, string> = { sales: "Sales", tl: "Team leader", sm: "Sales manager" };
+const NOT_COUNTED: Record<string, string> = { progress: "Finishing its steps", waiting: "Waiting (steps done, held)", excluded: "Left out" };
 type PendingBreakdown = {
   newLeads: { id: string; name: string; phone: string; source: string; at: string | null }[];
   reminders: { id: string; name: string; phone: string; statusLabel: string; title: string; note: string; at: string | null; overdue: boolean }[];
@@ -47,10 +56,10 @@ export function SalespersonBreakdown({ card, d, code, userId, period, money, onC
   money: (n: number) => string;
   onClose: () => void;
 }) {
-  const asked = card === "leads" || card === "followups" || card === "pending" ? card : null;
+  const asked = card === "leads" || card === "followups" || card === "pending" || card === "commission" ? card : null;
   const q = useQuery({
     queryKey: ["salesperson-breakdown", code, userId, asked, period],
-    queryFn: async () => (await api.get(`/salespeople/${code}/${userId}/breakdown/${asked}`, { params: period })).data.data as LeadsBreakdown & FollowupsBreakdown & PendingBreakdown,
+    queryFn: async () => (await api.get(`/salespeople/${code}/${userId}/breakdown/${asked}`, { params: period })).data.data as LeadsBreakdown & FollowupsBreakdown & PendingBreakdown & CommissionBreakdown,
     enabled: !!asked,
   });
   const waiting = <p className="py-8 text-center text-sm text-muted-foreground">{q.isError ? ((q.error as AxiosError)?.response?.status === 404 ? "This shows after Root's server is updated." : "Could not load it — try again.") : "Loading…"}</p>;
@@ -123,6 +132,28 @@ export function SalespersonBreakdown({ card, d, code, userId, period, money, onC
       { key: "new", label: `New leads · ${d.pendingNow.newLeads}`, content: ready && b ? (
         <ListTable head={["Lead", "Phone", "Source", "Waiting since"]}
           rows={b.newLeads.map((l) => [<span key="n" className="font-medium">{l.name || "—"}</span>, l.phone || "—", l.source || "—", gst(l.at)])} />
+      ) : waiting },
+    ];
+  }
+
+  if (card === "commission") {
+    const b = q.data as CommissionBreakdown | undefined;
+    const aed = (n: number) => `AED ${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+    title = `Commission · ${aed(d.commission?.earned ?? 0)}`;
+    description = "Credited for their sales closed in the period, once each finished its five steps (finance → LMS → CS → onboarded → MT5 bonus) — as the CRM's My Pay counts it. In AED.";
+    tabs = [
+      { key: "sales", label: "Each sale", content: ready && b ? (
+        <ListTable head={["Student", "Course", "Their role", "Commission", "Fee", "Closed", "Counted"]}
+          rows={b.rows.map((x) => [<span key="n" className="font-medium">{x.student || "—"}<span className="block text-xs font-normal text-muted-foreground">{[x.invoiceNumber, x.role !== "sales" && x.closer ? `closed by ${x.closer}` : ""].filter(Boolean).join(" · ")}</span></span>,
+            x.course || "—", ROLE[x.role] ?? x.role, <span key="a" className="font-medium text-emerald-500">{aed(x.amount)}</span>, aed(x.fee), gst(x.saleDate, false), gst(x.countedAt, false)])} empty="No commission credited for this period's sales yet." />
+      ) : waiting },
+      { key: "month", label: "By month", content: ready && b ? <Bars sort={false} rows={b.byMonth.map((x) => ({ key: x.key, label: x.label, value: x.amount, display: aed(x.amount) }))} empty="None yet." /> : waiting },
+      { key: "role", label: "By role", content: ready && b ? <Bars rows={b.byRole.map((x) => ({ key: x.key, label: ROLE[x.key] ?? x.key, value: x.amount, display: aed(x.amount), sub: `${x.count} sale${x.count === 1 ? "" : "s"}` }))} empty="None yet." /> : waiting },
+      { key: "waiting", label: `Not counted yet · ${d.commission?.notCounted ?? 0}`, content: ready && b ? (
+        <ListTable head={["Student", "Course", "Fee", "Closed", "Why not yet"]}
+          rows={b.notCounted.map((x) => [<span key="n" className="font-medium">{x.student || "—"}<span className="block text-xs font-normal text-muted-foreground">{x.invoiceNumber}</span></span>,
+            x.course || "—", aed(x.fee), gst(x.saleDate, false), <span key="w" className={x.state === "excluded" ? "text-muted-foreground" : "text-amber-500"}>{NOT_COUNTED[x.state] ?? x.state}{x.reason ? ` — ${x.reason}` : ""}</span>])}
+          empty="Every one of their closes in the period is counted." />
       ) : waiting },
     ];
   }
