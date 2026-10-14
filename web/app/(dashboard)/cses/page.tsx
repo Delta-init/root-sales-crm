@@ -17,6 +17,7 @@ import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
 import type { CseFigures, CseList, CseLocation, EnrolmentFlow, MoneyByCurrency } from "@/lib/types";
 import { CseEnrolments } from "@/components/pending/EnrolmentFlow";
+import { CseBreakdown, type CseCard } from "@/components/cses/CseBreakdown";
 
 /**
  * CSEs (the user, 2026-10-11): Tetra Commission's customer success people —
@@ -48,7 +49,7 @@ const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 const depositAed = (f: CseFigures) => f.deposits.aed ?? f.deposits.usd * AED_PER_USD;
 
 /** The team's cards: Dubai in AED, Bangalore's INR beside it. Before Tetra Commission sends totals, only what rows add up to exactly. */
-function TeamTotals({ list }: { list: CseList }) {
+function TeamTotals({ list, open }: { list: CseList; open: (c: CseCard) => void }) {
   const t: CseFigures | undefined = list.totals;
   const by = list.totalsByLocation;
   const later = "after Tetra Commission's update";
@@ -66,20 +67,20 @@ function TeamTotals({ list }: { list: CseList }) {
   const waiting = split((f) => f.funding?.pendingAed ?? 0);
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      <CseStatCard icon={CircleDollarSign} accent="emerald" title="Total deposits" value={value(deposits)} hint={withBlr(deposits, `${plural(depositCount, "deposit")} in the period`)} delay={0.05} />
-      <CseStatCard icon={Coins} accent="cyan" title="Total commission" value={value(commission)} hint={withBlr(commission, "credited in the period")} delay={0.1} />
-      <CseStatCard icon={ArrowUpCircle} accent="violet" title="Course upgrades" value={t?.upgrades ? String(t.upgrades.count) : "—"}
+      <CseStatCard icon={CircleDollarSign} accent="emerald" title="Total deposits" onClick={() => open("deposits")} value={value(deposits)} hint={withBlr(deposits, `${plural(depositCount, "deposit")} in the period`)} delay={0.05} />
+      <CseStatCard icon={Coins} accent="cyan" title="Total commission" onClick={() => open("commission")} value={value(commission)} hint={withBlr(commission, "credited in the period")} delay={0.1} />
+      <CseStatCard icon={ArrowUpCircle} accent="violet" title="Course upgrades" onClick={() => open("upgrades")} value={t?.upgrades ? String(t.upgrades.count) : "—"}
         hint={t?.upgrades ? `started · ${withBlr(upgrades, `${money(upgrades.dubai)} paid in the period`)}` : later} delay={0.15} />
-      <CseStatCard icon={GraduationCap} title="Students" value={t ? String(t.students) : "—"} hint={t ? "with a CSE, now" : later} delay={0.2} />
-      <CseStatCard icon={Wallet} accent="amber" title="Balance due" value={t ? moneyList(t.balance.amount) || "—" : "—"}
+      <CseStatCard icon={GraduationCap} title="Students" onClick={() => open("students")} value={t ? String(t.students) : "—"} hint={t ? "with a CSE, now" : later} delay={0.2} />
+      <CseStatCard icon={Wallet} accent="amber" title="Balance due" onClick={() => open("balance")} value={t ? moneyList(t.balance.amount) || "—" : "—"}
         hint={t ? `${plural(t.balance.students, "student")} owing · ${t.upcoming.count} due in ${list.upcomingDays} days` : later}
         alert={!!t?.overdueDues.count} delay={0.25} />
-      <CseStatCard icon={Gift} accent="rose" title="Bonus due" value={t ? value(bonus) : "—"} hint={t ? withBlr(bonus, `${plural(t.bonus.clients, "client")} waiting`) : later} delay={0.3} />
-      <CseStatCard icon={PhoneCall} title="Follow-ups today" value={t ? String(t.followupsToday) : "—"}
+      <CseStatCard icon={Gift} accent="rose" title="Bonus due" onClick={() => open("bonus")} value={t ? value(bonus) : "—"} hint={t ? withBlr(bonus, `${plural(t.bonus.clients, "client")} waiting`) : later} delay={0.3} />
+      <CseStatCard icon={PhoneCall} title="Follow-ups today" onClick={() => open("followups")} value={t ? String(t.followupsToday) : "—"}
         hint={t ? (t.followupsOverdue ? `${t.followupsOverdue} overdue` : "none overdue") : later} alert={!!t?.followupsOverdue} delay={0.35} />
-      <CseStatCard icon={UserX} accent="amber" title="Not onboarded" value={t ? String(t.notOnboarded) : "—"}
+      <CseStatCard icon={UserX} accent="amber" title="Not onboarded" onClick={() => open("notOnboarded")} value={t ? String(t.notOnboarded) : "—"}
         hint={t ? (t.notOnboardedLate ? `${t.notOnboardedLate} waiting 6h+` : "none waiting 6h+") : later} alert={!!t?.notOnboardedLate} delay={0.4} />
-      <CseStatCard icon={HandCoins} accent="violet" title="Funding requests waiting" value={t?.funding ? String(t.funding.pending) : "—"}
+      <CseStatCard icon={HandCoins} accent="violet" title="Funding requests waiting" onClick={() => open("funding")} value={t?.funding ? String(t.funding.pending) : "—"}
         hint={t?.funding
           ? `${withBlr(waiting, money(waiting.dubai))} — ${t.funding.withFinance} with finance · ${t.funding.waitingBroker} broker admin · ${t.funding.sentBack} sent back`
           : later}
@@ -93,6 +94,7 @@ export default function CsesPage() {
   const [custom, setCustom] = useState<Range>({});
   const [search, setSearch] = useState("");
   const [showLeft, setShowLeft] = useState(false);
+  const [card, setCard] = useState<CseCard | null>(null);
   const period = resolveRange(range, custom);
 
   const list = useQuery({
@@ -126,7 +128,8 @@ export default function CsesPage() {
         </div>
       </motion.div>
 
-      {list.data && <TeamTotals list={list.data} />}
+      {list.data && <TeamTotals list={list.data} open={setCard} />}
+      {list.data && <CseBreakdown card={card} list={list.data} onClose={() => setCard(null)} />}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Button size="sm" variant={showLeft ? "default" : "outline"} onClick={() => setShowLeft((v) => !v)}>Show people who left</Button>

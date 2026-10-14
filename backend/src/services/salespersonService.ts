@@ -219,3 +219,103 @@ export async function salespersonLeads(code: string, userId: string, status: str
     createdAt: l.createdAt ? new Date(l.createdAt).toISOString() : null, updatedAt: l.updatedAt ? new Date(l.updatedAt).toISOString() : null,
   }));
 }
+
+/* ── A stat card's breakdown (the user, 2026-10-14: "when click on the stats card it need to show the breakdown") ── */
+
+const BREAKDOWN_LIMIT = 1000;
+/** A Gulf day, YYYY-MM-DD, for grouping. */
+const gstDay = { $dateToString: { format: "%Y-%m-%d", date: "$_d", timezone: "+04:00" } };
+
+/**
+ * What one of the salesperson page's cards is made of:
+ *   leads      the period's leads by status, source and the day they reached them, and the leads themselves;
+ *   followups  the follow-ups they logged in the period, by day, each with its lead and note;
+ *   pending    what waits on them now: their new leads nobody has worked, and their open reminders (overdue first).
+ * Closings and revenue are broken down on the page from what it already has. Read only.
+ */
+export async function salespersonBreakdown(code: string, userId: string, kind: string, period: Period) {
+  const src = await sourceFor(code);
+  const uid = oid(userId);
+  if (!uid) throw httpError("Not a person in that CRM", 404);
+  const leads = src.conn.collection("leads");
+  const iso = (v: unknown) => (v ? new Date(v as string).toISOString() : null);
+  const group = (rows: { _id: unknown; n: number }[], label = (k: string) => k) =>
+    rows.map((r) => ({ key: String(r._id ?? ""), label: label(String(r._id ?? "")) || "—", count: r.n })).sort((a, b) => b.count - a.count);
+
+  if (kind === "leads") {
+    const match = { assignedTo: uid, ...within("createdAt", period) };
+    const [bySource, byDay, byStatus, rows] = await Promise.all([
+      leads.aggregate<{ _id: unknown; n: number }>([{ $match: match }, { $group: { _id: { $ifNull: ["$source", ""] }, n: { $sum: 1 } } }], { maxTimeMS: QUERY_MS }).toArray(),
+      leads.aggregate<{ _id: unknown; n: number }>([{ $match: match }, { $set: { _d: "$createdAt" } }, { $group: { _id: gstDay, n: { $sum: 1 } } }], { maxTimeMS: QUERY_MS }).toArray(),
+      leads.aggregate<{ _id: unknown; n: number }>([{ $match: match }, { $group: { _id: "$status", n: { $sum: 1 } } }], { maxTimeMS: QUERY_MS }).toArray(),
+      leads.find(match, { projection: { name: 1, phone: 1, source: 1, status: 1, createdAt: 1, updatedAt: 1 }, maxTimeMS: QUERY_MS })
+        .sort({ createdAt: -1 }).limit(BREAKDOWN_LIMIT).toArray(),
+    ]);
+    return {
+      kind,
+      bySource: group(bySource, (k) => k || "No source"),
+      byStatus: group(byStatus, statusLabel),
+      byDay: group(byDay).sort((a, b) => a.key.localeCompare(b.key)),
+      rows: rows.map((l) => ({
+        id: String(l._id), name: String(l.name ?? ""), phone: String(l.phone ?? ""), source: String(l.source ?? ""),
+        status: String(l.status ?? ""), statusLabel: statusLabel(String(l.status ?? "")), at: iso(l.createdAt), updatedAt: iso(l.updatedAt),
+      })),
+      truncated: rows.length >= BREAKDOWN_LIMIT,
+    };
+  }
+
+  if (kind === "followups") {
+    const pipeline = [
+      { $match: { "followUps.followedUpBy": uid, ...within("followUps.followedUpAt", period) } },
+      { $unwind: "$followUps" },
+      { $match: { "followUps.followedUpBy": uid, ...within("followUps.followedUpAt", period) } },
+    ];
+    const [byDay, byStatus, rows] = await Promise.all([
+      leads.aggregate<{ _id: unknown; n: number }>([...pipeline, { $set: { _d: "$followUps.followedUpAt" } }, { $group: { _id: gstDay, n: { $sum: 1 } } }], { maxTimeMS: QUERY_MS }).toArray(),
+      leads.aggregate<{ _id: unknown; n: number }>([...pipeline, { $group: { _id: "$status", n: { $sum: 1 } } }], { maxTimeMS: QUERY_MS }).toArray(),
+      leads.aggregate<Record<string, any>>([
+        ...pipeline,
+        { $project: { _id: 0, leadId: "$_id", name: 1, phone: 1, status: 1, at: "$followUps.followedUpAt", note: "$followUps.note", next: "$followUps.nextFollowUpAt" } },
+        { $sort: { at: -1 } },
+        { $limit: BREAKDOWN_LIMIT },
+      ], { maxTimeMS: QUERY_MS }).toArray(),
+    ]);
+    return {
+      kind,
+      byDay: group(byDay).sort((a, b) => a.key.localeCompare(b.key)),
+      byStatus: group(byStatus, statusLabel),
+      rows: rows.map((f) => ({
+        id: `${f.leadId}:${iso(f.at)}`, leadId: String(f.leadId), name: String(f.name ?? ""), phone: String(f.phone ?? ""),
+        status: String(f.status ?? ""), statusLabel: statusLabel(String(f.status ?? "")), at: iso(f.at), note: String(f.note ?? ""), next: iso(f.next),
+      })),
+      truncated: rows.length >= BREAKDOWN_LIMIT,
+    };
+  }
+
+  if (kind === "pending") {
+    const now = new Date();
+    const [newLeads, reminders] = await Promise.all([
+      leads.find({ assignedTo: uid, status: "assigned" }, { projection: { name: 1, phone: 1, source: 1, createdAt: 1 }, maxTimeMS: QUERY_MS })
+        .sort({ createdAt: 1 }).limit(BREAKDOWN_LIMIT).toArray(),
+      leads.aggregate<Record<string, any>>([
+        { $match: { reminders: { $elemMatch: { createdBy: uid, isDone: { $ne: true } } } } },
+        { $unwind: "$reminders" },
+        { $match: { "reminders.createdBy": uid, "reminders.isDone": { $ne: true } } },
+        { $project: { _id: 0, leadId: "$_id", name: 1, phone: 1, status: 1, title: "$reminders.title", note: "$reminders.note", at: "$reminders.remindAt" } },
+        { $sort: { at: 1 } },
+        { $limit: BREAKDOWN_LIMIT },
+      ], { maxTimeMS: QUERY_MS }).toArray(),
+    ]);
+    return {
+      kind,
+      newLeads: newLeads.map((l) => ({ id: String(l._id), name: String(l.name ?? ""), phone: String(l.phone ?? ""), source: String(l.source ?? ""), at: iso(l.createdAt) })),
+      reminders: reminders.map((r) => ({
+        id: `${r.leadId}:${iso(r.at)}`, leadId: String(r.leadId), name: String(r.name ?? ""), phone: String(r.phone ?? ""),
+        statusLabel: statusLabel(String(r.status ?? "")), title: String(r.title ?? ""), note: String(r.note ?? ""), at: iso(r.at),
+        overdue: !!r.at && new Date(r.at) < now,
+      })),
+    };
+  }
+
+  throw httpError("Unknown breakdown — leads, followups or pending", 400);
+}

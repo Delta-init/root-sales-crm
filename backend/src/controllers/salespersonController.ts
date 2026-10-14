@@ -2,7 +2,7 @@ import type { Response, NextFunction } from "express";
 import { z } from "zod";
 import type { AuthenticatedRequest } from "../types/index.js";
 import { sendSuccess, sendError } from "../utils/response.js";
-import { listSalespeople, getSalesperson, salespersonLeads, type Period } from "../services/salespersonService.js";
+import { listSalespeople, getSalesperson, salespersonBreakdown, salespersonLeads, type Period } from "../services/salespersonService.js";
 
 /*
  * Salespeople, root admins only. The period is cut in Gulf time (UTC+4): a
@@ -44,4 +44,10 @@ export const detail = run((req, period) => getSalesperson(String(req.params.code
 export const leads = run(
   (req, period) => salespersonLeads(String(req.params.code), String(req.params.userId), String(req.query.status ?? ""), period),
   "Salesperson's leads",
+);
+
+/** GET /salespeople/:code/:userId/breakdown/:kind — what one stat card is made of (leads, followups, pending). */
+export const breakdown = run(
+  (req, period) => salespersonBreakdown(String(req.params.code), String(req.params.userId), String(req.params.kind), period),
+  "Breakdown",
 );

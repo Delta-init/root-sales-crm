@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { BreakdownHint, cardButton } from "@/components/common/Breakdown";
 
 /*
  * A figure on the CSEs pages, in the look of Tetra Commission's own dashboard
@@ -20,7 +21,7 @@ const ACCENTS = {
 } as const;
 export type StatAccent = keyof typeof ACCENTS;
 
-export function CseStatCard({ title, value, hint, icon: Icon, accent = "blue", alert, delay = 0 }: {
+export function CseStatCard({ title, value, hint, icon: Icon, accent = "blue", alert, delay = 0, onClick }: {
   title: string;
   value: string;
   hint?: string;
@@ -29,6 +30,8 @@ export function CseStatCard({ title, value, hint, icon: Icon, accent = "blue", a
   /** The hint in red: something is late. */
   alert?: boolean;
   delay?: number;
+  /** Opens the figure's breakdown (2026-10-14). */
+  onClick?: () => void;
 }) {
   const a = ACCENTS[accent];
   return (
@@ -36,7 +39,9 @@ export function CseStatCard({ title, value, hint, icon: Icon, accent = "blue", a
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay }}
-      className="group relative min-w-0 overflow-hidden rounded-2xl border border-border/60 bg-card p-4 shadow-sm transition-shadow hover:shadow-md sm:p-5"
+      className={cn("group relative min-w-0 overflow-hidden rounded-2xl border border-border/60 bg-card p-4 shadow-sm transition-shadow hover:shadow-md sm:p-5",
+        onClick && "cursor-pointer pb-6 hover:border-primary/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary")}
+      {...cardButton(onClick)}
     >
       <span className={cn("absolute inset-x-0 top-0 h-[3px] origin-left scale-x-[0.18] bg-gradient-to-r transition-transform duration-500 group-hover:scale-x-100", a.bar)} />
       <div className="flex items-start justify-between gap-3">
@@ -48,6 +53,7 @@ export function CseStatCard({ title, value, hint, icon: Icon, accent = "blue", a
       {/* Wraps rather than cuts: "AED 49,500 · USD 3,700" in half a phone's width. */}
       <p className="mt-2 break-words text-xl font-bold leading-tight tracking-tight tabular-nums sm:text-[1.7rem]">{value}</p>
       {hint && <p className={cn("mt-1.5 line-clamp-2 text-xs", alert ? "text-rose-500" : "text-muted-foreground")} title={hint}>{hint}</p>}
+      {onClick && <BreakdownHint />}
     </motion.div>
   );
 }

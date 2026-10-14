@@ -51,6 +51,14 @@ export default function CsePage() {
     queryFn: async () => (await api.get(`/cses/${userId}`, { params: period })).data.data as CseDetail,
   });
   const d = q.data;
+  /** A card opens its breakdown: the list for it below, brought into view and lit for a moment (2026-10-14). */
+  const show = (id: string) => () => {
+    const el = document.getElementById(`section-${id}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    el.classList.add("ring-2", "ring-primary");
+    setTimeout(() => el.classList.remove("ring-2", "ring-primary"), 1600);
+  };
   // The sales CRMs' enrolments waiting on them (2026-10-14), matched by name.
   const flow = useQuery({
     queryKey: ["pending-enrolments"],
@@ -101,30 +109,30 @@ export default function CsePage() {
           </motion.div>
 
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-            <CseStatCard icon={CircleDollarSign} accent="emerald" title="Total deposits" value={inLocal(d.summary.deposits.aed ?? d.summary.deposits.usd * AED_PER_USD)} hint={`${d.summary.deposits.count} in the period`} delay={0.05} />
-            <CseStatCard icon={Coins} accent="cyan" title="Commission earned" value={inLocalUsd(d.summary.commissionUsd)} hint="credited in the period" delay={0.1} />
-            <CseStatCard icon={ArrowUpCircle} accent="violet" title="Course upgrades" value={d.summary.upgrades ? String(d.summary.upgrades.count) : "—"}
+            <CseStatCard icon={CircleDollarSign} accent="emerald" title="Total deposits" onClick={show("deposits")} value={inLocal(d.summary.deposits.aed ?? d.summary.deposits.usd * AED_PER_USD)} hint={`${d.summary.deposits.count} in the period`} delay={0.05} />
+            <CseStatCard icon={Coins} accent="cyan" title="Commission earned" onClick={show("commission")} value={inLocalUsd(d.summary.commissionUsd)} hint="credited in the period" delay={0.1} />
+            <CseStatCard icon={ArrowUpCircle} accent="violet" title="Course upgrades" onClick={show("upgrades")} value={d.summary.upgrades ? String(d.summary.upgrades.count) : "—"}
               hint={d.summary.upgrades ? `started · ${inLocal(d.summary.upgrades.paidAed)} paid in the period` : "after Tetra Commission's update"} delay={0.15} />
             <CseStatCard icon={GraduationCap} title="Students" value={String(d.summary.students)} hint="theirs now, Common CS too" delay={0.2} />
-            <CseStatCard icon={PhoneCall} title="Follow-ups today" value={String(d.summary.followupsToday)}
+            <CseStatCard icon={PhoneCall} title="Follow-ups today" onClick={show("followups")} value={String(d.summary.followupsToday)}
               hint={d.summary.followupsOverdue ? `${d.summary.followupsOverdue} overdue` : "none overdue"} alert={!!d.summary.followupsOverdue} delay={0.25} />
-            <CseStatCard icon={CalendarClock} accent="amber" title={`Due in ${d.upcomingDays} days`} value={String(d.summary.upcoming.count)}
+            <CseStatCard icon={CalendarClock} accent="amber" title={`Due in ${d.upcomingDays} days`} onClick={show("dues")} value={String(d.summary.upcoming.count)}
               hint={`${moneyList(d.summary.upcoming.amount)}${d.summary.overdueDues.count ? ` · ${d.summary.overdueDues.count} overdue` : ""}`}
               alert={!!d.summary.overdueDues.count} delay={0.3} />
-            <CseStatCard icon={Wallet} accent="amber" title="Balance due" value={moneyList(d.summary.balance.amount)} hint={`${d.summary.balance.students} students owing`} delay={0.35} />
-            <CseStatCard icon={Gift} accent="rose" title="Bonus due" value={inLocalUsd(d.summary.bonus.usd)}
+            <CseStatCard icon={Wallet} accent="amber" title="Balance due" onClick={show("dues")} value={moneyList(d.summary.balance.amount)} hint={`${d.summary.balance.students} students owing`} delay={0.35} />
+            <CseStatCard icon={Gift} accent="rose" title="Bonus due" onClick={show("bonus")} value={inLocalUsd(d.summary.bonus.usd)}
               hint={`${d.summary.bonus.clients} clients · ${d.summary.bonus.needsCall} need a call · ${d.summary.bonus.withFinance} with finance · ${d.summary.bonus.waitingBroker} with a broker admin`} delay={0.4} />
-            <CseStatCard icon={UserX} accent="amber" title="Not onboarded" value={String(d.summary.notOnboarded)}
+            <CseStatCard icon={UserX} accent="amber" title="Not onboarded" onClick={show("notOnboarded")} value={String(d.summary.notOnboarded)}
               hint={d.summary.notOnboardedLate ? `${d.summary.notOnboardedLate} waiting 6h+` : "none waiting 6h+"} alert={!!d.summary.notOnboardedLate} delay={0.45} />
             {d.summary.funding && (
-              <CseStatCard icon={HandCoins} accent="violet" title="Funding requests waiting" value={String(d.summary.funding.pending)}
+              <CseStatCard icon={HandCoins} accent="violet" title="Funding requests waiting" onClick={show("funding")} value={String(d.summary.funding.pending)}
                 hint={`${inLocal(d.summary.funding.pendingAed)} — ${d.summary.funding.withFinance} with finance · ${d.summary.funding.waitingBroker} broker admin · ${d.summary.funding.sentBack} sent back`}
                 alert={!!d.summary.funding.sentBack} delay={0.5} />
             )}
           </div>
 
           {flow.data && (
-            <Card>
+            <Card id="section-enrolments" className="scroll-mt-24 transition-shadow">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base"><UserX className="h-4 w-4" /> Enrolments waiting on them</CardTitle>
                 <p className="text-xs text-muted-foreground">Sales CRM closes whose next step is theirs — the welcome, the MT5 to log — or with a broker admin for their bonus.</p>
@@ -134,7 +142,7 @@ export default function CsePage() {
           )}
 
           {d.funding && (
-            <Card>
+            <Card id="section-funding" className="scroll-mt-24 transition-shadow">
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base"><HandCoins className="h-4 w-4" /> Funding requests</CardTitle>
                 <p className="text-xs text-muted-foreground">Theirs still waiting, from any date, and those raised in the period — with the commission each earned, and their own share.</p>
@@ -147,7 +155,7 @@ export default function CsePage() {
           )}
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <Section title={`Follow-ups — today and overdue · ${d.followups.length}`} empty="No follow-ups due." rows={d.followups.length}>
+            <Section id="followups" title={`Follow-ups — today and overdue · ${d.followups.length}`} empty="No follow-ups due." rows={d.followups.length}>
               <thead><tr><Th>Student</Th><Th>Stage</Th><Th>Due</Th></tr></thead>
               <tbody>{d.followups.map((f, i) => (
                 <tr key={i} className="border-b border-border/20 last:border-0">
@@ -158,7 +166,7 @@ export default function CsePage() {
               ))}</tbody>
             </Section>
 
-            <Section title={`Instalments and balances · ${d.dues.length}`} empty="Nobody owes anything." rows={d.dues.length}>
+            <Section id="dues" title={`Instalments and balances · ${d.dues.length}`} empty="Nobody owes anything." rows={d.dues.length}>
               <thead><tr><Th>Student</Th><Th right>Balance</Th><Th>Next due</Th></tr></thead>
               <tbody>{d.dues.map((x, i) => (
                 <tr key={i} className="border-b border-border/20 last:border-0">
@@ -171,7 +179,7 @@ export default function CsePage() {
               ))}</tbody>
             </Section>
 
-            <Section title={`Bonus due · ${d.bonus.length} clients`} empty="No bonuses waiting." rows={d.bonus.length}>
+            <Section id="bonus" title={`Bonus due · ${d.bonus.length} clients`} empty="No bonuses waiting." rows={d.bonus.length}>
               <thead><tr><Th>Client</Th><Th right>Bonus</Th><Th>Where it waits</Th></tr></thead>
               <tbody>{d.bonus.map((x, i) => (
                 <tr key={i} className="border-b border-border/20 last:border-0">
@@ -182,7 +190,7 @@ export default function CsePage() {
               ))}</tbody>
             </Section>
 
-            <Section title={`Not onboarded · ${d.notOnboarded.length}`} empty="Everyone is onboarded." rows={d.notOnboarded.length}>
+            <Section id="notOnboarded" title={`Not onboarded · ${d.notOnboarded.length}`} empty="Everyone is onboarded." rows={d.notOnboarded.length}>
               <thead><tr><Th>Student</Th><Th>Waiting since</Th></tr></thead>
               <tbody>{d.notOnboarded.map((x, i) => (
                 <tr key={i} className="border-b border-border/20 last:border-0">
@@ -192,7 +200,7 @@ export default function CsePage() {
               ))}</tbody>
             </Section>
 
-            <Section title={`Deposits in the period · ${inLocal(d.summary.deposits.aed ?? d.summary.deposits.usd * AED_PER_USD)}`} empty="No deposits in this period." rows={d.deposits.length}>
+            <Section id="deposits" title={`Deposits in the period · ${inLocal(d.summary.deposits.aed ?? d.summary.deposits.usd * AED_PER_USD)}`} empty="No deposits in this period." rows={d.deposits.length}>
               <thead><tr><Th>Student</Th><Th right>Amount</Th><Th>Approved</Th></tr></thead>
               <tbody>{d.deposits.map((x, i) => (
                 <tr key={i} className="border-b border-border/20 last:border-0">
@@ -202,7 +210,7 @@ export default function CsePage() {
             </Section>
 
             {d.upgrades && (
-              <Section title={`Course upgrades · ${d.upgrades.length}`} empty="No course upgrades started or paid on in this period." rows={d.upgrades.length}>
+              <Section id="upgrades" title={`Course upgrades · ${d.upgrades.length}`} empty="No course upgrades started or paid on in this period." rows={d.upgrades.length}>
                 <thead><tr><Th>Student</Th><Th right>Paid in period</Th><Th>Started</Th></tr></thead>
                 <tbody>{d.upgrades.map((x, i) => (
                   <tr key={i} className="border-b border-border/20 last:border-0">
@@ -216,7 +224,7 @@ export default function CsePage() {
               </Section>
             )}
 
-            <Section title={`Commission in the period · ${inLocalUsd(d.summary.commissionUsd)}`} empty="No commission credited in this period." rows={d.commission.length}>
+            <Section id="commission" title={`Commission in the period · ${inLocalUsd(d.summary.commissionUsd)}`} empty="No commission credited in this period." rows={d.commission.length}>
               <thead><tr><Th>Student</Th><Th right>Commission</Th><Th>Credited</Th></tr></thead>
               <tbody>{d.commission.map((x, i) => (
                 <tr key={i} className="border-b border-border/20 last:border-0">
@@ -232,9 +240,9 @@ export default function CsePage() {
   );
 }
 
-function Section({ title, empty, rows, children }: { title: string; empty: string; rows: number; children: ReactNode }) {
+function Section({ id, title, empty, rows, children }: { id?: string; title: string; empty: string; rows: number; children: ReactNode }) {
   return (
-    <Card>
+    <Card id={id ? `section-${id}` : undefined} className="scroll-mt-24 transition-shadow">
       <CardHeader className="pb-3"><CardTitle className="text-base">{title}</CardTitle></CardHeader>
       <CardContent className="max-h-[420px] overflow-auto">
         {rows === 0 ? <p className="py-6 text-center text-sm text-muted-foreground">{empty}</p> : <table className="w-full text-sm">{children}</table>}

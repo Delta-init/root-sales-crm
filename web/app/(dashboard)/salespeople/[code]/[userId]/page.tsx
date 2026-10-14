@@ -15,13 +15,15 @@ import { RangePicker, resolveRange, REPORT_TZ_LABEL, type Range, type RangeKey }
 import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
 import type { SalespersonDetail, SalespersonLead } from "@/lib/types";
+import { SalespersonBreakdown, type SalesCard } from "@/components/salespeople/SalespersonBreakdown";
+import { BreakdownHint, cardButton } from "@/components/common/Breakdown";
 
 /**
  * One salesperson (the user, 2026-10-11): the leads that reached them in the
  * period and where those stand now, their closings, their revenue and the
  * follow-ups they logged — the same rules as the CRM's own Leaderboard — and
  * what is waiting on them right now. Every time and day in Gulf time (GST).
- * Root admins only.
+ * Each card opens its breakdown (2026-10-14). Root admins only.
  */
 
 const money = (n: number, currency: string) => `${currency} ${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
@@ -39,6 +41,7 @@ export default function SalespersonPage() {
   const [range, setRange] = useState<RangeKey>("month");
   const [custom, setCustom] = useState<Range>({});
   const [status, setStatus] = useState<string | null>(null);
+  const [card, setCard] = useState<SalesCard | null>(null);
   const period = resolveRange(range, custom);
 
   const detail = useQuery({
@@ -94,14 +97,16 @@ export default function SalespersonPage() {
           </motion.div>
 
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-            <Stat icon={Inbox} label="Total leads" value={d.summary.leads.toLocaleString("en-US")} hint="reached them in the period" />
-            <Stat icon={GraduationCap} label="Closings" value={d.summary.closings.toLocaleString("en-US")} hint={`${d.summary.conversion}% of those leads`} tone="text-emerald-500" />
-            <Stat icon={CircleDollarSign} label="Revenue" value={money(d.summary.revenue, cur)} hint="payments dated in the period" tone="text-primary" />
-            <Stat icon={PhoneCall} label="Follow-ups logged" value={d.summary.followUps.toLocaleString("en-US")} />
-            <Stat icon={Bell} label="Pending now" value={(d.pendingNow.newLeads + d.pendingNow.reminders).toLocaleString("en-US")}
+            <Stat icon={Inbox} label="Total leads" value={d.summary.leads.toLocaleString("en-US")} hint="reached them in the period" onClick={() => setCard("leads")} />
+            <Stat icon={GraduationCap} label="Closings" value={d.summary.closings.toLocaleString("en-US")} hint={`${d.summary.conversion}% of those leads`} tone="text-emerald-500" onClick={() => setCard("closings")} />
+            <Stat icon={CircleDollarSign} label="Revenue" value={money(d.summary.revenue, cur)} hint="payments dated in the period" tone="text-primary" onClick={() => setCard("revenue")} />
+            <Stat icon={PhoneCall} label="Follow-ups logged" value={d.summary.followUps.toLocaleString("en-US")} onClick={() => setCard("followups")} />
+            <Stat icon={Bell} label="Pending now" value={(d.pendingNow.newLeads + d.pendingNow.reminders).toLocaleString("en-US")} onClick={() => setCard("pending")}
               hint={`${d.pendingNow.newLeads} new leads · ${d.pendingNow.reminders} reminders${d.pendingNow.overdue ? ` · ${d.pendingNow.overdue} overdue` : ""}`}
               tone={d.pendingNow.overdue ? "text-rose-500" : undefined} />
           </div>
+
+          <SalespersonBreakdown card={card} d={d} code={code} userId={userId} period={period} money={(n) => money(n, cur)} onClose={() => setCard(null)} />
 
           <Card>
             <CardHeader className="pb-3">
@@ -220,10 +225,11 @@ export default function SalespersonPage() {
   );
 }
 
-function Stat({ icon: Icon, label, value, hint, tone }: { icon: typeof Inbox; label: string; value: string; hint?: string; tone?: string }) {
+function Stat({ icon: Icon, label, value, hint, tone, onClick }: { icon: typeof Inbox; label: string; value: string; hint?: string; tone?: string; onClick?: () => void }) {
   return (
-    <Card>
-      <CardContent className="space-y-1 pt-4">
+    <Card className={cn("group relative", onClick && "cursor-pointer transition-colors hover:border-primary/40")} {...cardButton(onClick)}>
+      {onClick && <BreakdownHint />}
+      <CardContent className="space-y-1 pb-6 pt-4">
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Icon className="h-3.5 w-3.5" />{label}</p>
         <p className={cn("text-2xl font-bold tabular-nums", tone)}>{value}</p>
         {hint && <p className="text-xs text-muted-foreground">{hint}</p>}

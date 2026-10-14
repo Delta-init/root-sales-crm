@@ -16,6 +16,7 @@ import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
 import type { CallsByPerson, EnrolmentFlow, PendingOverview, PendingPortal, SalespeopleList } from "@/lib/types";
 import { EnrolmentFlowView } from "@/components/pending/EnrolmentFlow";
+import { BreakdownDialog, Bars, type BarRow } from "@/components/common/Breakdown";
 import { CALL_PERIODS, periodDays, talkTime, type CallPeriod } from "@/lib/calls";
 
 /**
@@ -42,6 +43,8 @@ import { CALL_PERIODS, periodDays, talkTime, type CallPeriod } from "@/lib/calls
  * pile, who holds the most (finance, broker admins, each CS, each salesperson)
  * — and in By person what each of them holds: a salesperson's closes sent
  * back, a CS's welcomes to send and MT5s to log (a CS matched by name).
+ *
+ * Every figure on a portal's card opens its breakdown by person (2026-10-14).
  */
 
 const VIEWS = [
@@ -394,6 +397,11 @@ function PortalCard({ portal: p, index, matches, sales, calls }: {
   calls?: { summary: CallsByPerson["portals"][number]; byEmail: Map<string, PersonCalls> };
 }) {
   const [all, setAll] = useState(false);
+  /** A figure on the card, opened by person (2026-10-14). */
+  const [pick, setPick] = useState<{ title: string; about: string; rows: BarRow[] } | null>(null);
+  const kindRows = (key: string): BarRow[] => p.people.filter((x) => x.counts[key]).map((x) => ({
+    key: x.id, label: x.name, value: x.counts[key]!, sub: x.counts[`${key}_overdue`] ? `${x.counts[`${key}_overdue`]} overdue` : x.active ? undefined : "left",
+  }));
   // Those who closed this month with nothing pending join the list, after those with something.
   const closersOnly = sales
     ? Array.from(sales.byId).filter(([id, x]) => x.closings > 0 && !p.people.some((y) => y.id === id))
@@ -444,7 +452,8 @@ function PortalCard({ portal: p, index, matches, sales, calls }: {
             <>
               <div className="flex flex-wrap gap-2">
                 {p.kinds.map((k) => (
-                  <Badge key={k.key} variant="outline" className="gap-1 py-1">
+                  <Badge key={k.key} variant="outline" className="cursor-pointer gap-1 py-1 hover:border-primary/50" role="button" tabIndex={0}
+                    onClick={() => setPick({ title: `${p.name} · ${k.label} · ${k.total}`, about: k.shared ? "Waits on anyone who can do it — each holder is listed with all of it." : "By who it waits on.", rows: kindRows(k.key) })}>
                     {k.label} <span className="font-semibold">{k.total}</span>
                     {k.overdue ? <span className="text-rose-500">· {k.overdue} overdue</span> : null}
                     {k.shared ? <span className="text-muted-foreground">· shared</span> : null}
@@ -452,7 +461,11 @@ function PortalCard({ portal: p, index, matches, sales, calls }: {
                 ))}
                 {calls && (
                   calls.summary.available ? (
-                    <Badge variant="outline" className="gap-1 border-sky-500/40 py-1">
+                    <Badge variant="outline" className="cursor-pointer gap-1 border-sky-500/40 py-1 hover:border-sky-500" role="button" tabIndex={0}
+                      onClick={() => setPick({
+                        title: `${p.name} · Calls · ${calls.summary.stats.calls}`, about: "Calls in the period picked above, by who took them — talk time beside each.",
+                        rows: Array.from(calls.byEmail).filter(([, c]) => c.calls).map(([email, c]) => ({ key: email, label: c.name, value: c.calls, sub: `${c.connected} connected · ${talkTime(c.talkSeconds)}` })),
+                      })}>
                       <Phone className="h-3 w-3" /> Calls <span className="font-semibold text-sky-500">{calls.summary.stats.calls}</span>
                       <span className="text-muted-foreground">· {calls.summary.stats.connected} connected · {talkTime(calls.summary.stats.talkSeconds)}</span>
                     </Badge>
@@ -464,15 +477,23 @@ function PortalCard({ portal: p, index, matches, sales, calls }: {
                 )}
                 {monthTotals && sales && (
                   <>
-                    <Badge variant="outline" className="gap-1 border-emerald-500/40 py-1">
+                    <Badge variant="outline" className="cursor-pointer gap-1 border-emerald-500/40 py-1 hover:border-emerald-500" role="button" tabIndex={0}
+                      onClick={() => setPick({ title: `${p.name} · Closings this month · ${monthTotals.closings}`, about: "This month's closings by who closed them (Gulf time).",
+                        rows: Array.from(sales.byId).filter(([, x]) => x.closings).map(([id, x]) => ({ key: id, label: x.name, value: x.closings, sub: money(sales.currency, x.revenue) })) })}>
                       Closings this month <span className="font-semibold text-emerald-500">{monthTotals.closings}</span>
                     </Badge>
-                    <Badge variant="outline" className="gap-1 border-emerald-500/40 py-1">
+                    <Badge variant="outline" className="cursor-pointer gap-1 border-emerald-500/40 py-1 hover:border-emerald-500" role="button" tabIndex={0}
+                      onClick={() => setPick({ title: `${p.name} · Revenue this month · ${money(sales.currency, monthTotals.revenue)}`, about: "This month's revenue by salesperson (Gulf time).",
+                        rows: Array.from(sales.byId).filter(([, x]) => x.revenue).map(([id, x]) => ({ key: id, label: x.name, value: x.revenue, display: money(sales.currency, x.revenue) })) })}>
                       Revenue <span className="font-semibold text-emerald-500">{money(sales.currency, monthTotals.revenue)}</span>
                     </Badge>
                   </>
                 )}
               </div>
+              {pick && (
+                <BreakdownDialog open onClose={() => setPick(null)} title={pick.title} description={pick.about}
+                  tabs={[{ key: "person", label: "By person", content: <Bars rows={pick.rows} empty="Nobody." /> }]} />
+              )}
               {people.length === 0 ? (
                 <p className="py-4 text-center text-sm text-muted-foreground">
                   {p.people.length ? "Nobody by that name here." : "Nothing pending."}

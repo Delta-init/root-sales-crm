@@ -155,6 +155,25 @@ async function main() {
   check("no session: 401", (await call("GET", "/salespeople")).status === 401 && (await call("GET", `/salespeople/delta/${ria}`)).status === 401);
   check("an admin who is not a root admin: 403", (await call("GET", "/salespeople", member)).status === 403 && (await call("GET", `/salespeople/delta/${ria}`, member)).status === 403);
 
+  step("Case 5 — a stat card's breakdown (2026-10-14)");
+  r = await call("GET", `/salespeople/delta/${ria}/breakdown/leads?${OCT}`, root);
+  let b = r.body?.data;
+  check("leads: by source (Meta 2, Google 1), by status, by Gulf day, and the leads", r.status === 200
+    && show(b?.bySource?.map((x: Json) => [x.label, x.count])) === show([["Meta", 2], ["Google", 1]])
+    && b.byStatus.length === 3 && b.byDay.map((x: Json) => x.key).join() === "2026-10-02,2026-10-10,2026-10-20"
+    && b.rows.length === 3 && b.rows[0].name === "Chen" && b.rows[0].source === "Meta", show(b));
+  r = await call("GET", `/salespeople/delta/${ria}/breakdown/followups?${OCT}`, root);
+  b = r.body?.data;
+  check("follow-ups: hers in October only (not Gopika's, not September's), by day, each with its lead", r.status === 200
+    && b?.rows?.length === 2 && b.rows[0].name === "Bilal" && b.rows[1].name === "Asha" && b.byDay.length === 2 && b.byStatus.length === 2, show(b));
+  r = await call("GET", `/salespeople/delta/${ria}/breakdown/pending`, root);
+  b = r.body?.data;
+  check("pending: her new lead, and her two reminders — the overdue one first, marked", r.status === 200
+    && b?.newLeads?.length === 1 && b.newLeads[0].name === "Chen" && b.reminders?.length === 2 && b.reminders[0].overdue === true && b.reminders[1].overdue === false
+    && b.reminders[0].name === "Bilal", show(b));
+  check("an unknown breakdown: 400; a member: 403", (await call("GET", `/salespeople/delta/${ria}/breakdown/nope`, root)).status === 400
+    && (await call("GET", `/salespeople/delta/${ria}/breakdown/leads`, member)).status === 403);
+
   console.log(`\n${checks - failures}/${checks} checks passed`);
   await mongoose.disconnect();
   process.exit(failures ? 1 : 0);

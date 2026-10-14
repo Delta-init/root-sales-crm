@@ -16,7 +16,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
 import { CALL_PERIODS, callLength, periodDays, talkTime, type CallPeriod } from "@/lib/calls";
-import type { CallRow, CallsOverview, PortalCallsSummary } from "@/lib/types";
+import type { CallRow, CallsOverview, CallTotals, PortalCallsSummary } from "@/lib/types";
+import { BreakdownDialog, Bars, BreakdownHint, cardButton } from "@/components/common/Breakdown";
 
 /**
  * 3CX calls (the user, 2026-10-14): every call in every portal that has one —
@@ -24,7 +25,8 @@ import type { CallRow, CallsOverview, PortalCallsSummary } from "@/lib/types";
  * come from a phone call-recorder app — with the totals, everybody's figures
  * (one person's put together across portals by email), and each call with its
  * recording, played from the portal that has it on a link it signs for 10
- * minutes. Dubai days. Root admins only.
+ * minutes. Dubai days. Each card opens its breakdown — by person, by portal —
+ * and can narrow the list to those calls (2026-10-14). Root admins only.
  */
 
 const forbidden = (e: unknown) => e instanceof AxiosError && e.response?.status === 403;
@@ -59,6 +61,7 @@ export default function CallsPage() {
   const [sort, setSort] = useState<"date" | "talk">("date");
   const [order, setOrder] = useState<"desc" | "asc">("desc");
   const [page, setPage] = useState(1);
+  const [card, setCard] = useState<CallCard | null>(null);
 
   // Opened from a portal's card on Pending: that portal.
   useEffect(() => {
@@ -167,16 +170,37 @@ export default function CallsPage() {
         </Card>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
-          <Stat icon={Phone} label="All calls" value={stats.calls} />
-          <Stat icon={PhoneOutgoing} label="Outgoing" value={stats.outgoing} />
-          <Stat icon={PhoneIncoming} label="Incoming" value={stats.incoming} />
-          <Stat icon={Phone} label="Connected" value={stats.connected} tone="text-emerald-500" />
-          <Stat icon={PhoneMissed} label="Missed" value={stats.missed} tone="text-rose-500" hint="They called, nobody answered" />
-          <Stat icon={PhoneOff} label="Not answered" value={stats.notAnswered} tone="text-amber-500" hint="We called, they didn't pick up" />
-          <Stat icon={Timer} label="Talk time" value={talkTime(stats.talkSeconds)} />
-          <Stat icon={Clock} label="Average connected call" value={stats.avgTalkSeconds ? callLength(stats.avgTalkSeconds) : "—"} />
+          <Stat icon={Phone} label="All calls" value={stats.calls} onClick={() => setCard("calls")} />
+          <Stat icon={PhoneOutgoing} label="Outgoing" value={stats.outgoing} onClick={() => setCard("outgoing")} />
+          <Stat icon={PhoneIncoming} label="Incoming" value={stats.incoming} onClick={() => setCard("incoming")} />
+          <Stat icon={Phone} label="Connected" value={stats.connected} tone="text-emerald-500" onClick={() => setCard("connected")} />
+          <Stat icon={PhoneMissed} label="Missed" value={stats.missed} tone="text-rose-500" hint="They called, nobody answered" onClick={() => setCard("missed")} />
+          <Stat icon={PhoneOff} label="Not answered" value={stats.notAnswered} tone="text-amber-500" hint="We called, they didn't pick up" onClick={() => setCard("notAnswered")} />
+          <Stat icon={Timer} label="Talk time" value={talkTime(stats.talkSeconds)} onClick={() => setCard("talkSeconds")} />
+          <Stat icon={Clock} label="Average connected call" value={stats.avgTalkSeconds ? callLength(stats.avgTalkSeconds) : "—"} onClick={() => setCard("avgTalkSeconds")} />
         </div>
       )}
+
+      {data && card && (() => {
+        const c = CARDS[card];
+        const show = (n: number) => (c.time ? (card === "avgTalkSeconds" ? (n ? callLength(n) : "—") : talkTime(n)) : n.toLocaleString("en-US"));
+        const narrow = c.filter;
+        return (
+          <BreakdownDialog open onClose={() => setCard(null)} title={`${c.label} · ${show(data.stats[card])}`}
+            description={<>
+              {c.about} {data.period.from === data.period.to ? data.period.from : `${data.period.from} → ${data.period.to}`} (Dubai).
+              {narrow && <Button size="sm" variant="outline" className="ml-2 h-7" onClick={() => { setDirection(narrow.direction ?? "all"); setResult(narrow.result ?? "all"); setPage(1); setCard(null); }}>Show these calls</Button>}
+            </>}
+            tabs={[
+              { key: "person", label: "By person", content: <Bars rows={data.people.filter((p) => p[card]).map((p) => ({
+                key: p.key, label: p.name, value: p[card], display: show(p[card]), sub: p.portals.map((x) => x.name).join(" · "),
+              }))} empty="No one." /> },
+              { key: "portal", label: "By portal", content: <Bars rows={data.portals.filter((p) => p.available && p.stats[card]).map((p) => ({
+                key: p.code, label: p.name, value: p.stats[card], display: show(p.stats[card]),
+              }))} empty="No portal." /> },
+            ]} />
+        );
+      })()}
 
       {/* People */}
       {data && data.people.length > 0 && (
@@ -320,10 +344,24 @@ function PortalTab({ active, onClick, label, count, accent, warn }: { active: bo
   );
 }
 
-function Stat({ icon: Icon, label, value, tone, hint }: { icon: React.ElementType; label: string; value: number | string; tone?: string; hint?: string }) {
+/** What each card counts, and the filter that lists those calls. */
+type CallCard = keyof Pick<CallTotals, "calls" | "outgoing" | "incoming" | "connected" | "missed" | "notAnswered" | "talkSeconds" | "avgTalkSeconds">;
+const CARDS: Record<CallCard, { label: string; about: string; time?: boolean; filter?: { direction?: string; result?: string } }> = {
+  calls: { label: "All calls", about: "Every call,", filter: {} },
+  outgoing: { label: "Outgoing", about: "Calls we made,", filter: { direction: "out" } },
+  incoming: { label: "Incoming", about: "Calls that came in,", filter: { direction: "in" } },
+  connected: { label: "Connected", about: "Calls someone talked on,", filter: { result: "connected" } },
+  missed: { label: "Missed", about: "They called, nobody answered —", filter: { result: "missed" } },
+  notAnswered: { label: "Not answered", about: "We called, they didn't pick up —", filter: { result: "not_answered" } },
+  talkSeconds: { label: "Talk time", about: "Time talking on connected calls,", time: true, filter: { result: "connected" } },
+  avgTalkSeconds: { label: "Average connected call", about: "The average connected call,", time: true, filter: { result: "connected" } },
+};
+
+function Stat({ icon: Icon, label, value, tone, hint, onClick }: { icon: React.ElementType; label: string; value: number | string; tone?: string; hint?: string; onClick?: () => void }) {
   return (
-    <Card className="min-w-0">
-      <CardContent className="p-4">
+    <Card className={cn("group relative min-w-0", onClick && "cursor-pointer transition-colors hover:border-primary/40")} {...cardButton(onClick)}>
+      {onClick && <BreakdownHint />}
+      <CardContent className="p-4 pb-6">
         <div className="flex items-center gap-2 text-xs text-muted-foreground"><Icon className={cn("h-4 w-4", tone)} /> {label}</div>
         <div className={cn("mt-1 text-2xl font-bold tabular-nums", tone)}>{typeof value === "number" ? value.toLocaleString() : value}</div>
         {hint && <div className="mt-0.5 text-[11px] text-muted-foreground">{hint}</div>}
