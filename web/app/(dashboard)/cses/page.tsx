@@ -4,13 +4,14 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { AlertTriangle, ArrowUpCircle, ChevronRight, CircleDollarSign, Coins, Gift, GraduationCap, Headset, PhoneCall, Search, UserX, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowUpCircle, ChevronRight, CircleDollarSign, Coins, Gift, GraduationCap, HandCoins, Headset, PhoneCall, Search, UserX, Wallet } from "lucide-react";
 import { AxiosError } from "axios";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CseStatCard } from "@/components/cses/CseStatCard";
+import { FundingTable, UpgradesTable, UsdAed, aedOfUsd } from "@/components/cses/CseFunding";
 import { RangePicker, resolveRange, REPORT_TZ_LABEL, type Range, type RangeKey } from "@/components/reports/RangePicker";
 import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
@@ -27,6 +28,11 @@ import type { CseFigures, CseList, MoneyByCurrency } from "@/lib/types";
  * deposits, commission and course upgrades among them (2026-10-11). Tetra
  * Commission counts those, each student once: rows added up would count a
  * student shared with a Common CS twice.
+ *
+ * Dollars with their AED at Tetra Commission's fixed 3.67, as its Funding
+ * Requests shows them; the funding requests waiting — with finance, with a
+ * broker admin, sent back — and the period's, with the commission each
+ * earned; and the period's course upgrades (2026-10-14).
  */
 
 const usd = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
@@ -45,19 +51,24 @@ function TeamTotals({ list }: { list: CseList }) {
   const commission = t?.commissionUsd ?? list.rows.reduce((n, r) => n + r.commissionUsd, 0);
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      <CseStatCard icon={CircleDollarSign} accent="emerald" title="Total deposits" value={usd(deposits.usd)} hint={`${plural(deposits.count, "deposit")} in the period`} delay={0.05} />
-      <CseStatCard icon={Coins} accent="cyan" title="Total commission" value={usd(commission)} hint="credited in the period" delay={0.1} />
+      <CseStatCard icon={CircleDollarSign} accent="emerald" title="Total deposits" value={usd(deposits.usd)} hint={`${aedOfUsd(deposits.usd)} · ${plural(deposits.count, "deposit")} in the period`} delay={0.05} />
+      <CseStatCard icon={Coins} accent="cyan" title="Total commission" value={usd(commission)} hint={`${aedOfUsd(commission)} · credited in the period`} delay={0.1} />
       <CseStatCard icon={ArrowUpCircle} accent="violet" title="Course upgrades" value={t?.upgrades ? String(t.upgrades.count) : "—"}
         hint={t?.upgrades ? `started · ${aed(t.upgrades.paidAed)} paid in the period` : later} delay={0.15} />
       <CseStatCard icon={GraduationCap} title="Students" value={t ? String(t.students) : "—"} hint={t ? "with a CSE, now" : later} delay={0.2} />
       <CseStatCard icon={Wallet} accent="amber" title="Balance due" value={t ? moneyList(t.balance.amount) || "—" : "—"}
         hint={t ? `${plural(t.balance.students, "student")} owing · ${t.upcoming.count} due in ${list.upcomingDays} days` : later}
         alert={!!t?.overdueDues.count} delay={0.25} />
-      <CseStatCard icon={Gift} accent="rose" title="Bonus due" value={t ? usd(t.bonus.usd) : "—"} hint={t ? `${plural(t.bonus.clients, "client")} waiting` : later} delay={0.3} />
+      <CseStatCard icon={Gift} accent="rose" title="Bonus due" value={t ? usd(t.bonus.usd) : "—"} hint={t ? `${aedOfUsd(t.bonus.usd)} · ${plural(t.bonus.clients, "client")} waiting` : later} delay={0.3} />
       <CseStatCard icon={PhoneCall} title="Follow-ups today" value={t ? String(t.followupsToday) : "—"}
         hint={t ? (t.followupsOverdue ? `${t.followupsOverdue} overdue` : "none overdue") : later} alert={!!t?.followupsOverdue} delay={0.35} />
       <CseStatCard icon={UserX} accent="amber" title="Not onboarded" value={t ? String(t.notOnboarded) : "—"}
         hint={t ? (t.notOnboardedLate ? `${t.notOnboardedLate} waiting 6h+` : "none waiting 6h+") : later} alert={!!t?.notOnboardedLate} delay={0.4} />
+      <CseStatCard icon={HandCoins} accent="violet" title="Funding requests waiting" value={t?.funding ? String(t.funding.pending) : "—"}
+        hint={t?.funding
+          ? `${usd(t.funding.pendingUsd)} · ${aedOfUsd(t.funding.pendingUsd)} — ${t.funding.withFinance} with finance · ${t.funding.waitingBroker} broker admin · ${t.funding.sentBack} sent back`
+          : later}
+        alert={!!t?.funding?.sentBack} delay={0.45} />
     </div>
   );
 }
@@ -131,12 +142,13 @@ export default function CsesPage() {
                   <th className="pb-2 pr-3 text-right font-medium">Balance due</th>
                   <th className="pb-2 pr-3 text-right font-medium">Bonus due</th>
                   <th className="pb-2 pr-3 text-right font-medium">Not onboarded</th>
+                  <th className="pb-2 pr-3 text-right font-medium">Funding waiting</th>
                   <th className="pb-2" />
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 ? (
-                  <tr><td colSpan={11} className="py-10 text-center text-muted-foreground">{needle ? "Nobody by that name." : "No CSEs."}</td></tr>
+                  <tr><td colSpan={12} className="py-10 text-center text-muted-foreground">{needle ? "Nobody by that name." : "No CSEs."}</td></tr>
                 ) : rows.map((r) => (
                   <tr key={r.id} className="border-b border-border/20 align-top last:border-0 hover:bg-muted/30">
                     <td className="py-2.5 pr-3">
@@ -146,9 +158,9 @@ export default function CsesPage() {
                     </td>
                     <td className="py-2.5 pr-3 text-right font-semibold tabular-nums">{r.students || dash}</td>
                     <td className="py-2.5 pr-3 text-right tabular-nums">
-                      {r.deposits.usd ? <>{usd(r.deposits.usd)}<div className="text-xs text-muted-foreground">{r.deposits.count} deposit{r.deposits.count === 1 ? "" : "s"}</div></> : dash}
+                      {r.deposits.usd ? <><UsdAed usd={r.deposits.usd} /><div className="text-xs text-muted-foreground">{r.deposits.count} deposit{r.deposits.count === 1 ? "" : "s"}</div></> : dash}
                     </td>
-                    <td className="py-2.5 pr-3 text-right tabular-nums text-primary">{r.commissionUsd ? usd(r.commissionUsd) : dash}</td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums text-primary">{r.commissionUsd ? <UsdAed usd={r.commissionUsd} /> : dash}</td>
                     <td className="py-2.5 pr-3 text-right tabular-nums">
                       {r.upgrades?.count || r.upgrades?.paidAed ? <>{r.upgrades.count}<div className="text-xs text-muted-foreground">{aed(r.upgrades.paidAed)} paid</div></> : dash}
                     </td>
@@ -164,17 +176,55 @@ export default function CsesPage() {
                       {r.balance.students ? <>{moneyList(r.balance.amount)}<div className="text-xs text-muted-foreground">{r.balance.students} student{r.balance.students === 1 ? "" : "s"}</div></> : dash}
                     </td>
                     <td className="py-2.5 pr-3 text-right tabular-nums">
-                      {r.bonus.clients ? <>{usd(r.bonus.usd)}<div className="text-xs text-muted-foreground">{r.bonus.clients} client{r.bonus.clients === 1 ? "" : "s"}</div></> : dash}
+                      {r.bonus.clients ? <><UsdAed usd={r.bonus.usd} /><div className="text-xs text-muted-foreground">{r.bonus.clients} client{r.bonus.clients === 1 ? "" : "s"}</div></> : dash}
                     </td>
                     <td className="py-2.5 pr-3 text-right tabular-nums">
                       {r.notOnboarded || dash}
                       {r.notOnboardedLate ? <div className="text-xs text-rose-500">{r.notOnboardedLate} 6h+</div> : null}
+                    </td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums">
+                      {r.funding?.pending ? (
+                        <>
+                          {r.funding.pending}
+                          <div className="text-xs text-muted-foreground">
+                            {[r.funding.withFinance && `${r.funding.withFinance} finance`, r.funding.waitingBroker && `${r.funding.waitingBroker} broker`].filter(Boolean).join(" · ")}
+                          </div>
+                          {r.funding.sentBack ? <div className="text-xs text-rose-500">{r.funding.sentBack} sent back</div> : null}
+                        </>
+                      ) : dash}
                     </td>
                     <td className="py-2.5 text-right"><Link href={`/cses/${r.id}`} aria-label={`Open ${r.name}`}><ChevronRight className="h-4 w-4 text-muted-foreground" /></Link></td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </CardContent>
+        </Card>
+      )}
+
+      {list.data?.funding && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base"><HandCoins className="h-4 w-4" /> Funding requests</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Every one still waiting, from any date, and those raised in the period — where each is paused, the amount in USD and AED (3.67), and the commission it earned.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <FundingTable rows={list.data.funding.rows} total={list.data.funding.total}
+              studentHref={(id) => (list.data?.studentLink && id ? `${list.data.studentLink}${id}` : null)} />
+          </CardContent>
+        </Card>
+      )}
+
+      {list.data?.recentUpgrades && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base"><ArrowUpCircle className="h-4 w-4" /> Recent course upgrades · {list.data.recentUpgrades.length}</CardTitle>
+            <p className="text-xs text-muted-foreground">Started in the period, or paid on in it — newest first, with who started each.</p>
+          </CardHeader>
+          <CardContent>
+            <UpgradesTable rows={list.data.recentUpgrades} studentHref={(id) => (list.data?.studentLink && id ? `${list.data.studentLink}${id}` : null)} />
           </CardContent>
         </Card>
       )}

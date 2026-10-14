@@ -666,6 +666,55 @@ export interface CseFigures {
   notOnboardedLate: number;
   /** Started in the period, and the AED finance approved on them in it. Missing from a Tetra Commission before 2026-10-11. */
   upgrades?: { count: number; paidAed: number; payments: number };
+  /** Funding requests waiting and where (2026-10-14). Missing from a Tetra Commission before then. */
+  funding?: CseFundingSummary;
+}
+
+/** Funding requests waiting — sent back, with finance, with a broker admin — and those raised in the period. */
+export interface CseFundingSummary {
+  pending: number;
+  pendingUsd: number;
+  pendingAed: number;
+  sentBack: number;
+  withFinance: number;
+  waitingBroker: number;
+  raised: number;
+}
+
+export type CseFundingStage = "sent_back" | "with_finance" | "waiting_broker" | "approved" | "rejected";
+
+/** One funding request: where it is paused, USD and AED, and the commission it earned. */
+export interface CseFundingRow {
+  id: string;
+  type: string;
+  label: string;
+  stage: CseFundingStage;
+  reason: string;
+  studentId: string;
+  student: string;
+  code: string;
+  csId: string;
+  cs: string;
+  usd: number;
+  aed: number;
+  /** What the student paid with it, in AED (a course payment); 0 when none. */
+  receivedAed: number;
+  requestedAt: string;
+  decidedAt: string;
+  commissionUsd: number;
+  /** On one CSE's page: their own share of it. */
+  mineUsd?: number;
+}
+
+export interface CseUpgradeRow extends CseStudentRef {
+  course: string;
+  plan: string;
+  status: string;
+  dueAed: number;
+  paidAed: number;
+  at: string;
+  csId: string;
+  cs: string;
 }
 
 export interface CsePerson { id: string; name: string; email: string; role: string; active: boolean; team: string }
@@ -676,6 +725,10 @@ export interface CseList {
   rows: (CsePerson & CseFigures)[];
   /** The team's figures, each student once however many CSEs share them. Missing from a Tetra Commission before 2026-10-11. */
   totals?: CseFigures;
+  /** The period's funding requests and every one still waiting (at most 300), and how many there are. Since 2026-10-14. */
+  funding?: { rows: CseFundingRow[]; total: number };
+  /** The period's course upgrades, newest first, with who started them. Since 2026-10-14. */
+  recentUpgrades?: CseUpgradeRow[];
   /** Prefix for a student's page in Tetra Commission; "" when its address is not set. */
   studentLink: string;
 }
@@ -695,6 +748,8 @@ export interface CseDetail {
   commission: (CseStudentRef & { usd: number; level: number | null; type: string; status: string; at: string })[];
   /** Started or paid on in the period. Missing from a Tetra Commission before 2026-10-11. */
   upgrades?: (CseStudentRef & { course: string; plan: string; status: string; dueAed: number; paidAed: number; at: string; startedBy: string })[];
+  /** Their funding requests: the period's and every one still waiting. Since 2026-10-14. */
+  funding?: { rows: CseFundingRow[]; total: number };
   studentLink: string;
 }
 

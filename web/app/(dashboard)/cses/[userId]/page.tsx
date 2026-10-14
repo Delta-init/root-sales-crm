@@ -5,13 +5,14 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { AlertTriangle, ArrowLeft, ArrowUpCircle, CalendarClock, CircleDollarSign, Coins, Gift, GraduationCap, PhoneCall, UserX, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowUpCircle, CalendarClock, CircleDollarSign, Coins, Gift, GraduationCap, HandCoins, PhoneCall, UserX, Wallet } from "lucide-react";
 import { AxiosError } from "axios";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CseStatCard } from "@/components/cses/CseStatCard";
+import { FundingTable, UsdAed, aedOfUsd } from "@/components/cses/CseFunding";
 import { RangePicker, resolveRange, REPORT_TZ_LABEL, type Range, type RangeKey } from "@/components/reports/RangePicker";
 import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
@@ -37,7 +38,9 @@ const gst = (iso: string | null, withTime = false) => {
 };
 const aed = (n: number) => `AED ${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 const UPGRADE_STATUS: Record<string, string> = { open: "In progress", done: "Paid in full", cancelled: "Cancelled" };
-const STAGE: Record<string, string> = { needs_call: "Needs call + MT5", with_finance: "With finance", waiting_broker: "Waiting for broker admin" };
+const STAGE: Record<string, string> = {
+  sent_back: "Sent back to the CSE", needs_call: "Needs call + MT5", with_finance: "With finance", waiting_broker: "Waiting for broker admin",
+};
 
 export default function CsePage() {
   const { userId } = useParams<{ userId: string }>();
@@ -88,8 +91,8 @@ export default function CsePage() {
           </motion.div>
 
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-            <CseStatCard icon={CircleDollarSign} accent="emerald" title="Total deposits" value={usd(d.summary.deposits.usd)} hint={`${d.summary.deposits.count} in the period`} delay={0.05} />
-            <CseStatCard icon={Coins} accent="cyan" title="Commission earned" value={usd(d.summary.commissionUsd)} hint="credited in the period" delay={0.1} />
+            <CseStatCard icon={CircleDollarSign} accent="emerald" title="Total deposits" value={usd(d.summary.deposits.usd)} hint={`${aedOfUsd(d.summary.deposits.usd)} · ${d.summary.deposits.count} in the period`} delay={0.05} />
+            <CseStatCard icon={Coins} accent="cyan" title="Commission earned" value={usd(d.summary.commissionUsd)} hint={`${aedOfUsd(d.summary.commissionUsd)} · credited in the period`} delay={0.1} />
             <CseStatCard icon={ArrowUpCircle} accent="violet" title="Course upgrades" value={d.summary.upgrades ? String(d.summary.upgrades.count) : "—"}
               hint={d.summary.upgrades ? `started · ${aed(d.summary.upgrades.paidAed)} paid in the period` : "after Tetra Commission's update"} delay={0.15} />
             <CseStatCard icon={GraduationCap} title="Students" value={String(d.summary.students)} hint="theirs now, Common CS too" delay={0.2} />
@@ -100,10 +103,28 @@ export default function CsePage() {
               alert={!!d.summary.overdueDues.count} delay={0.3} />
             <CseStatCard icon={Wallet} accent="amber" title="Balance due" value={moneyList(d.summary.balance.amount)} hint={`${d.summary.balance.students} students owing`} delay={0.35} />
             <CseStatCard icon={Gift} accent="rose" title="Bonus due" value={usd(d.summary.bonus.usd)}
-              hint={`${d.summary.bonus.clients} clients · ${d.summary.bonus.needsCall} need a call · ${d.summary.bonus.withFinance} with finance · ${d.summary.bonus.waitingBroker} with a broker admin`} delay={0.4} />
+              hint={`${aedOfUsd(d.summary.bonus.usd)} · ${d.summary.bonus.clients} clients · ${d.summary.bonus.needsCall} need a call · ${d.summary.bonus.withFinance} with finance · ${d.summary.bonus.waitingBroker} with a broker admin`} delay={0.4} />
             <CseStatCard icon={UserX} accent="amber" title="Not onboarded" value={String(d.summary.notOnboarded)}
               hint={d.summary.notOnboardedLate ? `${d.summary.notOnboardedLate} waiting 6h+` : "none waiting 6h+"} alert={!!d.summary.notOnboardedLate} delay={0.45} />
+            {d.summary.funding && (
+              <CseStatCard icon={HandCoins} accent="violet" title="Funding requests waiting" value={String(d.summary.funding.pending)}
+                hint={`${usd(d.summary.funding.pendingUsd)} · ${aedOfUsd(d.summary.funding.pendingUsd)} — ${d.summary.funding.withFinance} with finance · ${d.summary.funding.waitingBroker} broker admin · ${d.summary.funding.sentBack} sent back`}
+                alert={!!d.summary.funding.sentBack} delay={0.5} />
+            )}
           </div>
+
+          {d.funding && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base"><HandCoins className="h-4 w-4" /> Funding requests</CardTitle>
+                <p className="text-xs text-muted-foreground">Theirs still waiting, from any date, and those raised in the period — with the commission each earned, and their own share.</p>
+              </CardHeader>
+              <CardContent>
+                <FundingTable rows={d.funding.rows} total={d.funding.total} showCs={false}
+                  studentHref={(id) => (d.studentLink && id ? `${d.studentLink}${id}` : null)} />
+              </CardContent>
+            </Card>
+          )}
 
           <div className="grid gap-4 lg:grid-cols-2">
             <Section title={`Follow-ups — today and overdue · ${d.followups.length}`} empty="No follow-ups due." rows={d.followups.length}>
@@ -135,7 +156,7 @@ export default function CsePage() {
               <tbody>{d.bonus.map((x, i) => (
                 <tr key={i} className="border-b border-border/20 last:border-0">
                   <Td>{student(x)}</Td>
-                  <Td right>{usd(x.usd)}{x.count > 1 ? <span className="ml-1 text-xs text-muted-foreground">({x.count})</span> : null}</Td>
+                  <Td right><UsdAed usd={x.usd} />{x.count > 1 ? <span className="ml-1 text-xs text-muted-foreground">({x.count})</span> : null}</Td>
                   <Td>{STAGE[x.stage] ?? x.stage}</Td>
                 </tr>
               ))}</tbody>
@@ -155,7 +176,7 @@ export default function CsePage() {
               <thead><tr><Th>Student</Th><Th right>Amount</Th><Th>Approved</Th></tr></thead>
               <tbody>{d.deposits.map((x, i) => (
                 <tr key={i} className="border-b border-border/20 last:border-0">
-                  <Td>{student(x)}</Td><Td right>{usd(x.usd)}</Td><Td>{gst(x.at, true)}</Td>
+                  <Td>{student(x)}</Td><Td right><UsdAed usd={x.usd} /></Td><Td>{gst(x.at, true)}</Td>
                 </tr>
               ))}</tbody>
             </Section>
@@ -180,7 +201,7 @@ export default function CsePage() {
               <tbody>{d.commission.map((x, i) => (
                 <tr key={i} className="border-b border-border/20 last:border-0">
                   <Td>{student(x)}<div className="text-xs text-muted-foreground">{[x.type, x.level ? `level ${x.level}` : "", x.status].filter(Boolean).join(" · ")}</div></Td>
-                  <Td right>{usd(x.usd)}</Td><Td>{gst(x.at, true)}</Td>
+                  <Td right><UsdAed usd={x.usd} /></Td><Td>{gst(x.at, true)}</Td>
                 </tr>
               ))}</tbody>
             </Section>
