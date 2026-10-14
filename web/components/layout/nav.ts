@@ -8,7 +8,7 @@
  */
 import type { LucideIcon } from "lucide-react";
 import {
-  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, Headset, Inbox, LayoutGrid, Shuffle, Users2,
+  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, Headset, Inbox, LayoutGrid, Phone, Shuffle, Users2,
 } from "lucide-react";
 
 export interface NavLink {
@@ -54,6 +54,8 @@ export const NAV: NavItem[] = [
       { href: "/reports", label: "Group report", icon: BarChart3, rootOnly: true },
       // Everyone in the sales CRMs, each with their own page (2026-10-11).
       { href: "/salespeople", label: "Salespeople", icon: Users2, rootOnly: true },
+      // Every portal's 3CX calls and their recordings (2026-10-14).
+      { href: "/calls", label: "3CX calls", icon: Phone, rootOnly: true },
       { href: "/tracker", label: "Daily tracker", icon: ClipboardList, rootOnly: true },
       // Where the Meta lead sheet's leads go: split between Delta and Draw.
       // Also for anybody a root admin has given lead-traffic access.

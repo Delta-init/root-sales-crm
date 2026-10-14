@@ -697,3 +697,71 @@ export interface CseDetail {
   upgrades?: (CseStudentRef & { course: string; plan: string; status: string; dueAed: number; paidAed: number; at: string; startedBy: string })[];
   studentLink: string;
 }
+
+// ── 3CX calls, every portal (2026-10-14) ──────────────────────────────────────
+// The Sales CRM, Draw and Tetra Commission sync calls from 3CX; Banglore's come
+// from a phone call-recorder app (nobody's). One person's are put together by email.
+
+export interface CallTotals {
+  calls: number;
+  outgoing: number;
+  incoming: number;
+  connected: number;
+  missed: number;
+  notAnswered: number;
+  talkSeconds: number;
+  recorded: number;
+  avgTalkSeconds: number;
+}
+
+export interface PortalCallsSummary {
+  code: string;
+  name: string;
+  accent: string;
+  kind: "3cx" | "recorder";
+  available: boolean;
+  error?: string;
+  stats: CallTotals;
+}
+
+export interface CallEveryone extends CallTotals {
+  key: string;
+  name: string;
+  email: string;
+  /** Where their calls are: each portal, with the key that picks them there. */
+  portals: { code: string; name: string; person: string; calls: number; connected: number; talkSeconds: number }[];
+}
+
+export interface CallRow {
+  portal: string;
+  portalName: string;
+  id: string;
+  startedAt: string;
+  direction: "in" | "out";
+  status: "answered" | "missed" | "no_answer";
+  talkSeconds: number;
+  ringSeconds: number;
+  number: string;
+  extension: string;
+  person: string;
+  personName: string;
+  personEmail: string;
+  contact: string;
+  contactKind: string;
+  recordings: number;
+}
+
+export interface CallsByPerson {
+  period: { from: string; to: string };
+  portals: PortalCallsSummary[];
+  stats: CallTotals;
+  people: CallEveryone[];
+}
+
+export interface CallsOverview extends CallsByPerson {
+  calls: CallRow[];
+  total: number;
+  page: number;
+  limit: number;
+  capped: boolean;
+}

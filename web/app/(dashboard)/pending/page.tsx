@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { AlertTriangle, ArrowRight, Clock, Inbox, RefreshCw, Search } from "lucide-react";
+import { AlertTriangle, ArrowRight, Clock, Inbox, Phone, RefreshCw, Search } from "lucide-react";
 import { AxiosError } from "axios";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +14,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { resolveRange } from "@/components/reports/RangePicker";
 import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
-import type { PendingOverview, PendingPortal, SalespeopleList } from "@/lib/types";
+import type { CallsByPerson, PendingOverview, PendingPortal, SalespeopleList } from "@/lib/types";
+import { CALL_PERIODS, periodDays, talkTime, type CallPeriod } from "@/lib/calls";
 
 /**
  * Pending (the user, 2026-10-06): what is waiting in every portal, and for
@@ -27,6 +28,13 @@ import type { PendingOverview, PendingPortal, SalespeopleList } from "@/lib/type
  * Each sales CRM's card also shows this month's closings and revenue per
  * person (Gulf time, the CRM's own currency — the Salespeople page's figures),
  * and lists those who closed this month with nothing pending (2026-10-11).
+ *
+ * And everybody's 3CX calls beside it (2026-10-14): calls, connected and talk
+ * time per person — today by default, or 7 days / 30 days / this month — on
+ * each portal's card and in By person, with those who called and have nothing
+ * pending listed after the rest. Calls come from the Sales CRM, Draw and Tetra
+ * Commission (3CX) and Banglore's call recorder; one person's are put together
+ * by email. The 3CX calls page (Sales) has every call and its recording.
  */
 
 const VIEWS = [
@@ -43,6 +51,8 @@ const forbidden = (e: unknown) => e instanceof AxiosError && e.response?.status 
 const notYet = (e: unknown) => e instanceof AxiosError && e.response?.status === 404;
 /** "1 reminder", "3 reminders": the kind's label, singular for one. */
 const howMany = (count: number, label: string) => `${count} ${(count === 1 ? label.replace(/s$/, "") : label).toLowerCase()}`;
+/** One person's calls in a portal, by email. */
+type PersonCalls = { calls: number; connected: number; talkSeconds: number; name: string };
 /** A CRM's closings and revenue this month, by person id. */
 type SalesMonth = { currency: string; byId: Map<string, { closings: number; revenue: number; name: string; email: string; active: boolean }> };
 const money = (currency: string, n: number) => `${currency} ${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
@@ -70,9 +80,40 @@ export default function PendingPage() {
     byId: new Map(c.people.map((x) => [x.id, { closings: x.closings, revenue: x.revenue, name: x.name, email: x.email, active: x.active }])),
   }])), [sales.data]);
 
+  // Everybody's calls in the period picked (today by default).
+  const [callsPeriod, setCallsPeriod] = useState<CallPeriod>("today");
+  const callDays = useMemo(() => periodDays(callsPeriod), [callsPeriod]);
+  const calls = useQuery({
+    queryKey: ["pending-calls", callDays],
+    queryFn: async () => (await api.get("/pending/calls", { params: callDays })).data.data as CallsByPerson,
+    refetchInterval: 2 * 60_000,
+  });
+  const callsByEmail = useMemo(() => new Map((calls.data?.people ?? []).filter((x) => x.email).map((x) => [x.email, x])), [calls.data]);
+  /** Per portal: each person's calls there, by email. */
+  const callsByPortal = useMemo(() => {
+    const out = new Map<string, Map<string, PersonCalls>>();
+    for (const x of calls.data?.people ?? []) {
+      if (!x.email) continue;
+      for (const at of x.portals) {
+        if (!out.has(at.code)) out.set(at.code, new Map());
+        out.get(at.code)!.set(x.email, { calls: at.calls, connected: at.connected, talkSeconds: at.talkSeconds, name: x.name });
+      }
+    }
+    return out;
+  }, [calls.data]);
+  const callSummaryOf = useMemo(() => new Map((calls.data?.portals ?? []).map((x) => [x.code, x])), [calls.data]);
+
   const needle = search.trim().toLowerCase();
   const matches = (name: string, email: string) => !needle || name.toLowerCase().includes(needle) || email.includes(needle);
-  const people = useMemo(() => (data?.people ?? []).filter((p) => matches(p.name, p.email)), [data, needle]); // eslint-disable-line react-hooks/exhaustive-deps
+  const people = useMemo(() => {
+    const pendingPeople = data?.people ?? [];
+    const seen = new Set(pendingPeople.map((p) => p.email).filter(Boolean));
+    // Those who called in the period with nothing pending, after the rest.
+    const callersOnly = (calls.data?.people ?? [])
+      .filter((x) => x.email && x.calls > 0 && !seen.has(x.email))
+      .map((x) => ({ key: x.email, name: x.name, email: x.email, total: 0, items: [] as PendingOverview["people"][number]["items"] }));
+    return [...pendingPeople, ...callersOnly].filter((p) => matches(p.name, p.email));
+  }, [data, calls.data, needle]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (forbidden(pending.error)) {
     return (
@@ -125,6 +166,15 @@ export default function PendingPage() {
             </Button>
           ))}
         </div>
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Calls period">
+          <span className="mr-1 flex items-center gap-1 text-xs text-muted-foreground"><Phone className="h-3.5 w-3.5" /> Calls</span>
+          {CALL_PERIODS.map((c) => (
+            <Button key={c.key} size="sm" variant={callsPeriod === c.key ? "secondary" : "ghost"} className="h-7 px-2.5 text-xs" onClick={() => setCallsPeriod(c.key)}>
+              {c.label}
+            </Button>
+          ))}
+          {calls.isFetching && <RefreshCw className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+        </div>
         <div className="relative w-full sm:w-72">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -155,7 +205,14 @@ export default function PendingPage() {
           {/* grid-cols-1: a column that may shrink below its table, which scrolls inside the card instead of pushing it off a phone's screen. */}
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {data.portals.map((p, i) => (
-              <PortalCard key={p.code} portal={p} index={i} matches={matches} sales={p.crm ? salesByCrm.get(p.code) : undefined} />
+              <PortalCard
+                key={p.code}
+                portal={p}
+                index={i}
+                matches={matches}
+                sales={p.crm ? salesByCrm.get(p.code) : undefined}
+                calls={callSummaryOf.has(p.code) ? { summary: callSummaryOf.get(p.code)!, byEmail: callsByPortal.get(p.code) ?? new Map() } : undefined}
+              />
             ))}
           </div>
           {data.comingNext.length > 0 && (
@@ -168,6 +225,15 @@ export default function PendingPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Everybody, across the portals · {people.length}</CardTitle>
+            {calls.data && (
+              <p className="text-xs text-muted-foreground">
+                Calls {calls.data.period.from === calls.data.period.to ? `on ${calls.data.period.from}` : `${calls.data.period.from} → ${calls.data.period.to}`} (Dubai):{" "}
+                <span className="font-medium text-foreground">{calls.data.stats.calls}</span> calls,{" "}
+                <span className="font-medium text-foreground">{calls.data.stats.connected}</span> connected,{" "}
+                <span className="font-medium text-foreground">{talkTime(calls.data.stats.talkSeconds)}</span> talk time ·{" "}
+                <Link href="/calls" className="text-primary hover:underline">every call and recording</Link>
+              </p>
+            )}
           </CardHeader>
           <CardContent>
             {people.length === 0 ? (
@@ -181,7 +247,9 @@ export default function PendingPage() {
                     <tr className="border-b border-border/40 text-left text-muted-foreground">
                       <th className="pb-2 pr-3 font-medium">Person</th>
                       <th className="pb-2 pr-3 font-medium">Waiting on them</th>
-                      <th className="pb-2 text-right font-medium">Total</th>
+                      <th className="pb-2 pr-3 text-right font-medium">Total</th>
+                      <th className="whitespace-nowrap border-l border-border/40 pb-2 pl-3 pr-3 text-right font-medium">Calls</th>
+                      <th className="whitespace-nowrap pb-2 text-right font-medium">Talk time</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -220,7 +288,23 @@ export default function PendingPage() {
                             ))}
                           </div>
                         </td>
-                        <td className="py-2.5 text-right font-semibold tabular-nums">{p.total}</td>
+                        <td className="py-2.5 pr-3 text-right font-semibold tabular-nums">{p.total || <span className="font-normal text-muted-foreground/60">—</span>}</td>
+                        {(() => {
+                          const c = p.email ? callsByEmail.get(p.email) : undefined;
+                          return (
+                            <>
+                              <td className="border-l border-border/40 py-2.5 pl-3 pr-3 text-right tabular-nums" title={c ? c.portals.map((x) => `${x.name}: ${x.calls}`).join(" · ") : undefined}>
+                                {c?.calls ? (
+                                  <>
+                                    <span className="font-medium">{c.calls}</span>
+                                    <span className="ml-1 text-xs text-muted-foreground">({c.connected} connected)</span>
+                                  </>
+                                ) : <span className="text-muted-foreground/60">—</span>}
+                              </td>
+                              <td className="whitespace-nowrap py-2.5 text-right tabular-nums">{c?.talkSeconds ? talkTime(c.talkSeconds) : <span className="text-muted-foreground/60">—</span>}</td>
+                            </>
+                          );
+                        })()}
                       </motion.tr>
                     ))}
                   </tbody>
@@ -234,12 +318,14 @@ export default function PendingPage() {
   );
 }
 
-function PortalCard({ portal: p, index, matches, sales }: {
+function PortalCard({ portal: p, index, matches, sales, calls }: {
   portal: PendingPortal;
   index: number;
   matches: (name: string, email: string) => boolean;
   /** A sales CRM's closings and revenue this month; not yet loaded, or not a CRM: none. */
   sales?: SalesMonth;
+  /** The portal's calls in the period picked, and each person's by email; a portal with no calls system: none. */
+  calls?: { summary: CallsByPerson["portals"][number]; byEmail: Map<string, PersonCalls> };
 }) {
   const [all, setAll] = useState(false);
   // Those who closed this month with nothing pending join the list, after those with something.
@@ -248,7 +334,14 @@ function PortalCard({ portal: p, index, matches, sales }: {
         .sort(([, a], [, b]) => b.closings - a.closings || b.revenue - a.revenue)
         .map(([id, x]) => ({ id, name: x.name, email: x.email, active: x.active, counts: {} as Record<string, number>, total: 0 }))
     : [];
-  const people = [...p.people, ...closersOnly].filter((x) => matches(x.name, x.email));
+  // …and those who called in the period with nothing pending and no closing.
+  const listed = new Set([...p.people, ...closersOnly].map((x) => x.email).filter(Boolean));
+  const callersOnly = calls
+    ? Array.from(calls.byEmail).filter(([email, c]) => c.calls > 0 && !listed.has(email))
+        .sort(([, a], [, b]) => b.calls - a.calls)
+        .map(([email, c]) => ({ id: `calls:${email}`, name: c.name, email, active: true, counts: {} as Record<string, number>, total: 0 }))
+    : [];
+  const people = [...p.people, ...closersOnly, ...callersOnly].filter((x) => matches(x.name, x.email));
   const monthTotals = sales
     ? Array.from(sales.byId.values()).reduce((t, x) => ({ closings: t.closings + x.closings, revenue: t.revenue + x.revenue }), { closings: 0, revenue: 0 })
     : null;
@@ -291,6 +384,18 @@ function PortalCard({ portal: p, index, matches, sales }: {
                     {k.shared ? <span className="text-muted-foreground">· shared</span> : null}
                   </Badge>
                 ))}
+                {calls && (
+                  calls.summary.available ? (
+                    <Badge variant="outline" className="gap-1 border-sky-500/40 py-1">
+                      <Phone className="h-3 w-3" /> Calls <span className="font-semibold text-sky-500">{calls.summary.stats.calls}</span>
+                      <span className="text-muted-foreground">· {calls.summary.stats.connected} connected · {talkTime(calls.summary.stats.talkSeconds)}</span>
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="gap-1 border-amber-500/40 py-1 text-muted-foreground" title={calls.summary.error}>
+                      <Phone className="h-3 w-3" /> Calls could not be read
+                    </Badge>
+                  )
+                )}
                 {monthTotals && sales && (
                   <>
                     <Badge variant="outline" className="gap-1 border-emerald-500/40 py-1">
@@ -319,7 +424,13 @@ function PortalCard({ portal: p, index, matches, sales }: {
                       {sales && (
                         <>
                           <th className="whitespace-nowrap border-l border-border/40 pb-2 pl-3 pr-2 text-right font-medium">Closings</th>
-                          <th className="whitespace-nowrap pb-2 text-right font-medium">Revenue</th>
+                          <th className="whitespace-nowrap pb-2 pr-2 text-right font-medium">Revenue</th>
+                        </>
+                      )}
+                      {calls && (
+                        <>
+                          <th className="whitespace-nowrap border-l border-border/40 pb-2 pl-3 pr-2 text-right font-medium">Calls</th>
+                          <th className="whitespace-nowrap pb-2 text-right font-medium">Talk</th>
                         </>
                       )}
                     </tr>
@@ -328,7 +439,7 @@ function PortalCard({ portal: p, index, matches, sales }: {
                     {shown.map((x) => (
                       <tr key={x.id} className="border-b border-border/20 last:border-0">
                         <td className="py-2 pr-2">
-                          {p.crm ? (
+                          {p.crm && !x.id.startsWith("calls:") ? (
                             <Link href={`/salespeople/${p.code}/${x.id}`} className={cn("font-medium hover:underline", !x.active && "text-muted-foreground")}>{x.name}</Link>
                           ) : (
                             <span className={cn("font-medium", !x.active && "text-muted-foreground")}>{x.name}</span>
@@ -354,9 +465,20 @@ function PortalCard({ portal: p, index, matches, sales }: {
                               <td className="border-l border-border/40 py-2 pl-3 pr-2 text-right tabular-nums">
                                 {m?.closings ? <span className="font-medium text-emerald-500">{m.closings}</span> : <span className="text-muted-foreground/60">—</span>}
                               </td>
-                              <td className="whitespace-nowrap py-2 text-right tabular-nums">
+                              <td className="whitespace-nowrap py-2 pr-2 text-right tabular-nums">
                                 {m?.revenue ? money(sales.currency, m.revenue) : <span className="text-muted-foreground/60">—</span>}
                               </td>
+                            </>
+                          );
+                        })()}
+                        {calls && (() => {
+                          const c = x.email ? calls.byEmail.get(x.email) : undefined;
+                          return (
+                            <>
+                              <td className="border-l border-border/40 py-2 pl-3 pr-2 text-right tabular-nums" title={c ? `${c.connected} connected` : undefined}>
+                                {c?.calls ? <span className="font-medium text-sky-500">{c.calls}</span> : <span className="text-muted-foreground/60">—</span>}
+                              </td>
+                              <td className="whitespace-nowrap py-2 text-right tabular-nums">{c?.talkSeconds ? talkTime(c.talkSeconds) : <span className="text-muted-foreground/60">—</span>}</td>
                             </>
                           );
                         })()}
@@ -374,6 +496,15 @@ function PortalCard({ portal: p, index, matches, sales }: {
               {sales ? (
                 <p className="text-xs text-muted-foreground">
                   Closings and revenue are this month&apos;s, in Gulf time — the Salespeople page&apos;s figures.
+                </p>
+              ) : null}
+              {calls?.summary.available ? (
+                <p className="text-xs text-muted-foreground">
+                  <Phone className="mr-1 inline h-3 w-3 text-sky-500" />
+                  {calls.summary.kind === "recorder"
+                    ? "Calls from the phone call-recorder app, which does not say who made them — only the card's total."
+                    : "Calls from 3CX in the period picked above, by who took them."}{" "}
+                  <Link href={`/calls?portal=${p.code}`} className="text-primary hover:underline">Every call and recording</Link>
                 </p>
               ) : null}
               {anyOverdue ? (

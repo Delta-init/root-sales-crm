@@ -12,6 +12,7 @@ import taskRoutes from "./taskRoutes.js";
 import trafficRoutes from "./trafficRoutes.js";
 import pendingRoutes from "./pendingRoutes.js";
 import salespersonRoutes from "./salespersonRoutes.js";
+import callRoutes from "./callRoutes.js";
 import cseRoutes from "./cseRoutes.js";
 import commissionPlanRoutes from "./commissionPlanRoutes.js";
 
@@ -30,6 +31,8 @@ router.use("/tasks", taskRoutes);
 router.use("/traffic", trafficRoutes);
 router.use("/pending", pendingRoutes);
 router.use("/salespeople", salespersonRoutes);
+// Every portal's 3CX calls and recordings (2026-10-14).
+router.use("/calls", callRoutes);
 router.use("/cses", cseRoutes);
 router.use("/commission-plans", commissionPlanRoutes);
 
