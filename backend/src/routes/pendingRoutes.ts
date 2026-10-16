@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { enrolments, overview } from "../controllers/pendingController.js";
+import { cs, enrolments, overview } from "../controllers/pendingController.js";
 import { byPerson } from "../controllers/callsController.js";
 import { authenticate, requireRole } from "../middleware/auth.js";
 
@@ -16,5 +16,7 @@ router.get("/", overview);
 router.get("/calls", byPerson);
 // Every sales CRM's enrolment workflow — where each unfinished close stands and whom it waits on (2026-10-14).
 router.get("/enrolments", enrolments);
+// What waits on each Tetra Commission CS, and which students — the CS portal tab (2026-10-17).
+router.get("/cs", cs);
 
 export default router;

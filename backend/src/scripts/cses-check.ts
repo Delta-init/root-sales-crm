@@ -9,6 +9,9 @@
  *   Case 3  errors       bad dates, an id that is not one, a CSE it does not know
  *   Case 4  permission   no session, an admin who is not a root admin
  *
+ * And Pending → CS portal (GET /pending/cs): what waits on each CS, as Tetra
+ * Commission's /service/cs-pending says, with the student link (2026-10-17).
+ *
  * Run through scripts/cses-check.sh. Scratch database on 127.0.0.1 only.
  */
 import { createServer } from "node:http";
@@ -58,6 +61,11 @@ const stand = createServer((req, res) => {
       summary: figures, followups: [{ studentId: "s1", student: "Asha", code: "STU-1", stage: "Interested", title: "Call", due: "2026-10-11", overdue: false }],
       dues: [], bonus: [], notOnboarded: [], deposits: [], commission: [] } });
   }
+  if (url.pathname === "/commission/api/v1/service/cs-pending") {
+    return send(200, { success: true, data: { today: "2026-10-17", totals: { onboarding: 2, onboarding_late: 1, bonus: 1, total: 3 },
+      people: [{ id: CS, name: "Cee One", email: "cs1@tetra.test", role: "cs", active: true, location: "dubai", counts: { onboarding: 2, onboarding_late: 1, bonus: 1 }, total: 3 }],
+      noCs: null, tickets: { available: true }, items: { onboarding: [{ studentId: "s1", student: "Asha", code: "STU-1", late: true }], bonus: [], tickets: [], followups: [], completions: [] } } });
+  }
   return send(404, { success: false, error: { code: "NOT_FOUND", message: "No such person here" } });
 });
 await new Promise<void>((ok) => stand.listen(Number(process.env.E2E_STANDIN_PORT), "127.0.0.1", ok));
@@ -84,6 +92,12 @@ async function main() {
     && row.deposits.usd === 1400 && row.commissionUsd === 50 && row.balance.amount.USD === 500 && row.bonus.clients === 1 && row.notOnboardedLate === 1, show(r.body));
   check("…asked of Tetra Commission with its portal secret", seen.at(-1)?.path === "/commission/api/v1/service/cs-overview" && seen.at(-1)?.secret === "cses-e2e-commission-secret", show(seen.at(-1)));
   check("…with each student's link into Tetra Commission", r.body?.data?.studentLink === "https://tetra.example.test/StudentDetail?id=", show(r.body?.data?.studentLink));
+  r = await call("GET", "/pending/cs", root);
+  check("Pending → CS portal: each CS's counts and the students, as Tetra Commission says", r.status === 200 && r.body?.data?.people?.[0]?.counts?.onboarding === 2
+    && r.body.data.items.onboarding[0].student === "Asha" && r.body.data.totals.total === 3, show(r.body));
+  check("…asked of its /service/cs-pending with the portal secret, with the student link", seen.at(-1)?.path === "/commission/api/v1/service/cs-pending"
+    && seen.at(-1)?.secret === "cses-e2e-commission-secret" && r.body?.data?.studentLink === "https://tetra.example.test/StudentDetail?id=", show(seen.at(-1)));
+
   r = await call("GET", `/cses/${CS}?from=2026-10-01&to=2026-10-31`, root);
   check("one CSE's page: the figures and the lists", r.status === 200 && r.body?.data?.person?.name === "Cee One" && r.body.data.followups[0].student === "Asha"
     && r.body.data.summary.followupsToday === 1, show(r.body));
@@ -97,6 +111,8 @@ async function main() {
   oldServer = true;
   r = await call("GET", "/cses", root);
   check("a Tetra Commission from before this page: says its server needs updating", r.status === 409 && /needs updating/.test(r.body?.message ?? ""), show(r.body));
+  r = await call("GET", "/pending/cs", root);
+  check("…and the CS portal tab says so too", r.status === 409 && /needs updating — it has no CS pending list yet/.test(r.body?.message ?? ""), show(r.body));
   oldServer = false;
 
   step("Case 3 — errors");
@@ -109,6 +125,7 @@ async function main() {
   step("Case 4 — root admins only");
   check("no session: 401", (await call("GET", "/cses")).status === 401 && (await call("GET", `/cses/${CS}`)).status === 401);
   check("an admin who is not a root admin: 403", (await call("GET", "/cses", member)).status === 403);
+  check("the CS portal tab too: 401 with no session, 403 for a non-root admin", (await call("GET", "/pending/cs")).status === 401 && (await call("GET", "/pending/cs", member)).status === 403);
 
   console.log(`\n${checks - failures}/${checks} checks passed`);
   stand.close();

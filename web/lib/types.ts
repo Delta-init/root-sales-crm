@@ -890,3 +890,39 @@ export interface EnrolmentFlow {
   waitingOn: FlowWaitingOn[];
   open: FlowClose[];
 }
+
+/* Pending → CS portal (2026-10-17): Tetra Commission's GET /service/cs-pending, through Root's /pending/cs. */
+export interface CsPendingCounts {
+  onboarding: number; onboarding_late: number;
+  bonus: number; bonus_usd: number; bonus_sent_back: number; bonus_needs_call: number; bonus_with_finance: number; bonus_waiting_broker: number;
+  tickets_open: number; tickets_waiting: number;
+  followups_today: number; followups_overdue: number;
+  completions: number;
+}
+export type CsLocation = "dubai" | "bangalore";
+export interface CsPendingPerson {
+  id: string; name: string; email: string; role: string; team: string; active: boolean; location: CsLocation;
+  counts: CsPendingCounts; total: number;
+}
+/** A student a pending item is about, with their CSs ("" in csIds: nobody's yet). */
+export interface CsPendingWho {
+  studentId: string; student: string; code: string; csIds: string[]; cs: { id: string; name: string }[]; location: CsLocation;
+}
+export type BonusStage = "sent_back" | "needs_call" | "with_finance" | "waiting_broker";
+export interface CsPending {
+  today: string;
+  generatedAt: string;
+  totals: CsPendingCounts & { total: number };
+  totalsByLocation: Record<CsLocation, CsPendingCounts & { total: number }>;
+  people: CsPendingPerson[];
+  noCs: { counts: CsPendingCounts; total: number } | null;
+  tickets: { available: boolean; message?: string };
+  studentLink: string;
+  items: {
+    onboarding: (CsPendingWho & { since: string; fromFinance: boolean; late: boolean })[];
+    bonus: (CsPendingWho & { count: number; usd: number; stage: BonusStage; since: string; stages: Partial<Record<BonusStage, { count: number; total_usd: number }>> })[];
+    tickets: (CsPendingWho & { ticketId: string; subject: string; category: string; status: "waiting_for_answer" | "waiting_on_student"; openedAt: string; lastMessageAt: string; lastFrom: string })[];
+    followups: (CsPendingWho & { due: string; overdue: boolean; stage: string; title: string; outcome: string })[];
+    completions: (CsPendingWho & { className: string; course: string; mentor: string; endedAt: string; since: string })[];
+  };
+}
