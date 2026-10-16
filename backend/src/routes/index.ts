@@ -15,6 +15,7 @@ import salespersonRoutes from "./salespersonRoutes.js";
 import callRoutes from "./callRoutes.js";
 import cseRoutes from "./cseRoutes.js";
 import commissionPlanRoutes from "./commissionPlanRoutes.js";
+import backupRoutes from "./backupRoutes.js";
 
 const router = Router();
 
@@ -35,6 +36,8 @@ router.use("/salespeople", salespersonRoutes);
 router.use("/calls", callRoutes);
 router.use("/cses", cseRoutes);
 router.use("/commission-plans", commissionPlanRoutes);
+// Every portal's database, into R2 twice a day (2026-10-16).
+router.use("/backups", backupRoutes);
 
 router.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

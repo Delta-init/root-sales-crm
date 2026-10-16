@@ -9,6 +9,7 @@ import routes from "./routes/index.js";
 import { verify as verifySsoToken } from "./controllers/ssoController.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
 import { startTrafficWorker } from "./services/trafficService.js";
+import { startBackupWorker } from "./services/backupService.js";
 
 const app = express();
 
@@ -42,6 +43,8 @@ const start = async () => {
   if (env.TRAFFIC_WORKER !== "false") {
     startTrafficWorker(Math.max(1000, Number(env.TRAFFIC_WORKER_INTERVAL_MS) || 30_000));
   }
+  // Every portal's database into R2, twice a day. BACKUP_WORKER=false for a second process.
+  startBackupWorker();
 };
 
 start();

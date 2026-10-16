@@ -188,7 +188,10 @@ export type AuditAction =
   // who changed it, and who pushed a stuck lead through by hand, is recorded.
   | "traffic_rules_changed"
   | "traffic_lead_retried"
-  | "traffic_access_changed";
+  | "traffic_access_changed"
+  // A backup started by hand, and an archive taken home — each is a whole portal's data.
+  | "backup_run"
+  | "backup_downloaded";
 
 export interface IAuditLog extends Document {
   admin: Types.ObjectId | null;

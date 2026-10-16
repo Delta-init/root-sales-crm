@@ -1,0 +1,249 @@
+/**
+ * Checks Backups (2026-10-16) — GET /backups, POST /backups/run,
+ * GET /backups/:id/link and src/scripts/backup-restore.ts — against scratch
+ * databases and an R2 stand-in:
+ *
+ *   - root admins only;
+ *   - every portal: the ones set up are backed up, one not set up, one naming
+ *     no database and one whose server is down say so (and never show the
+ *     database address or its password); one database under two names once;
+ *   - the file in R2 under the portal's folder, its checksum, a download link;
+ *   - restored into a new database, every document is the same — ObjectIds,
+ *     dates, decimals, binary, longs — with its indexes and views; restoring
+ *     onto data is refused; a file cut short is refused;
+ *   - a second run while one is running is refused; a scheduled slot runs once;
+ *   - after 30 days an archive leaves R2, never a portal's newest good one;
+ *   - the times: 02:30 and 13:30 Dubai;
+ *   - who started a run and who downloaded is in the audit log.
+ *
+ * Run by backups-check.sh. Scratch databases only.
+ */
+import mongoose from "mongoose";
+import { createHash, randomBytes } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { gunzipSync, gzipSync } from "node:zlib";
+import { dirname, join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const { EJSON, Decimal128, Binary, Long, ObjectId } = mongoose.mongo.BSON;
+
+const uri = process.env.MONGODB_URI ?? "";
+const MONGO = process.env.E2E_MONGO ?? "";
+if (!/^mongodb:\/\/127\.0\.0\.1:\d+\/[^/?]*e2e/.test(uri) || !/^mongodb:\/\/127\.0\.0\.1:\d+$/.test(MONGO)) {
+  console.error(`Refusing to run: MONGODB_URI must be a scratch e2e database on 127.0.0.1`);
+  process.exit(1);
+}
+const ROOT = `http://127.0.0.1:${process.env.E2E_API_PORT}/api/v1`;
+const R2_DIR = process.env.E2E_R2_DIR!;
+const OUT = process.env.E2E_OUT!;
+const PASSWORD = "BackupsE2e!pass1";
+
+let failures = 0, checks = 0;
+function check(label: string, ok: boolean, detail = "") {
+  checks++;
+  if (ok) console.log(`  \x1b[32m✓\x1b[0m ${label}`);
+  else { failures++; console.log(`  \x1b[31m✗ ${label}${detail ? ` — ${detail}` : ""}\x1b[0m`); }
+}
+const step = (name: string) => console.log(`\n\x1b[1m${name}\x1b[0m`);
+const show = (v: unknown) => String(JSON.stringify(v)).slice(0, 400);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Json = any;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const restore = (...a: string[]) => {
+  const p = spawnSync("bun", ["--no-env-file", join(dirname(fileURLToPath(import.meta.url)), "backup-restore.ts"), ...a], { cwd: OUT, env: { PATH: process.env.PATH ?? "" } });
+  return { code: p.status, out: String(p.stdout) + String(p.stderr) };
+};
+const canon = (d: unknown) => EJSON.stringify(d, { relaxed: false });
+
+async function main() {
+  await mongoose.connect(uri);
+  if (mongoose.connection.host !== "127.0.0.1") throw new Error("not a local database");
+  const client = mongoose.connection.getClient();
+  const dbOf = (name: string) => client.db(name);
+
+  step("Setting up: two admins, the portals' data");
+  const { AdminUser } = await import("../models/AdminUser.js");
+  await AdminUser.create({ name: "Root E2E", email: "root@backups-e2e.test", password: PASSWORD, role: "root_admin", status: "active" });
+  await AdminUser.create({ name: "Member E2E", email: "member@backups-e2e.test", password: PASSWORD, role: "member", status: "active" });
+
+  const delta = dbOf("delta-bk-e2e");
+  const leadId = new ObjectId();
+  await delta.collection("leads").insertMany([
+    { _id: leadId, name: "Asha", phone: "971500000001", createdAt: new Date("2026-10-01T08:00:00.123Z"), amount: Decimal128.fromString("2250.50"),
+      big: Long.fromString("9007199254740993"), file: new Binary(Buffer.from([0, 1, 2, 250])), notes: [{ at: new Date("2026-10-02T00:00:00Z"), content: "first call" }],
+      nested: { course: new ObjectId(), tags: ["forex", "jura"], none: null }, ratio: 0.1, whole: 3.0, int: 7 },
+    { name: "Ravi", phone: "971500000002", createdAt: new Date("2026-10-03T08:00:00Z"), status: "new", "dotted-key": true },
+  ]);
+  await delta.collection("leads").createIndex({ phone: 1 }, { unique: true, name: "phone_unique" });
+  await delta.collection("leads").createIndex({ createdAt: -1, status: 1 });
+  await delta.collection("threecx_calls").insertMany(Array.from({ length: 50 }, (_, i) => ({ n: i, at: new Date(Date.UTC(2026, 9, 1, 0, i)) })));
+  await delta.createCollection("open_leads", { viewOn: "leads", pipeline: [{ $match: { status: "new" } }] });
+  await delta.createCollection("empty_one");
+
+  // The LMS: big enough that the file is written and sent in parts.
+  const lms = dbOf("lms-bk-e2e");
+  for (let b = 0; b < 30; b++) {
+    await lms.collection("progress").insertMany(Array.from({ length: 1000 }, (_, i) => ({ user: new ObjectId(), lesson: b * 1000 + i, at: new Date(), text: randomBytes(200).toString("hex") })));
+  }
+  await dbOf("banglore-bk-e2e").collection("leads").insertOne({ name: "Kiran", amountInr: 150000 });
+  await dbOf("finance-bk-e2e").collection("invoices").insertOne({ number: "IN-00001", totalMinor: Long.fromNumber(550500) });
+  await dbOf("tc-bk-e2e").collection("students").insertOne({ code: "STU-1", name: "Stella" });
+  await dbOf("hrms-bk-e2e").collection("employees").insertOne({ name: "Hana" });
+
+  const login = async (email: string) => (await (await fetch(`${ROOT}/auth/login`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, password: PASSWORD }),
+  })).json())?.data?.accessToken as string;
+  const root = { authorization: `Bearer ${await login("root@backups-e2e.test")}` };
+  const member = { authorization: `Bearer ${await login("member@backups-e2e.test")}` };
+  const call = async (method: string, path: string, headers: Record<string, string> = root, body?: unknown): Promise<{ status: number; body: Json }> => {
+    const r = await fetch(`${ROOT}${path}`, { method, headers: { ...headers, "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    return { status: r.status, body: await r.json().catch(() => null) };
+  };
+  const overview = async () => (await call("GET", "/backups")).body?.data as Json;
+  const waitIdle = async () => {
+    for (let i = 0; i < 240; i++) {
+      const o = await overview();
+      if (!o.running) return o;
+      await sleep(250);
+    }
+    throw new Error("the backup never finished");
+  };
+
+  step("Root admins only");
+  check("a member is refused", (await call("GET", "/backups", member)).status === 403);
+  check("…and cannot start one", (await call("POST", "/backups/run", member)).status === 403);
+  const before = await overview();
+  check("the store is set up", before.store.ready === true && before.store.bucket === "delta-backups-e2e", show(before.store));
+  check("02:30 and 13:30 Dubai, kept 30 days", show(before.schedule.times) === show(["02:30", "13:30"]) && before.schedule.keepDays === 30 && before.schedule.timezone === "Dubai");
+  const codes = before.portals.map((p: Json) => p.code);
+  check("every portal, in order; finance's one database listed once",
+    show(codes) === show(["delta", "draw", "remote", "banglore", "finance-hq", "lms", "commission", "hrms", "media-erp", "root"]), show(codes));
+  const problem = (c: string) => before.portals.find((p: Json) => p.code === c)?.problem ?? "";
+  check("Remote: not set up, naming the variable", /REMOTE_MONGODB_URI/.test(problem("remote")), problem("remote"));
+  check("Media ERP: no database named", /MEDIA_ERP_MONGODB_DB/.test(problem("media-erp")), problem("media-erp"));
+  check("Tetra Commission: the database named apart is used", before.portals.find((p: Json) => p.code === "commission")?.database === "tc-bk-e2e" && !problem("commission"));
+  check("no address or password on the page", !/mongodb:|secretpw/.test(JSON.stringify(before)));
+
+  step("Back up now — every portal");
+  const started = await call("POST", "/backups/run");
+  check("started (202)", started.status === 202 && /^manual /.test(started.body?.data?.slot ?? ""), show(started.body));
+  const again = await call("POST", "/backups/run");
+  check("a second run while one runs is refused (409)", again.status === 409, show(again));
+  const after = await waitIdle();
+  const run1 = after.runs[0];
+  const row = (code: string, run = run1) => run.backups.find((b: Json) => b.portal === code);
+  check("one run, by the root admin", after.runs.length === 1 && run1.trigger === "manual" && run1.triggeredBy === "root@backups-e2e.test");
+  for (const c of ["delta", "banglore", "finance-hq", "lms", "commission", "hrms", "root"]) {
+    check(`${c}: complete`, row(c)?.status === "complete" && row(c).bytes > 0, show(row(c)));
+  }
+  check("Draw (server down): failed", row("draw")?.status === "failed", show(row("draw")));
+  check("…without its address or password", !/secretpw|mongodb:|drawuser/.test(row("draw")?.error ?? "x"), row("draw")?.error);
+  check("Remote and Media ERP: skipped, saying why", row("remote")?.status === "skipped" && row("media-erp")?.status === "skipped");
+  check("the run is marked failed (Draw)", run1.status === "failed");
+  check("Sales CRM: 4 collections (and the view), 52 documents", row("delta").collections === 4 && row("delta").documents === 52, show(row("delta")));
+  check("LMS: 30,000 documents", row("lms").documents === 30_000);
+  const portalCard = after.portals.find((p: Json) => p.code === "delta");
+  check("the Sales CRM card: last good backup, 1 kept", portalCard.lastGood?.id === row("delta").id && portalCard.kept === 1 && portalCard.keptBytes === row("delta").bytes);
+  check("Draw's card: last is the failure, no good one", after.portals.find((p: Json) => p.code === "draw").last?.status === "failed" && !after.portals.find((p: Json) => p.code === "draw").lastGood);
+
+  step("In R2");
+  const deltaKey = `delta/${row("delta").file}`;
+  const inR2 = join(R2_DIR, deltaKey);
+  check("under the portal's folder", existsSync(inR2) && /^delta_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z_[0-9a-f]{6}\.ndjson\.gz$/.test(row("delta").file), deltaKey);
+  check("the checksum is the file's", createHash("sha256").update(readFileSync(inR2)).digest("hex") === row("delta").sha256);
+  const parts = existsSync(join(R2_DIR, "..", "_multipart.log")) ? readFileSync(join(R2_DIR, "..", "_multipart.log"), "utf8") : "";
+  check("the LMS file went up in parts and arrived whole", new RegExp(`/lms/${row("lms").file} [2-9]`).test(parts) && readFileSync(join(R2_DIR, `lms/${row("lms").file}`)).length === row("lms").bytes, `${row("lms").bytes} bytes; ${parts.trim()}`);
+
+  step("Download");
+  const link = await call("GET", `/backups/${row("delta").id}/link`);
+  check("a link for root admins", link.status === 200 && /X-Amz-Signature=/.test(link.body?.data?.url ?? ""), show(link.body));
+  check("members get none", (await call("GET", `/backups/${row("delta").id}/link`, member)).status === 403);
+  check("a failed one has no file (404)", (await call("GET", `/backups/${row("draw").id}/link`)).status === 404);
+  check("nonsense id → 404", (await call("GET", `/backups/nope/link`)).status === 404);
+  const file = await (await fetch(link.body.data.url)).arrayBuffer();
+  const local = join(OUT, row("delta").file);
+  writeFileSync(local, Buffer.from(file));
+  check("the link downloads the file", Buffer.from(file).equals(readFileSync(inR2)));
+
+  step("Restore");
+  const verify = restore(local, "--sha256", row("delta").sha256);
+  check("the file checks out: checksum, whole", verify.code === 0 && /Checksum matches/.test(verify.out) && /whole/.test(verify.out), verify.out);
+  const wrongSha = restore(local, "--sha256", "0".repeat(64));
+  check("a wrong checksum is refused", wrongSha.code === 1, wrongSha.out);
+  const dry = restore(local, "--to", `${MONGO}/delta-restored-e2e`);
+  check("without --write it writes nothing", dry.code === 0 && /Add --write/.test(dry.out) && (await dbOf("delta-restored-e2e").listCollections().toArray()).length === 0, dry.out);
+  const done = restore(local, "--to", `${MONGO}/delta-restored-e2e`, "--write");
+  check("restored into a new database", done.code === 0 && /Restored into delta-restored-e2e/.test(done.out), done.out);
+  const back = dbOf("delta-restored-e2e");
+  for (const c of ["leads", "threecx_calls", "empty_one"]) {
+    const a = (await delta.collection(c).find().sort({ _id: 1 }).toArray()).map(canon);
+    const b = (await back.collection(c).find().sort({ _id: 1 }).toArray()).map(canon);
+    check(`${c}: every document the same, types and all`, a.length === b.length && a.every((x, i) => x === b[i]), `${a.length} vs ${b.length}`);
+  }
+  const asha = await back.collection("leads").findOne({ _id: leadId });
+  check("…an ObjectId, a Date, a Decimal128, a Long and Binary come back as themselves",
+    asha?._id instanceof ObjectId && asha?.createdAt instanceof Date && asha.amount instanceof Decimal128 && asha.big?.toString() === "9007199254740993" && asha.file instanceof Binary);
+  const idx = (await back.collection("leads").indexes()).map((i) => i.name).sort();
+  check("the indexes, unique one included", show(idx) === show(["_id_", "createdAt_-1_status_1", "phone_unique"]) && (await back.collection("leads").indexes()).find((i) => i.name === "phone_unique")?.unique === true, show(idx));
+  const view = (await back.listCollections({ name: "open_leads" }).toArray())[0];
+  check("the view, still a view", view?.type === "view" && (await back.collection("open_leads").countDocuments()) === 1);
+  const onto = restore(local, "--to", `${MONGO}/delta-restored-e2e`, "--write");
+  check("restoring onto data is refused", onto.code === 1 && /already has documents/.test(onto.out), onto.out);
+  const only = restore(local, "--to", `${MONGO}/delta-only-e2e`, "--write", "--only", "threecx_calls");
+  check("--only restores just those", only.code === 0 && show((await dbOf("delta-only-e2e").listCollections().toArray()).map((c) => c.name)) === show(["threecx_calls"]), only.out);
+  const lines = gunzipSync(readFileSync(local)).toString().trimEnd().split("\n");
+  const cut = join(OUT, "cut.ndjson.gz");
+  writeFileSync(cut, gzipSync(lines.slice(0, -1).join("\n") + "\n"));
+  const cutRes = restore(cut, "--to", `${MONGO}/delta-cut-e2e`, "--write");
+  check("a file cut short is refused, nothing written", cutRes.code === 1 && /cut short/.test(cutRes.out) && (await dbOf("delta-cut-e2e").listCollections().toArray()).length === 0, cutRes.out);
+
+  step("A scheduled slot runs once");
+  const svc = await import("../services/backupService.js");
+  const [a, b] = await Promise.all([
+    svc.runBackups({ slot: "2026-10-17 13:30", trigger: "scheduled", portals: ["hrms"] }),
+    svc.runBackups({ slot: "2026-10-17 13:30", trigger: "scheduled", portals: ["hrms"] }),
+  ]);
+  check("two processes, one backup", [a, b].filter(Boolean).length === 1 && (a ?? b)!.rows.length === 1 && (a ?? b)!.rows[0].status === "complete");
+  const hrmsKeys = [row("hrms").file, (a ?? b)!.rows[0].key.split("/").pop()];
+  check("two backups of a portal in the same minute are two files", hrmsKeys[0] !== hrmsKeys[1] && hrmsKeys.every((f) => existsSync(join(R2_DIR, `hrms/${f}`))), show(hrmsKeys));
+
+  step("The times (Dubai)");
+  const iso = (d: Date | null) => d?.toISOString() ?? "";
+  check("13:00 Dubai → next 13:30", iso(svc.nextSlot(new Date("2026-10-17T09:00:00Z"))) === "2026-10-17T09:30:00.000Z");
+  check("00:00 Dubai → next 02:30 that night", iso(svc.nextSlot(new Date("2026-10-17T20:00:00Z"))) === "2026-10-17T22:30:00.000Z");
+  check("13:31 Dubai → last was 13:30", iso(svc.lastSlot(new Date("2026-10-17T09:31:00Z"))) === "2026-10-17T09:30:00.000Z");
+  check("the slot's name is Dubai time", svc.slotId(new Date("2026-10-17T22:30:00Z")) === "2026-10-18 02:30");
+
+  step("After 30 days");
+  const { Backup } = await import("../models/Backup.js");
+  const old = new Date(Date.now() - 40 * 86_400_000);
+  await Backup.updateMany({ run: new mongoose.Types.ObjectId(String(run1.id)) }, { $set: { startedAt: old } });
+  const second = await call("POST", "/backups/run", root, { portals: ["delta"] });
+  check("one portal backed up on its own", second.status === 202);
+  const pruned = await waitIdle();
+  const run2 = pruned.runs[0];
+  check("…only that portal", run2.backups.length === 1 && run2.backups[0].portal === "delta" && run2.backups[0].status === "complete", show(run2.backups));
+  const oldRun = pruned.runs.find((r: Json) => r.id === run1.id);
+  check("the old Sales CRM archive left R2", !existsSync(inR2) && oldRun.backups.find((x: Json) => x.portal === "delta").expired === true);
+  check("…its row stays as history", !!oldRun.backups.find((x: Json) => x.portal === "delta"));
+  check("the LMS's old one stays — still its newest good backup", existsSync(join(R2_DIR, `lms/${row("lms").file}`)) && oldRun.backups.find((x: Json) => x.portal === "lms").expired === false);
+  check("HRMS: the old one left, the newer one from the same minute stayed", !existsSync(join(R2_DIR, `hrms/${hrmsKeys[0]}`)) && existsSync(join(R2_DIR, `hrms/${hrmsKeys[1]}`)));
+  check("a removed one has no link (410)", (await call("GET", `/backups/${row("delta").id}/link`)).status === 410);
+
+  step("The audit log");
+  const { AuditLog } = await import("../models/AuditLog.js");
+  check("who started a run", (await AuditLog.countDocuments({ action: "backup_run", adminEmail: "root@backups-e2e.test" })) === 2);
+  check("who downloaded what", (await AuditLog.countDocuments({ action: "backup_downloaded", detail: new RegExp(`Sales CRM: ${row("delta").file}`) })) === 1);
+
+  console.log(`\n${checks - failures}/${checks} checks passed`);
+  await mongoose.disconnect();
+  process.exit(failures ? 1 : 0);
+}
+
+main().catch(async (e) => {
+  console.error(e);
+  await mongoose.disconnect().catch(() => {});
+  process.exit(1);
+});

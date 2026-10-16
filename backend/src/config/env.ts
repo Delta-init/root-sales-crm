@@ -92,6 +92,32 @@ const envSchema = z.object({
   TRAFFIC_WORKER: z.string().default("true"),
   TRAFFIC_WORKER_INTERVAL_MS: z.string().default("30000"),
 
+  /**
+   * Backups (the user, 2026-10-16): every portal's whole database, into R2,
+   * twice a day — the lunch break and the night, Dubai time.
+   *
+   * Read from each portal's {CODE}_MONGODB_URI, the same variables the reports
+   * use; Tetra Commission's is COMMISSION_MONGODB_URI. A bucket of its own
+   * (delta-backups), with a key that can write to nothing else, so one
+   * portal's leaked key can never reach the copies of every other.
+   *
+   * Unset keys leave the job off and say so on the Backups page — never a
+   * portal that refuses to boot. BACKUP_WORKER=false keeps a second process
+   * sharing the database from running its own (a claim on each run stops a
+   * double anyway).
+   */
+  BACKUP_R2_ACCOUNT_ID: z.string().default(""),
+  BACKUP_R2_ACCESS_KEY_ID: z.string().default(""),
+  BACKUP_R2_SECRET_ACCESS_KEY: z.string().default(""),
+  BACKUP_R2_BUCKET: z.string().default("delta-backups"),
+  /** Set only to point somewhere other than R2 (the check's stand-in). */
+  BACKUP_R2_ENDPOINT: z.string().default(""),
+  /** Dubai wall-clock times, HH:MM, comma separated. */
+  BACKUP_TIMES: z.string().default("02:30,13:30"),
+  BACKUP_KEEP_DAYS: z.string().default("30"),
+  BACKUP_WORKER: z.string().default("true"),
+  /** Who is emailed when a portal's backup fails or cannot run. Comma separated; empty sends nothing. */
+  BACKUP_ALERT_EMAIL: z.string().default(""),
 });
 
 const parsed = envSchema.safeParse(process.env);

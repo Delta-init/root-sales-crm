@@ -8,7 +8,7 @@
  */
 import type { LucideIcon } from "lucide-react";
 import {
-  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, Headset, Inbox, LayoutGrid, Phone, Shuffle, Users2,
+  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, DatabaseBackup, Headset, Inbox, LayoutGrid, Phone, Shuffle, Users2,
 } from "lucide-react";
 
 export interface NavLink {
@@ -67,6 +67,8 @@ export const NAV: NavItem[] = [
   // Root admins only: deciding who may open which production system is the
   // portal's most consequential act, and the API refuses anybody else anyway.
   { href: "/users", label: "Users", icon: Users2, rootOnly: true },
+  // Every portal's database into R2, twice a day (2026-10-16). Root admins only.
+  { href: "/backups", label: "Backups", icon: DatabaseBackup, rootOnly: true },
   /* Not root-only. It began that way, on the reasoning that a staff timetable
      is nobody's business by default — booking changed that. The people who
      need an hour with a mentor are the people doing the work, and a calendar

@@ -2,7 +2,7 @@ import nodemailer, { type Transporter } from "nodemailer";
 import { env } from "../config/env.js";
 
 /**
- * The portal's one and only reason to send mail: sign-in codes.
+ * The portal's mail: sign-in codes, and a backup that did not happen.
  *
  * Built lazily and kept, because a transport opened per message would pay a
  * TLS handshake for every sign-in, and a code is worth nothing if it arrives
@@ -71,5 +71,10 @@ export const mailer = {
         </div>
       `,
     });
+  },
+
+  /** A portal's backup failed or could not run (2026-10-16). Plain text: it is read on a phone. */
+  async sendBackupAlert(to: string[], subject: string, text: string): Promise<void> {
+    await get().sendMail({ from: from(), to: to.join(", "), subject, text });
   },
 };

@@ -926,3 +926,50 @@ export interface CsPending {
     completions: (CsPendingWho & { className: string; course: string; mentor: string; endedAt: string; since: string })[];
   };
 }
+
+// ─── Backups (2026-10-16) ─────────────────────────────────────────────────────
+export type BackupStatus = "running" | "complete" | "failed" | "skipped";
+
+export interface BackupRow {
+  id: string;
+  portal: string;
+  label: string;
+  database: string;
+  status: BackupStatus;
+  error: string;
+  bytes: number;
+  sha256: string;
+  documents: number;
+  collections: number;
+  startedAt: string;
+  finishedAt: string | null;
+  durationMs: number;
+  expired: boolean;
+  file: string;
+}
+
+export interface BackupsOverview {
+  store: { ready: boolean; missing: string[]; bucket: string };
+  schedule: { times: string[]; timezone: string; next: string | null; keepDays: number; worker: boolean };
+  running: boolean;
+  portals: {
+    code: string;
+    label: string;
+    database: string;
+    problem: string;
+    last: BackupRow | null;
+    lastGood: BackupRow | null;
+    kept: number;
+    keptBytes: number;
+  }[];
+  runs: {
+    id: string;
+    slot: string;
+    trigger: "scheduled" | "manual";
+    triggeredBy: string;
+    status: "running" | "complete" | "failed";
+    startedAt: string;
+    finishedAt: string | null;
+    backups: BackupRow[];
+  }[];
+}
