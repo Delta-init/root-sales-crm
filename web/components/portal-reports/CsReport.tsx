@@ -1,20 +1,18 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { motion } from "framer-motion";
 import { AxiosError } from "axios";
-import { AlertTriangle, ArrowUpCircle, CalendarRange, Coins, Gift, PhoneCall, RefreshCw, UserCheck, Wallet, MessageSquareText, type LucideIcon } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AlertTriangle, ArrowUpCircle, CalendarRange, Coins, Gift, PhoneCall, RefreshCw, UserCheck, Wallet, MessageSquareText } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CseStatCard, type StatAccent } from "@/components/cses/CseStatCard";
-import { BreakdownDialog, Bars, type BreakdownTab } from "@/components/common/Breakdown";
 import { RangePicker, resolveRange, REPORT_TZ_LABEL, type Range, type RangeKey } from "@/components/reports/RangePicker";
 import { Recording } from "@/components/calls/Recording";
 import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
 import { talkTime } from "@/lib/calls";
+import { ReportBody, n0, usd, aed, pct, when, type Group, type Row, type Section } from "@/components/portal-reports/ReportBody";
 
 /**
  * Reports → CS portal (the user, 2026-10-17): what Tetra Commission's CSs did
@@ -26,40 +24,12 @@ import { talkTime } from "@/lib/calls";
  * them; a CS opens their own. Root admins only; read-only.
  */
 
-type Num = Record<string, number>;
-type Person = Num & { id: string; name: string; team_id: string; team: string; location: string };
-type Team = Num & { id: string; team: string; location: string };
-type Month = Num & { month: string };
-type Row = Record<string, any>;
-interface Group { total: Num; people: Person[]; teams: Team[]; months: Month[]; rows: Row[]; available?: boolean; message?: string }
 type SectionKey = "revenue" | "followups" | "calls" | "programs" | "onboarded" | "bonus" | "commission" | "upgrades";
 interface Report extends Record<SectionKey, Group> {
   period: string; since: string | null; until: string | null; studentLink: string;
   filters: { teams: { id: string; name: string; location: string }[]; people: { id: string; name: string; team_id: string }[] };
 }
 
-type Fmt = "n" | "usd" | "aed" | "secs";
-interface Col { key: string; label: string; fmt?: Fmt }
-interface Section {
-  key: SectionKey; label: string; icon: LucideIcon; accent: StatAccent;
-  headline: (t: Num) => string; headlineHint: (t: Num) => string;
-  cards: (t: Num) => { title: string; value: string; hint?: string; alert?: boolean }[];
-  cols: Col[];
-  rowHead: string[];
-  row: (r: Row, link: (r: Row) => ReactNode) => ReactNode[];
-  sortKey: string;
-}
-
-const n0 = (v: number | undefined) => (v ?? 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
-const usd = (v: number | undefined) => `$${n0(v)}`;
-const aed = (v: number | undefined) => `AED ${n0(v)}`;
-const fmt = (v: number | undefined, f: Fmt = "n") => (f === "usd" ? usd(v) : f === "aed" ? aed(v) : f === "secs" ? talkTime(v ?? 0) : n0(v));
-const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : "—");
-const when = (iso: string) => {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "—" : new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(d);
-};
-const monthName = (ym: string) => new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${ym}-01T00:00:00Z`));
 const STAGE: Record<string, { label: string; cls: string }> = {
   approved: { label: "Approved", cls: "text-emerald-500" }, rejected: { label: "Rejected", cls: "text-rose-500" },
   with_finance: { label: "With finance", cls: "text-sky-500" }, waiting_broker: { label: "Waiting for broker admin", cls: "text-violet-500" },
@@ -67,9 +37,9 @@ const STAGE: Record<string, { label: string; cls: string }> = {
 };
 const csCell = (r: Row) => <div key="cs"><div>{r.cs}</div><div className="text-xs text-muted-foreground">{r.team}{r.location === "bangalore" ? " · Bangalore" : ""}</div></div>;
 
-const SECTIONS: Section[] = [
+const SECTIONS: Section<SectionKey>[] = [
   {
-    key: "revenue", label: "Revenue", icon: Wallet, accent: "emerald", sortKey: "deposit_usd",
+    key: "revenue", label: "Revenue", icon: Wallet, accent: "emerald",
     headline: (t) => usd(t.deposit_usd), headlineHint: (t) => `${n0(t.deposits)} deposits · net ${usd(t.net_usd)}`,
     cards: (t) => [
       { title: "Deposits", value: usd(t.deposit_usd), hint: `${n0(t.deposits)} approved · ${aed(t.deposit_aed)}` },
@@ -85,7 +55,7 @@ const SECTIONS: Section[] = [
       <span key="a" className={cn("tabular-nums", r.kind === "withdrawal" && "text-rose-500")}>{r.kind === "course_payment" ? aed(r.aed) : `${usd(r.usd)} · ${aed(r.aed)}`}</span>],
   },
   {
-    key: "followups", label: "Follow-ups & contacted", icon: MessageSquareText, accent: "blue", sortKey: "logged",
+    key: "followups", label: "Follow-ups & contacted", icon: MessageSquareText, accent: "blue",
     headline: (t) => n0(t.logged), headlineHint: (t) => `calls logged · ${n0(t.contacted)} students contacted`,
     cards: (t) => [
       { title: "Calls logged", value: n0(t.logged) }, { title: "Follow-ups opened", value: n0(t.opened) },
@@ -100,7 +70,7 @@ const SECTIONS: Section[] = [
       <span key="t" className="text-xs text-muted-foreground">{r.client_said || r.text || "—"}</span>],
   },
   {
-    key: "calls", label: "Calls", icon: PhoneCall, accent: "cyan", sortKey: "calls",
+    key: "calls", label: "Calls", icon: PhoneCall, accent: "cyan",
     headline: (t) => n0(t.calls), headlineHint: (t) => `${n0(t.connected)} connected · ${talkTime(t.talk_seconds ?? 0)}`,
     cards: (t) => [
       { title: "Calls", value: n0(t.calls), hint: `${n0(t.outgoing)} out · ${n0(t.incoming)} in` },
@@ -116,7 +86,7 @@ const SECTIONS: Section[] = [
       r.recordings > 0 ? <Recording key="p" call={{ portal: "commission", id: r.id }} /> : <span key="p" className="text-xs text-muted-foreground/60">None</span>],
   },
   {
-    key: "programs", label: "Program scheduling", icon: CalendarRange, accent: "violet", sortKey: "classes",
+    key: "programs", label: "Program scheduling", icon: CalendarRange, accent: "violet", unavailable: "Programs could not be read",
     headline: (t) => n0(t.programs), headlineHint: (t) => `programs · ${n0(t.classes)} classes · ${n0(t.students)} students`,
     cards: (t) => [
       { title: "Programs", value: n0(t.programs), hint: "with classes in the period" },
@@ -132,7 +102,7 @@ const SECTIONS: Section[] = [
       <span key="s">{r.students} · {r.confirmed} confirmed{r.declined ? `, ${r.declined} can't` : ""}</span>],
   },
   {
-    key: "onboarded", label: "Onboarded clients", icon: UserCheck, accent: "amber", sortKey: "onboarded",
+    key: "onboarded", label: "Onboarded clients", icon: UserCheck, accent: "amber",
     headline: (t) => n0(t.onboarded), headlineHint: (t) => `${n0(t.from_finance)} from finance`,
     cards: (t) => [{ title: "Onboarded", value: n0(t.onboarded) }, { title: "From finance (sale closed)", value: n0(t.from_finance) },
       { title: "Added in the portal", value: n0((t.onboarded ?? 0) - (t.from_finance ?? 0)) }],
@@ -141,7 +111,7 @@ const SECTIONS: Section[] = [
     row: (r, link) => [when(r.at), link(r), csCell(r), r.by || "—", <span key="a" className="text-xs text-muted-foreground">{r.from_finance ? "From finance" : "Added in the portal"} · {when(r.added_at)}</span>],
   },
   {
-    key: "bonus", label: "Bonus", icon: Gift, accent: "rose", sortKey: "usd",
+    key: "bonus", label: "Bonus", icon: Gift, accent: "rose",
     headline: (t) => usd(t.approved_usd), headlineHint: (t) => `${n0(t.approved)} approved of ${n0(t.count)} raised`,
     cards: (t) => [
       { title: "Raised", value: usd(t.usd), hint: `${n0(t.count)} bonuses · ${aed(t.aed)} paid` },
@@ -157,7 +127,7 @@ const SECTIONS: Section[] = [
       <span key="s" className={STAGE[r.raw_stage]?.cls ?? STAGE[r.stage]?.cls}>{STAGE[r.raw_stage]?.label ?? STAGE[r.stage]?.label ?? r.stage}{r.decided_at ? <span className="block text-xs text-muted-foreground">{when(r.decided_at)}</span> : null}</span>],
   },
   {
-    key: "commission", label: "Commission", icon: Coins, accent: "cyan", sortKey: "usd",
+    key: "commission", label: "Commission", icon: Coins, accent: "cyan",
     headline: (t) => usd(t.usd), headlineHint: (t) => `${n0(t.credits)} credits`,
     cards: (t) => [{ title: "Commission credited", value: usd(t.usd), hint: `${n0(t.credits)} credits` }],
     cols: [{ key: "credits", label: "Credits" }, { key: "usd", label: "USD", fmt: "usd" }],
@@ -165,7 +135,7 @@ const SECTIONS: Section[] = [
     row: (r, link) => [when(r.at), link(r), csCell(r), <span key="f">{String(r.type || "").toLowerCase() || "—"}{r.level ? ` · level ${r.level}` : ""}</span>, <span key="u" className="tabular-nums">{usd(r.usd)}</span>],
   },
   {
-    key: "upgrades", label: "Course upgrades", icon: ArrowUpCircle, accent: "violet", sortKey: "paid_aed",
+    key: "upgrades", label: "Course upgrades", icon: ArrowUpCircle, accent: "violet",
     headline: (t) => aed(t.paid_aed), headlineHint: (t) => `${n0(t.started)} started · ${n0(t.payments)} payments`,
     cards: (t) => [{ title: "Upgrades started", value: n0(t.started), hint: `${aed(t.quoted_aed)} quoted` },
       { title: "Paid (approved)", value: aed(t.paid_aed), hint: `${n0(t.payments)} payments` }],
@@ -176,8 +146,6 @@ const SECTIONS: Section[] = [
   },
 ];
 
-type View = "people" | "teams" | "months" | "rows";
-const VIEWS: { key: View; label: string }[] = [{ key: "people", label: "By CS" }, { key: "teams", label: "By team" }, { key: "months", label: "By month" }, { key: "rows", label: "List" }];
 const LOCS = [{ key: "", label: "Everyone" }, { key: "dubai", label: "Dubai" }, { key: "bangalore", label: "Bangalore" }];
 
 export function CsReportView() {
@@ -186,9 +154,6 @@ export function CsReportView() {
   const [location, setLocation] = useState("");
   const [team, setTeam] = useState("");
   const [cs, setCs] = useState("");
-  const [section, setSection] = useState<SectionKey>("revenue");
-  const [view, setView] = useState<View>("people");
-  const [personPick, setPersonPick] = useState<{ id: string; name: string } | null>(null);
   const period = useMemo(() => resolveRange(range, custom), [range, custom]);
   const q = useQuery({
     queryKey: ["portal-reports", "cs", period, location, team, cs],
@@ -196,8 +161,6 @@ export function CsReportView() {
     retry: 1,
   });
   const data = q.data;
-  const sec = SECTIONS.find((s) => s.key === section)!;
-  const g = data?.[section];
   const link = (r: Row) => (data?.studentLink && r.student_id
     ? <a key="s" href={`${data.studentLink}${r.student_id}`} target="_blank" rel="noreferrer" className="hover:underline"><span className="font-medium">{r.student || "A student"}</span>{r.code ? <span className="block text-xs text-muted-foreground">{r.code}</span> : null}</a>
     : <span key="s" className="font-medium">{r.student || "—"}{r.code ? <span className="block text-xs font-normal text-muted-foreground">{r.code}</span> : null}</span>);
@@ -207,15 +170,6 @@ export function CsReportView() {
   if (q.error instanceof AxiosError && q.error.response?.status === 403) {
     return <Card><CardContent className="pt-6 text-sm text-muted-foreground">Reports are for root admins.</CardContent></Card>;
   }
-
-  const rowsTable = (rows: Row[]) => rows.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">Nothing in this period.</p> : (
-    <div className="max-h-[60vh] overflow-auto">
-      <table className="w-full text-sm">
-        <thead className="sticky top-0 bg-background"><tr className="border-b border-border/40 text-left text-xs text-muted-foreground">{sec.rowHead.map((h) => <th key={h} className="pb-2 pr-3 font-medium">{h}</th>)}</tr></thead>
-        <tbody>{rows.map((r, i) => <tr key={`${r.id ?? r.student_id ?? ""}-${r.at}-${i}`} className="border-b border-border/20 align-top last:border-0">{sec.row(r, link).map((c, j) => <td key={j} className="py-2 pr-3">{c}</td>)}</tr>)}</tbody>
-      </table>
-    </div>
-  );
 
   return (
     <div className="space-y-6">
@@ -252,100 +206,10 @@ export function CsReportView() {
           </CardContent>
         </Card>
       ) : (
-        <>
-          {/* One figure from each report; a card opens its report below. */}
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            {SECTIONS.map((s, i) => (
-              <div key={s.key} className={cn("rounded-2xl", section === s.key && "ring-2 ring-primary/60")}>
-                <CseStatCard icon={s.icon} accent={s.accent} title={s.label} value={s.headline(data[s.key].total)} hint={s.headlineHint(data[s.key].total)} delay={i * 0.03}
-                  onClick={() => { setSection(s.key); setView("people"); }} />
-              </div>
-            ))}
-          </div>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <CardTitle className="flex items-center gap-2 text-base"><sec.icon className="h-4 w-4 text-primary" /> {sec.label}</CardTitle>
-                <div className="flex flex-wrap gap-1.5" role="tablist">
-                  {VIEWS.map((v) => <Button key={v.key} size="sm" role="tab" aria-selected={view === v.key} variant={view === v.key ? "default" : "outline"} onClick={() => setView(v.key)}>{v.label}{v.key === "rows" ? ` · ${g?.rows.length ?? 0}` : ""}</Button>)}
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {g && g.available === false && (
-                <div className="flex gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-                  <span className="text-muted-foreground">Programs could not be read — {g.message || "the LMS did not answer"}.</span>
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-                {sec.cards(g?.total ?? {}).map((c) => (
-                  <motion.div key={c.title} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl border border-border/60 p-3">
-                    <p className="text-xs text-muted-foreground">{c.title}</p>
-                    <p className="mt-1 text-lg font-bold tabular-nums">{c.value}</p>
-                    {c.hint && <p className={cn("mt-0.5 text-xs", c.alert ? "text-rose-500" : "text-muted-foreground")}>{c.hint}</p>}
-                  </motion.div>
-                ))}
-              </div>
-              {view === "rows" ? rowsTable(g?.rows ?? []) : (
-                <GroupTable view={view} section={sec} g={g} onPerson={(p) => setPersonPick(p)} />
-              )}
-              <p className="text-xs text-muted-foreground">
-                As Tetra Commission&apos;s Reports count it: a row for whoever it counts for (who raised or did it, else the student&apos;s CS), their team and its location. The list shows the latest 2,000.
-              </p>
-            </CardContent>
-          </Card>
-        </>
+        <ReportBody sections={SECTIONS} data={data} link={link} personLabel="CS" ownerKey="cs_id"
+          note={<>As Tetra Commission&apos;s Reports count it: a row for whoever it counts for (who raised or did it, else the student&apos;s CS), their team and its location. The list shows the latest 2,000.</>} />
       )}
-
-      {personPick && data && (() => {
-        const rows = (g?.rows ?? []).filter((r) => r.cs_id === personPick.id);
-        const tabs: BreakdownTab[] = [{ key: "list", label: `List · ${rows.length}`, content: rowsTable(rows) }];
-        const months = new Map<string, number>();
-        for (const r of rows) { const m = String(r.at ?? "").slice(0, 7); if (m) months.set(m, (months.get(m) ?? 0) + 1); }
-        if (months.size > 1) tabs.push({ key: "months", label: "By month", content: <Bars sort={false} rows={Array.from(months).sort().map(([m, v]) => ({ key: m, label: monthName(m), value: v }))} /> });
-        return <BreakdownDialog open onClose={() => setPersonPick(null)} title={`${personPick.name} · ${sec.label}`} description="Their rows in the period, newest first." tabs={tabs} />;
-      })()}
     </div>
   );
 }
 
-function GroupTable({ view, section, g, onPerson }: { view: Exclude<View, "rows">; section: Section; g?: Group; onPerson: (p: { id: string; name: string }) => void }) {
-  const list = (view === "people" ? g?.people : view === "teams" ? g?.teams : g?.months) ?? [];
-  if (!list.length) return <p className="py-8 text-center text-sm text-muted-foreground">Nothing in this period.</p>;
-  const nameOf = (x: any) => view === "people" ? x.name : view === "teams" ? x.team : monthName(x.month);
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-border/40 text-left text-xs text-muted-foreground">
-            <th className="pb-2 pr-3 font-medium">{view === "people" ? "CS" : view === "teams" ? "Team" : "Month"}</th>
-            {section.cols.map((c) => <th key={c.key} className="whitespace-nowrap pb-2 pr-3 text-right font-medium">{c.label}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {list.map((x: any, i: number) => (
-            <tr key={x.id ?? x.month ?? i} className="border-b border-border/20 last:border-0">
-              <td className="py-2 pr-3">
-                {view === "people" ? (
-                  <button type="button" className="text-left font-medium hover:underline" onClick={() => onPerson({ id: x.id, name: x.name })}>{nameOf(x)}</button>
-                ) : <span className="font-medium">{nameOf(x)}</span>}
-                {view !== "months" && <div className="text-xs text-muted-foreground">{view === "people" ? x.team : ""}{x.location === "bangalore" ? `${view === "people" ? " · " : ""}Bangalore` : ""}</div>}
-              </td>
-              {section.cols.map((c) => <td key={c.key} className={cn("py-2 pr-3 text-right tabular-nums", !x[c.key] && "text-muted-foreground/60")}>{x[c.key] ? fmt(x[c.key], c.fmt) : "—"}</td>)}
-            </tr>
-          ))}
-        </tbody>
-        {view !== "months" && g?.total && (
-          <tfoot>
-            <tr className="border-t border-border/60 font-semibold">
-              <td className="pt-2 pr-3">Total</td>
-              {section.cols.map((c) => <td key={c.key} className="pt-2 pr-3 text-right tabular-nums">{fmt(g.total[c.key], c.fmt)}</td>)}
-            </tr>
-          </tfoot>
-        )}
-      </table>
-    </div>
-  );
-}

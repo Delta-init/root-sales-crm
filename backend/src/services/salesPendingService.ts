@@ -63,7 +63,7 @@ export async function salesPortals() {
 
 type Lead = Record<string, any>;
 /** When the lead's status last became `status`, and who did it — else its last update. */
-const markedOf = (l: Lead, status: string): { at: string; by: string } => {
+export const markedOf = (l: Lead, status: string): { at: string; by: string } => {
   const logs = (Array.isArray(l.activityLogs) ? l.activityLogs : []) as Lead[];
   const last = logs.filter((a) => a?.action === "status_changed" && a?.changes?.status?.to === status)
     .sort((a, b) => String(new Date(b.createdAt).toISOString()).localeCompare(new Date(a.createdAt).toISOString()))[0];
