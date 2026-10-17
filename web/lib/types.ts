@@ -1060,3 +1060,34 @@ export interface FinanceWatch {
       orgId: string; orgName: string; href: string }[];
   };
 }
+
+/* Pending → HRMS (2026-10-17): HRMS's GET /service/hrms-watch through /pending/hrms. */
+interface HrmsWho { personId: string; person: string; email: string; code?: string; department: string }
+export interface HrmsWatch {
+  generatedAt: string; today: string; appUrl: string;
+  counts: { leave: number; regularization: number; hiring: number; hiring_with_finance: number; office_keeping: number; office_keeping_arriving: number;
+    procurement: number; procurement_waiting: number; on_leave_today: number };
+  items: {
+    leave: (HrmsWho & { id: string; type: string; days: number; halfDay: boolean; from: string; to: string; reason: string; raisedAt: string })[];
+    regularization: (HrmsWho & { id: string; type: string; date: string; becomes: string; reason: string; escalated: boolean; raisedAt: string })[];
+    hiring: (HrmsWho & { id: string; title: string; type: string; headcount: number; stage: "with_hr" | "with_finance"; raisedAt: string })[];
+    officeKeeping: (HrmsWho & { id: string; issue: string; location: string; stage: "requested" | "arriving"; handledBy: string; raisedAt: string })[];
+    procurement: (HrmsWho & { id: string; item: string; category: string; quantity: number; estimatedCost: number; currency: string; vendor: string;
+      stage: "with_hr" | "with_finance" | "to_order" | "ordered"; neededBy: string; raisedAt: string })[];
+    onLeaveToday: (HrmsWho & { id: string; type: string; days: number; halfDay: boolean; from: string; to: string })[];
+  };
+}
+
+/* Pending → Media ERP (2026-10-17): Media ERP's GET /service/media-watch through /pending/media. */
+interface MediaWho { personId: string; person: string; email: string; active: boolean }
+export interface MediaWatch {
+  generatedAt: string; today: string; appUrl: string;
+  counts: { media: number; media_overdue: number; media_upcoming: number; tasks: number; tasks_overdue: number;
+    leader_desk: number; leader_desk_review: number; leader_desk_incoming: number; leader_desk_reedit: number };
+  items: {
+    media: (MediaWho & { id: string; title: string; team: string; status: "active" | "scheduled"; priority: string; start: string; due: string; overdue: boolean })[];
+    tasks: (MediaWho & { id: string; title: string; team: string; status: string; priority: string; due: string; overdue: boolean; since: string })[];
+    leaderDesk: { id: string; title: string; team: string; stage: "review" | "incoming" | "reedit"; assignee: string; assigneeId: string;
+      leaders: { id: string; name: string }[]; due: string; since: string }[];
+  };
+}

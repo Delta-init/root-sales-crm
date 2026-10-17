@@ -239,3 +239,27 @@ export async function financeWatch() {
     throw error;
   }
 }
+
+/**
+ * A portal that answers its own Pending tab (GET /service/<path>) — HRMS's
+ * hrms-watch, Media ERP's media-watch (2026-10-17). Its old server says so.
+ */
+async function watchOf(kind: string, codes: RegExp, path: string, label: string) {
+  const org = await Organization.findOne({ isActive: true, $or: [{ kind }, { code: codes }] }).select("code name").sort({ sortOrder: 1 }).lean();
+  if (!org) throw httpError(`${label} is not set up in Root`, 404);
+  const target = await resolveTarget(org.code);
+  try {
+    const data = await callTarget<Record<string, unknown>>(target, `/${path}`, { method: "GET", verb: "share what is waiting" });
+    return { ...data, appUrl: targetConfig(org.code).appUrl.replace(/\/+$/, "") };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not be read";
+    if (/404|not found/i.test(message)) throw httpError(`${label}'s server needs updating — it has no ${path} endpoint yet`, 409);
+    throw error;
+  }
+}
+
+/** HRMS: leave, regularization, hiring, office keeping, procurement waiting, and who is on leave today — with departments. */
+export const hrmsWatch = () => watchOf("hrms", /^hrms/, "hrms-watch", "HRMS");
+/** Media ERP: Media Schedule, tasks and the Leader Desk waiting, and on whom. */
+export const mediaWatch = () => watchOf("erp", /media/, "media-watch", "Media ERP");
+

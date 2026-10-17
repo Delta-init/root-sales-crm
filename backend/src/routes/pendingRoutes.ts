@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { cs, enrolments, finance, overview, sales, salesList } from "../controllers/pendingController.js";
+import { cs, enrolments, finance, hrms, media, overview, sales, salesList } from "../controllers/pendingController.js";
 import { byPerson } from "../controllers/callsController.js";
 import { authenticate, requireRole } from "../middleware/auth.js";
 
@@ -23,5 +23,8 @@ router.get("/sales", salesList);
 router.get("/sales/:code", sales);
 // Finance: approvals waiting and delayed, entries typed with an old date (2026-10-17).
 router.get("/finance", finance);
+// HRMS (leave, regularization, hiring, office keeping, procurement, on leave today) and Media ERP (media, tasks, leader desk).
+router.get("/hrms", hrms);
+router.get("/media", media);
 
 export default router;

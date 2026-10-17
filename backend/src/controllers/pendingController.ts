@@ -2,7 +2,7 @@ import type { Response, NextFunction } from "express";
 import { pendingOverview } from "../services/pendingService.js";
 import { enrolmentFlow } from "../services/enrolmentFlowService.js";
 import { csPending } from "../services/cseService.js";
-import { salesPortals, salesPending, financeWatch } from "../services/salesPendingService.js";
+import { salesPortals, salesPending, financeWatch, hrmsWatch, mediaWatch } from "../services/salesPendingService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
 import type { AuthenticatedRequest } from "../types/index.js";
 
@@ -53,3 +53,8 @@ export const salesList = answer("Sales CRMs", () => salesPortals());
 export const sales = answer("Sales pending", (req) => salesPending(String(req.params.code), req.query));
 /** Finance: approvals waiting (30 minutes = delayed) and entries typed with an old date. */
 export const finance = answer("Finance pending", () => financeWatch());
+/** HRMS: what waits, with departments, and who is on leave today. */
+export const hrms = answer("HRMS pending", () => hrmsWatch());
+/** Media ERP: Media Schedule, tasks and the Leader Desk. */
+export const media = answer("Media ERP pending", () => mediaWatch());
+

@@ -9,6 +9,9 @@
  *   Case 3  errors       a CRM that can't be read, an unknown one, bad dates
  *   Case 4  permission   no session, an admin who is not a root admin
  *
+ * And the HRMS and Media ERP tabs (2026-10-17): /pending/hrms and /pending/media,
+ * as each portal's hrms-watch / media-watch says, and their old servers.
+ *
  * Run through scripts/sales-pending-check.sh. Scratch databases on 127.0.0.1 only.
  */
 import mongoose, { Types } from "mongoose";
@@ -49,6 +52,7 @@ const asha = new Types.ObjectId(), bina = new Types.ObjectId(), old = new Types.
 
 // ── A stand-in for the Sales CRM's API and finance's ─────────────────────────
 let financeOld = false;
+let hrmsOld = false;
 const saw: string[] = [];
 const stand = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://x");
@@ -87,6 +91,17 @@ const stand = createServer((req, res) => {
       backdated: { total: 1, typed: 1, lateWaiting: 0, byKind: [], rows: [{ kind: "expense", number: "EXP-1", daysBack: 4 }] },
     } });
   }
+  if (url.pathname.startsWith("/hrms/")) {
+    if (secret !== "sales-e2e-hrms-secret") return send(401, { success: false, message: "Bad secret" });
+    if (hrmsOld || url.pathname !== "/hrms/api/v1/service/hrms-watch") return send(404, { success: false, message: "Route not found" });
+    return send(200, { success: true, data: { today: today, counts: { leave: 1, on_leave_today: 1 },
+      items: { leave: [{ id: "l1", person: "Asha", department: "Sales" }], regularization: [], hiring: [], officeKeeping: [], procurement: [], onLeaveToday: [{ id: "l2", person: "Bilal", department: "Media" }] } } });
+  }
+  if (url.pathname.startsWith("/media/")) {
+    if (secret !== "sales-e2e-media-secret") return send(401, { success: false, message: "Bad secret" });
+    if (url.pathname !== "/media/api/v1/service/media-watch") return send(404, { success: false, message: "Route not found" });
+    return send(200, { success: true, data: { today, counts: { media: 2, tasks: 3, leader_desk: 1 }, items: { media: [], tasks: [], leaderDesk: [{ id: "t1", title: "Review me", stage: "review" }] } } });
+  }
   return send(404, { success: false, message: "Route not found" });
 });
 await new Promise<void>((ok) => stand.listen(Number(process.env.E2E_STANDIN_PORT), "127.0.0.1", ok));
@@ -106,7 +121,7 @@ async function main() {
   const { AdminUser } = await import("../models/AdminUser.js");
   const { Organization } = await import("../models/Organization.js");
   for (const [code, kind, name, sortOrder] of [["delta", "crm", "Delta CRM", 1], ["banglore", "crm", "Banglore CRM", 2], ["draw", "crm", "Draw CRM", 3],
-    ["remote", "crm", "Remote CRM", 4], ["finance-hq", "finance", "Finance HQ", 5]] as [string, string, string, number][]) {
+    ["remote", "crm", "Remote CRM", 4], ["finance-hq", "finance", "Finance HQ", 5], ["hrms", "hrms", "Delta HRMS", 6], ["media-erp", "erp", "Media ERP", 7]] as [string, string, string, number][]) {
     await Organization.create({ code, kind, name, timezone: "Asia/Dubai", currency: "AED", fxToBase: 1, isActive: true, sortOrder, accent: "#2563eb" });
   }
   await AdminUser.create({ name: "Root E2E", email: "root@sales-pending-e2e.test", password: PASSWORD, role: "root_admin", status: "active" });
@@ -176,6 +191,12 @@ async function main() {
   r = await call("/pending/finance", root);
   check("finance: approvals waiting and old-date entries, as finance says", r.status === 200 && r.body?.data?.approvals?.delayed === 1 && r.body.data.backdated.rows[0].number === "EXP-1", show(r.body));
 
+  r = await call("/pending/hrms", root);
+  check("HRMS: leave with its department, who is on leave today, as HRMS says", r.status === 200 && r.body?.data?.items?.leave?.[0]?.department === "Sales"
+    && r.body.data.counts.on_leave_today === 1, show(r.body));
+  r = await call("/pending/media", root);
+  check("Media ERP: media, tasks, leader desk, as Media ERP says", r.status === 200 && r.body?.data?.counts?.tasks === 3 && r.body.data.items.leaderDesk[0].stage === "review", show(r.body));
+
   step("Case 2 — edge");
   check("lost 10 days ago, not connected 20 days ago: outside the period", !(d.items?.lost ?? []).some((x: Json) => x.lead === "Old Lost") && !(d.items?.notConnected ?? []).some((x: Json) => x.lead === "Old Silence"));
   check("a reminder not yet due, and a done one: not counted", !(d.items?.reminders ?? []).some((x: Json) => x.title === "Later" || x.title === "Done"));
@@ -191,6 +212,10 @@ async function main() {
   r = await call("/pending/finance", root);
   check("finance from before this tab: says its server needs updating", r.status === 409 && /needs updating/.test(r.body?.message ?? ""), show(r.body));
   financeOld = false;
+  hrmsOld = true;
+  r = await call("/pending/hrms", root);
+  check("HRMS from before this tab: says its server needs updating", r.status === 409 && /needs updating/.test(r.body?.message ?? ""), show(r.body));
+  hrmsOld = false;
 
   step("Case 3 — errors");
   r = await call("/pending/sales/banglore", root);
@@ -201,7 +226,8 @@ async function main() {
 
   step("Case 4 — root admins only");
   check("no session: 401", (await call("/pending/sales")).status === 401 && (await call("/pending/sales/delta")).status === 401 && (await call("/pending/finance")).status === 401);
-  check("not a root admin: 403", (await call("/pending/sales", member)).status === 403 && (await call("/pending/finance", member)).status === 403);
+  check("not a root admin: 403", (await call("/pending/sales", member)).status === 403 && (await call("/pending/finance", member)).status === 403
+    && (await call("/pending/hrms", member)).status === 403 && (await call("/pending/media", member)).status === 403);
 
   console.log(`\n${checks - failures}/${checks} checks passed`);
 }
