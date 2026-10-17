@@ -10,7 +10,9 @@
  *   Case 4  permission   no session, an admin who is not a root admin
  *
  * And the HRMS and Media ERP tabs (2026-10-17): /pending/hrms and /pending/media,
- * as each portal's hrms-watch / media-watch says, and their old servers.
+ * as each portal's hrms-watch / media-watch says, and their old servers. And
+ * Reports → Finance (/portal-reports/finance → finance's finance-report): the
+ * period and organization handed on, bad ones refused, finance's old server.
  *
  * Run through scripts/sales-pending-check.sh. Scratch databases on 127.0.0.1 only.
  */
@@ -84,6 +86,11 @@ const stand = createServer((req, res) => {
   }
   if (url.pathname.startsWith("/finance/")) {
     if (secret !== "pending-e2e-finance-secret") return send(401, { success: false, message: "Bad secret" });
+    if (!financeOld && url.pathname === "/finance/api/v1/service/finance-report") {
+      if (url.searchParams.get("org") === "0".repeat(24)) return send(422, { success: false, message: "No such organization" });
+      return send(200, { success: true, data: { org: { id: "o1", name: "Delta HQ", currency: "AED" }, organizations: [{ id: "o1", name: "Delta HQ", currency: "AED" }],
+        expenses: { total: { amount: 180 }, people: [], teams: [], months: [], rows: [], categories: [], methods: [] } } });
+    }
     if (financeOld || url.pathname !== "/finance/api/v1/service/finance-watch") return send(404, { success: false, message: "Route not found" });
     return send(200, { success: true, data: {
       rules: { delayMinutes: 30, backdateMinDays: 1, enteredWithinDays: 30 },
@@ -191,6 +198,12 @@ async function main() {
   r = await call("/pending/finance", root);
   check("finance: approvals waiting and old-date entries, as finance says", r.status === 200 && r.body?.data?.approvals?.delayed === 1 && r.body.data.backdated.rows[0].number === "EXP-1", show(r.body));
 
+  const org = "a".repeat(24);
+  r = await call(`/portal-reports/finance?from=2026-08-31T20:00:00.000Z&to=2026-09-30T19:59:59.999Z&org=${org}`, root);
+  check("Reports → Finance: finance's report, with where its pages are", r.status === 200 && r.body?.data?.org?.name === "Delta HQ" && r.body.data.expenses.total.amount === 180
+    && r.body.data.appUrl === "", show(r.body));
+  check("…the period and organization handed on as they came", saw.includes(`/finance/api/v1/service/finance-report?from=2026-08-31T20%3A00%3A00.000Z&to=2026-09-30T19%3A59%3A59.999Z&org=${org}`), show(saw.slice(-3)));
+
   r = await call("/pending/hrms", root);
   check("HRMS: leave with its department, who is on leave today, as HRMS says", r.status === 200 && r.body?.data?.items?.leave?.[0]?.department === "Sales"
     && r.body.data.counts.on_leave_today === 1, show(r.body));
@@ -211,6 +224,8 @@ async function main() {
   financeOld = true;
   r = await call("/pending/finance", root);
   check("finance from before this tab: says its server needs updating", r.status === 409 && /needs updating/.test(r.body?.message ?? ""), show(r.body));
+  r = await call("/portal-reports/finance", root);
+  check("finance from before its report: says its server needs updating", r.status === 409 && /needs updating/.test(r.body?.message ?? ""), show(r.body));
   financeOld = false;
   hrmsOld = true;
   r = await call("/pending/hrms", root);
@@ -224,10 +239,17 @@ async function main() {
   check("bad dates, from after to: 400", (await call("/pending/sales/delta?from=yesterday", root)).status === 400
     && (await call(`/pending/sales/delta?from=${today}&to=${dayOf(-1)}`, root)).status === 400);
 
+  check("finance report: bad dates, a malformed organization: 400", (await call("/portal-reports/finance?from=soon", root)).status === 400
+    && (await call("/portal-reports/finance?org=nope", root)).status === 400);
+  r = await call(`/portal-reports/finance?org=${"0".repeat(24)}`, root);
+  check("finance report: an organization finance does not have — finance's reason", r.status === 409 && /No such organization/.test(r.body?.message ?? ""), show(r.body));
+
   step("Case 4 — root admins only");
   check("no session: 401", (await call("/pending/sales")).status === 401 && (await call("/pending/sales/delta")).status === 401 && (await call("/pending/finance")).status === 401);
   check("not a root admin: 403", (await call("/pending/sales", member)).status === 403 && (await call("/pending/finance", member)).status === 403
-    && (await call("/pending/hrms", member)).status === 403 && (await call("/pending/media", member)).status === 403);
+    && (await call("/pending/hrms", member)).status === 403 && (await call("/pending/media", member)).status === 403
+    && (await call("/portal-reports/finance", member)).status === 403);
+  check("finance report, no session: 401", (await call("/portal-reports/finance")).status === 401);
 
   console.log(`\n${checks - failures}/${checks} checks passed`);
 }

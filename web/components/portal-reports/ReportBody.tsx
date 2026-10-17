@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { talkTime } from "@/lib/calls";
 
 /*
- * A Reports tab's body (2026-10-17), shared by the CS portal and the sales CRMs:
+ * A Reports tab's body (2026-10-17), shared by the CS portal, the sales CRMs and finance:
  * a card per section with its key figure; the section picked, with its own
  * cards, every person's / team's / month's figures and the rows behind them;
  * a person opens their own rows.
@@ -23,7 +23,7 @@ export interface Group {
   total: Num; people: (Num & Record<string, any>)[]; teams: (Num & Record<string, any>)[]; months: (Num & { month: string })[]; rows: Row[];
   available?: boolean; message?: string;
 }
-export type Fmt = "n" | "usd" | "aed" | "secs" | "pct" | "money";
+export type Fmt = "n" | "usd" | "aed" | "secs" | "pct" | "money" | "mins";
 export interface Col { key: string; label: string; fmt?: Fmt }
 export interface Section<K extends string = string> {
   key: K; label: string; icon: LucideIcon; accent: StatAccent;
@@ -36,6 +36,10 @@ export interface Section<K extends string = string> {
   extra?: (g: Group) => ReactNode;
   /** Said when the section could not be read (g.available === false). */
   unavailable?: string;
+  /** What its people and teams are — "By submitter", "By department"; null leaves that view out. */
+  views?: { people?: string; teams?: string | null };
+  /** Not built yet: said in place of its figures. */
+  soon?: string;
 }
 
 export const n0 = (v: number | undefined) => (v ?? 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -46,9 +50,10 @@ export const when = (iso: string) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "—" : new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(d);
 };
+export const minutes = (v: number | undefined) => { const m = Math.round(v ?? 0); return m < 60 ? `${m} min` : `${Math.floor(m / 60)}h ${m % 60 ? `${m % 60}m` : ""}`.trim(); };
 export const monthName = (ym: string) => new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${ym}-01T00:00:00Z`));
 const fmtOf = (currency: string) => (v: number | undefined, f: Fmt = "n") =>
-  f === "usd" ? usd(v) : f === "aed" ? aed(v) : f === "money" ? `${currency} ${n0(v)}` : f === "secs" ? talkTime(v ?? 0) : f === "pct" ? `${n0(v)}%` : n0(v);
+  f === "usd" ? usd(v) : f === "aed" ? aed(v) : f === "money" ? `${currency} ${n0(v)}` : f === "secs" ? talkTime(v ?? 0) : f === "pct" ? `${n0(v)}%` : f === "mins" ? minutes(v) : n0(v);
 
 type View = "people" | "teams" | "months" | "rows";
 
@@ -69,7 +74,8 @@ export function ReportBody<K extends string>({ sections, data, link, personLabel
   const sec = sections.find((s) => s.key === section) ?? sections[0]!;
   const g = data[sec.key];
   const fmt = fmtOf(currency);
-  const views: { key: View; label: string }[] = [{ key: "people", label: `By ${personLabel}` }, { key: "teams", label: "By team" }, { key: "months", label: "By month" }, { key: "rows", label: "List" }];
+  const people = sec.views?.people ?? `By ${personLabel}`, teams = sec.views?.teams === undefined ? "By team" : sec.views.teams;
+  const views: { key: View; label: string }[] = sec.soon ? [] : [{ key: "people" as View, label: people }, ...(teams ? [{ key: "teams" as View, label: teams }] : []), { key: "months", label: "By month" }, { key: "rows", label: "List" }];
 
   const rowsTable = (rows: Row[]) => rows.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">Nothing in this period.</p> : (
     <div className="max-h-[60vh] overflow-auto">
@@ -82,7 +88,7 @@ export function ReportBody<K extends string>({ sections, data, link, personLabel
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className={cn("grid grid-cols-2 gap-3", sections.length === 5 ? "lg:grid-cols-5" : "lg:grid-cols-4")}>
         {sections.map((s, i) => (
           <div key={s.key} className={cn("rounded-2xl", section === s.key && "ring-2 ring-primary/60")}>
             <CseStatCard icon={s.icon} accent={s.accent} title={s.label} value={s.headline(data[s.key]?.total ?? {})} hint={s.headlineHint(data[s.key]?.total ?? {})} delay={i * 0.03}
@@ -101,6 +107,7 @@ export function ReportBody<K extends string>({ sections, data, link, personLabel
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          {sec.soon ? <p className="py-12 text-center text-sm text-muted-foreground">{sec.soon}</p> : <>
           {g && g.available === false && (
             <div className="flex gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
@@ -117,8 +124,9 @@ export function ReportBody<K extends string>({ sections, data, link, personLabel
             ))}
           </div>
           {g && sec.extra?.(g)}
-          {view === "rows" ? rowsTable(g?.rows ?? []) : <GroupTable view={view} cols={sec.cols} g={g} fmt={fmt} personLabel={personLabel} onPerson={setPersonPick} />}
+          {view === "rows" ? rowsTable(g?.rows ?? []) : <GroupTable view={view} cols={sec.cols} g={g} fmt={fmt} heads={{ people: people.replace(/^By /, ""), teams: (teams || "Team").replace(/^By /, "") }} onPerson={setPersonPick} />}
           <p className="text-xs text-muted-foreground">{note}</p>
+          </>}
         </CardContent>
       </Card>
 
@@ -134,8 +142,8 @@ export function ReportBody<K extends string>({ sections, data, link, personLabel
   );
 }
 
-function GroupTable({ view, cols, g, fmt, personLabel, onPerson }: {
-  view: Exclude<View, "rows">; cols: Col[]; g?: Group; fmt: (v: number | undefined, f?: Fmt) => string; personLabel: string; onPerson: (p: { id: string; name: string }) => void;
+function GroupTable({ view, cols, g, fmt, heads, onPerson }: {
+  view: Exclude<View, "rows">; cols: Col[]; g?: Group; fmt: (v: number | undefined, f?: Fmt) => string; heads: { people: string; teams: string }; onPerson: (p: { id: string; name: string }) => void;
 }) {
   const list = (view === "people" ? g?.people : view === "teams" ? g?.teams : g?.months) ?? [];
   if (!list.length) return <p className="py-8 text-center text-sm text-muted-foreground">Nothing in this period.</p>;
@@ -145,7 +153,7 @@ function GroupTable({ view, cols, g, fmt, personLabel, onPerson }: {
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border/40 text-left text-xs text-muted-foreground">
-            <th className="pb-2 pr-3 font-medium">{view === "people" ? personLabel : view === "teams" ? "Team" : "Month"}</th>
+            <th className="pb-2 pr-3 font-medium">{view === "people" ? heads.people.charAt(0).toUpperCase() + heads.people.slice(1) : view === "teams" ? heads.teams.charAt(0).toUpperCase() + heads.teams.slice(1) : "Month"}</th>
             {cols.map((c) => <th key={c.key} className="whitespace-nowrap pb-2 pr-3 text-right font-medium">{c.label}</th>)}
           </tr>
         </thead>
@@ -159,7 +167,7 @@ function GroupTable({ view, cols, g, fmt, personLabel, onPerson }: {
                 {view === "people" && <div className="text-xs text-muted-foreground">{x.team}{x.location === "bangalore" ? " · Bangalore" : ""}{x.active === false ? " · left" : ""}</div>}
                 {view === "teams" && x.location === "bangalore" && <div className="text-xs text-muted-foreground">Bangalore</div>}
               </td>
-              {cols.map((c) => <td key={c.key} className={cn("py-2 pr-3 text-right tabular-nums", !x[c.key] && "text-muted-foreground/60")}>{x[c.key] ? fmt(x[c.key], c.fmt) : "—"}</td>)}
+              {cols.map((c) => <td key={c.key} className={cn("py-2 pr-3 text-right tabular-nums", !x[c.key] && "text-muted-foreground/60", x[c.key] < 0 && "text-rose-500")}>{x[c.key] ? fmt(x[c.key], c.fmt) : "—"}</td>)}
             </tr>
           ))}
         </tbody>

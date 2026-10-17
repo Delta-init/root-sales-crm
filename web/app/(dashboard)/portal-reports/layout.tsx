@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 const TABS = [
   { href: "/portal-reports/cs", label: "CS portal" },
   { href: "/portal-reports/sales", label: "Sales" },
-  { href: "/portal-reports/finance", label: "Finance", soon: true },
+  { href: "/portal-reports/finance", label: "Finance" },
   { href: "/portal-reports/hrms", label: "HRMS", soon: true },
   { href: "/portal-reports/media", label: "Media ERP", soon: true },
 ];
