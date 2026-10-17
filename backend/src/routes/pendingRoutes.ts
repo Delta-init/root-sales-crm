@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { cs, enrolments, overview } from "../controllers/pendingController.js";
+import { cs, enrolments, finance, overview, sales, salesList } from "../controllers/pendingController.js";
 import { byPerson } from "../controllers/callsController.js";
 import { authenticate, requireRole } from "../middleware/auth.js";
 
@@ -18,5 +18,10 @@ router.get("/calls", byPerson);
 router.get("/enrolments", enrolments);
 // What waits on each Tetra Commission CS, and which students — the CS portal tab (2026-10-17).
 router.get("/cs", cs);
+// A tab per sales CRM: inactive leads, overdue reminders, not connected, lost and calls (2026-10-17).
+router.get("/sales", salesList);
+router.get("/sales/:code", sales);
+// Finance: approvals waiting and delayed, entries typed with an old date (2026-10-17).
+router.get("/finance", finance);
 
 export default router;

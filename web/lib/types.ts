@@ -1005,3 +1005,50 @@ export interface BackupsSummary {
   lastScheduled: { slot: string; finishedAt: string | null; ok: number; total: number } | null;
   next: string | null;
 }
+
+/* Pending → Sales, a tab per sales CRM (2026-10-17): GET /pending/sales and /pending/sales/:code. */
+export interface SalesPortalInfo { code: string; name: string; accent: string; currency: string; inactive: boolean; calls: "3cx" | "recorder" | null }
+export interface SalesPendingCounts {
+  inactive: number; reminders_overdue: number; not_connected: number; lost: number;
+  calls: number; connected: number; talkSeconds: number;
+}
+interface SalesLeadRef { leadId: string; lead: string; phone: string; source: string; ownerId: string; owner: string }
+export interface SalesPending {
+  code: string; name: string; accent: string; currency: string; generatedAt: string;
+  period: { from: string; to: string };
+  callsPeriod: { from: string; to: string };
+  totals: SalesPendingCounts & { total: number };
+  people: { id: string; name: string; email: string; active: boolean; counts: SalesPendingCounts; total: number }[];
+  lostReasons: { reason: string; count: number }[];
+  inactive: { supported: boolean; available: boolean; error: string; capped: boolean; limitMinutes: number };
+  calls: { supported: boolean; kind: "3cx" | "recorder" | null; available: boolean; error: string; unlinked: number; total: number;
+    list: (CallRow & { personId: string })[] };
+  items: {
+    inactive: (SalesLeadRef & { team: string; assignedAt: string; waitingMinutes: number; moves: number; calls: { total: number; answered: number } | null })[];
+    reminders: (SalesLeadRef & { status: string; title: string; note: string; remindAt: string })[];
+    notConnected: (SalesLeadRef & { markedAt: string; markedBy: string })[];
+    lost: (SalesLeadRef & { markedAt: string; markedBy: string; reason: string; notes: string })[];
+  };
+}
+
+/* Pending → Finance (2026-10-17): finance's GET /service/finance-watch through /pending/finance. */
+export interface FinanceWatch {
+  generatedAt: string;
+  /** Finance's web address, for links to its pages; "" when Root has none. */
+  appUrl: string;
+  rules: { delayMinutes: number; backdateMinDays: number; enteredWithinDays: number };
+  organizations: { id: string; name: string }[];
+  approvals: {
+    total: number; delayed: number; unavailable: string[];
+    byKind: { type: string; label: string; total: number; delayed: number }[];
+    rows: { id: string; type: string; kind: string; title: string; subtitle: string; amountMinor?: number; currency?: string; raisedBy: string;
+      submittedAt: string; waitingMinutes: number; delayed: boolean; orgId: string; orgName: string; href: string }[];
+  };
+  backdated: {
+    total: number; typed: number; lateWaiting: number;
+    byKind: { kind: string; label: string; total: number; typed: number }[];
+    rows: { kind: string; id: string; number: string; title: string; date: string; enteredAt: string; daysBack: number; amountMinor: number; currency: string;
+      enteredBy: string; origin: "typed" | "approval" | "hrms"; late?: { state: string; reason: string; decidedBy?: string; note?: string };
+      orgId: string; orgName: string; href: string }[];
+  };
+}

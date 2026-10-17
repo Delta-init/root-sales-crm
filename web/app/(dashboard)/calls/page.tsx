@@ -5,8 +5,8 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { AxiosError } from "axios";
 import {
-  AlertTriangle, ArrowDown, ArrowUp, Clock, Download, Loader2, Pause, Phone, PhoneIncoming, PhoneMissed,
-  PhoneOff, PhoneOutgoing, Play, RefreshCw, Search, Timer, Users2, X,
+  AlertTriangle, ArrowDown, ArrowUp, Clock, Download, Loader2, Phone, PhoneIncoming, PhoneMissed,
+  PhoneOff, PhoneOutgoing, RefreshCw, Search, Timer, Users2, X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/axios";
+import { Recording } from "@/components/calls/Recording";
 import { cn } from "@/lib/utils";
 import { CALL_PERIODS, callLength, periodDays, talkTime, type CallPeriod } from "@/lib/calls";
 import type { CallRow, CallsOverview, CallTotals, PortalCallsSummary } from "@/lib/types";
@@ -398,41 +399,6 @@ function CallLine({ call: c }: { call: CallRow }) {
       <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{c.talkSeconds ? callLength(c.talkSeconds) : "—"}</td>
       <td className="py-2">{c.recordings > 0 ? <Recording call={c} /> : <span className="text-xs text-muted-foreground/60">None</span>}</td>
     </tr>
-  );
-}
-
-/** Asks the portal for a fresh signed link only when played, so it is never stale. */
-function Recording({ call }: { call: CallRow }) {
-  const [state, setState] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [url, setUrl] = useState("");
-  const [error, setError] = useState("");
-  const load = async () => {
-    setState("loading");
-    try {
-      const res = await api.get(`/calls/${call.portal}/${call.id}/recording-link`, { params: { index: 0 } });
-      setUrl(res.data.data.url as string);
-      setState("ready");
-    } catch (e) {
-      setError(e instanceof AxiosError ? (e.response?.data as { message?: string })?.message ?? "Could not open it" : "Could not open it");
-      setState("error");
-    }
-  };
-  if (state === "ready") {
-    return (
-      <span className="flex items-center gap-1">
-        {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-        <audio controls autoPlay preload="none" src={url} className="h-8 w-56" onError={() => { setError("The recording could not be played"); setState("error"); }} />
-        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setState("idle")} aria-label="Close the player"><Pause className="h-3.5 w-3.5" /></Button>
-      </span>
-    );
-  }
-  return (
-    <span className="flex items-center gap-2">
-      <Button size="sm" variant="outline" className="h-7 gap-1 px-2" onClick={load} disabled={state === "loading"}>
-        {state === "loading" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />} Play
-      </Button>
-      {state === "error" && <span className="text-xs text-rose-500">{error}</span>}
-    </span>
   );
 }
 

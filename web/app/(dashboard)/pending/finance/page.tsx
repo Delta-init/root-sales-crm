@@ -1,8 +1,8 @@
 "use client";
 
-import { PortalsView } from "@/components/pending/PortalsView";
+import { FinanceWatchView } from "@/components/pending/FinanceWatch";
 
-/** Finance — each organisation's approvals, by who raised them. */
+/** Finance: approvals waiting (past 30 minutes delayed) and entries typed with an old date. */
 export default function PendingFinancePage() {
-  return <PortalsView only={(p) => p.code.startsWith("finance")} empty="Finance is not set up in Root." />;
+  return <FinanceWatchView />;
 }
