@@ -2,6 +2,7 @@ import { Organization } from "../models/Organization.js";
 import { getSources } from "./crmConnections.js";
 import { CALL_PORTALS, callsOverview } from "./callsService.js";
 import { markedOf } from "./salesPendingService.js";
+import { resolveTarget, callTarget } from "../lib/targetClient.js";
 
 /*
  * Reports → Sales, a tab per sales CRM (the user, 2026-10-17): what each
@@ -256,3 +257,43 @@ export async function salesReport(code: string, q: { from?: unknown; to?: unknow
   };
 }
 
+
+/*
+ * Reports → Sales → a CRM → Lead workflow (the user, 2026-10-17: the Sales CRM's
+ * Workflow tab, shown in Root too): the leads that came in over the period and
+ * where each went — came in, assigned, worked, inactive, moved, statuses now,
+ * by team and by employee — as that CRM's own Inactive Leads → Workflow counts
+ * them (GET /service/lead-workflow). The period's instants go as Gulf days
+ * (none: today); the CRM refuses more than 92 days. Banglore has no inactive
+ * leads, so nothing to ask. Read only.
+ */
+const NO_INACTIVE_LEADS = new Set(["banglore"]);
+const gulfDay = (iso: string) => new Date(Date.parse(iso) + 4 * 3_600_000).toISOString().slice(0, 10);
+
+export async function salesLeadWorkflow(code: string, q: { from?: unknown; to?: unknown; team?: unknown; person?: unknown }) {
+  const org = await Organization.findOne({ code, isActive: true, kind: "crm" }).select("code name").lean();
+  if (!org) throw httpError("No such sales CRM", 404);
+  if (NO_INACTIVE_LEADS.has(code)) return { available: false, message: `${org.name} has no inactive leads or mover, so there is no workflow to show.` };
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : "");
+  const from = str(q.from), to = str(q.to);
+  for (const v of [from, to]) if (v && !Number.isFinite(Date.parse(v))) throw httpError("from / to must be dates", 400);
+  const params = new URLSearchParams();
+  if (from || to) {
+    params.set("from", gulfDay(from || to));
+    params.set("to", gulfDay(to || new Date().toISOString()));
+  }
+  for (const [k, v] of [["teamId", str(q.team)], ["personId", str(q.person)]] as const) {
+    if (!v) continue;
+    if (!/^[0-9a-f]{24}$/i.test(v)) throw httpError(`${k === "teamId" ? "team" : "person"} is not an id`, 400);
+    params.set(k, v);
+  }
+  const target = await resolveTarget(code);
+  try {
+    const data = await callTarget<Record<string, unknown>>(target, `/lead-workflow${params.size ? `?${params}` : ""}`, { method: "GET", verb: "share its lead workflow" });
+    return { available: true, data };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not be read";
+    if (/not found/i.test(message)) return { available: false, message: `${org.name}'s server needs updating — it has no lead workflow yet.` };
+    throw error;
+  }
+}

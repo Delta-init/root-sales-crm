@@ -14,6 +14,7 @@ import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
 import { talkTime } from "@/lib/calls";
 import { ReportBody, n0, pct, when, type Group, type Row, type Section } from "@/components/portal-reports/ReportBody";
+import { LeadWorkflowSection } from "@/components/portal-reports/LeadWorkflow";
 
 /**
  * Reports → Sales, one sales CRM (the user, 2026-10-17): what each salesperson
@@ -150,6 +151,8 @@ export function SalesReportView({ code }: { code: string }) {
           <Button variant="outline" size="sm" onClick={() => q.refetch()} disabled={q.isFetching}><RefreshCw className={cn(q.isFetching && "animate-spin")} /> Refresh</Button>
         </div>
       </div>
+
+      <LeadWorkflowSection code={code} period={period} team={team} person={person} />
 
       {q.isLoading ? (
         <div className="space-y-4">

@@ -13,6 +13,9 @@
  * as each portal's hrms-watch / media-watch says, and their old servers. And
  * Reports → Finance (/portal-reports/finance → finance's finance-report): the
  * period and organization handed on, bad ones refused, finance's old server.
+ * And Reports → Sales → a CRM → Lead workflow (/portal-reports/sales/:code/workflow
+ * → the CRM's lead-workflow): Gulf days and ids handed on, Banglore has none, the
+ * CRM's refusal and its old server.
  *
  * Run through scripts/sales-pending-check.sh. Scratch databases on 127.0.0.1 only.
  */
@@ -54,6 +57,7 @@ const asha = new Types.ObjectId(), bina = new Types.ObjectId(), old = new Types.
 
 // ── A stand-in for the Sales CRM's API and finance's ─────────────────────────
 let financeOld = false;
+let workflowOld = false;
 let hrmsOld = false;
 const saw: string[] = [];
 const stand = createServer((req, res) => {
@@ -63,6 +67,11 @@ const stand = createServer((req, res) => {
   const send = (status: number, body: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
   if (url.pathname.startsWith("/delta/")) {
     if (secret !== "sales-e2e-delta-secret") return send(401, { success: false, message: "Bad secret" });
+    if (url.pathname === "/delta/api/v1/service/lead-workflow") {
+      if (workflowOld) return send(404, { success: false, message: "Route not found" });
+      if (url.searchParams.get("from") === "2026-01-01") return send(400, { success: false, message: "At most 92 days at a time" });
+      return send(200, { success: true, data: { period: { from: url.searchParams.get("from"), to: url.searchParams.get("to") }, totals: { came: 11, moves: 2 } } });
+    }
     if (url.pathname === "/delta/api/v1/service/inactive-leads") {
       return send(200, { success: true, data: {
         items: [{ id: "l-idle", name: "Idle Ivan", phone: "971500000099", source: "Meta", owner: { id: String(asha), name: "Asha", email: "ASHA@delta-e2e.test", active: true },
@@ -244,11 +253,31 @@ async function main() {
   r = await call(`/portal-reports/finance?org=${"0".repeat(24)}`, root);
   check("finance report: an organization finance does not have — finance's reason", r.status === 409 && /No such organization/.test(r.body?.message ?? ""), show(r.body));
 
+  step("Reports → Sales → Lead workflow");
+  const team = "b".repeat(24), who = "c".repeat(24);
+  r = await call(`/portal-reports/sales/delta/workflow?from=2026-10-18T20:00:00.000Z&to=2026-10-19T19:59:59.999Z&team=${team}&person=${who}`, root);
+  check("the Sales CRM's workflow, as it counts it", r.status === 200 && r.body?.data?.available === true && r.body.data.data.totals.came === 11, show(r.body));
+  check("…the period as Gulf days, the team and person handed on", saw.includes(`/delta/api/v1/service/lead-workflow?from=2026-10-19&to=2026-10-19&teamId=${team}&personId=${who}`), show(saw.slice(-3)));
+  r = await call("/portal-reports/sales/delta/workflow", root);
+  check("no period: nothing sent — the CRM's today", r.status === 200 && saw.includes("/delta/api/v1/service/lead-workflow"), show(saw.slice(-2)));
+  r = await call("/portal-reports/sales/banglore/workflow", root);
+  check("Banglore: no inactive leads, says so without asking", r.status === 200 && r.body?.data?.available === false && /no inactive leads/.test(r.body.data.message), show(r.body));
+  r = await call("/portal-reports/sales/delta/workflow?from=2026-01-01T00:00:00.000Z&to=2026-10-19T00:00:00.000Z", root);
+  check("the CRM refuses (more than 92 days): its reason", r.status === 409 && /92 days/.test(r.body?.message ?? ""), show(r.body));
+  workflowOld = true;
+  r = await call("/portal-reports/sales/delta/workflow", root);
+  check("a CRM from before the workflow: says its server needs updating", r.status === 200 && r.body?.data?.available === false && /needs updating/.test(r.body.data.message), show(r.body));
+  workflowOld = false;
+  check("bad dates, a bad team id: 400", (await call("/portal-reports/sales/delta/workflow?from=soon", root)).status === 400
+    && (await call("/portal-reports/sales/delta/workflow?team=nope", root)).status === 400);
+  check("an unknown CRM: 404", (await call("/portal-reports/sales/nowhere/workflow", root)).status === 404);
+
   step("Case 4 — root admins only");
   check("no session: 401", (await call("/pending/sales")).status === 401 && (await call("/pending/sales/delta")).status === 401 && (await call("/pending/finance")).status === 401);
   check("not a root admin: 403", (await call("/pending/sales", member)).status === 403 && (await call("/pending/finance", member)).status === 403
     && (await call("/pending/hrms", member)).status === 403 && (await call("/pending/media", member)).status === 403
-    && (await call("/portal-reports/finance", member)).status === 403);
+    && (await call("/portal-reports/finance", member)).status === 403 && (await call("/portal-reports/sales/delta/workflow", member)).status === 403);
+  check("lead workflow, no session: 401", (await call("/portal-reports/sales/delta/workflow")).status === 401);
   check("finance report, no session: 401", (await call("/portal-reports/finance")).status === 401);
 
   console.log(`\n${checks - failures}/${checks} checks passed`);
