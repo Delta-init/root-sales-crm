@@ -1,5 +1,5 @@
 import type { Response, NextFunction } from "express";
-import { backupOverview, backupSummary, downloadLink, startManualRun } from "../services/backupService.js";
+import { backupOverview, backupSummary, downloadLink, requestStop, retryFailed, startManualRun } from "../services/backupService.js";
 import { record } from "../services/auditService.js";
 import { sendSuccess } from "../utils/response.js";
 import type { AuthenticatedRequest } from "../types/index.js";
@@ -30,6 +30,32 @@ export const runNow = async (req: AuthenticatedRequest, res: Response, next: Nex
     const started = await startManualRun(req.admin!.email, portals);
     await record(req, "backup_run", { adminId: req.admin!.adminId, adminEmail: req.admin!.email, detail: portals?.length ? portals.join(", ") : "all portals" });
     sendSuccess(res, "Backup started", started, 202);
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** POST /backups/stop | /finish | /restart — the running backup: stop now, after this portal, or stop and start again. */
+const stopper = (mode: "now" | "after", restart: boolean, action: "backup_stopped" | "backup_finish_requested" | "backup_restarted", said: string) =>
+  async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      const out = await requestStop(req.admin!.email, mode, restart);
+      await record(req, action, { adminId: req.admin!.adminId, adminEmail: req.admin!.email, detail: out.slot });
+      sendSuccess(res, said, out, 202);
+    } catch (error) {
+      next(error);
+    }
+  };
+export const stop = stopper("now", false, "backup_stopped", "Stopping");
+export const finish = stopper("after", false, "backup_finish_requested", "Stopping after this portal");
+export const restart = stopper("now", true, "backup_restarted", "Restarting");
+
+/** POST /backups/retry — back up again the portals that failed or were stopped in the last backup. */
+export const retry = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const out = await retryFailed(req.admin!.email);
+    await record(req, "backup_run", { adminId: req.admin!.adminId, adminEmail: req.admin!.email, detail: `retry: ${out.portals.join(", ")}` });
+    sendSuccess(res, "Retrying", out, 202);
   } catch (error) {
     next(error);
   }

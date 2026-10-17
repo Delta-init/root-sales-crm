@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { AxiosError } from "axios";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Clock, DatabaseBackup, Download, Loader2, Play, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, DatabaseBackup, Download, Loader2, Play, RotateCcw, SkipForward, Square, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,7 +46,7 @@ const secs = (ms: number) => (ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : 
 function normalise(d: Partial<BackupsOverview>): BackupsOverview & { counted: boolean } {
   const portals = (d.portals ?? []).map((p) => ({
     ...p,
-    window: p.window ?? { ok: 0, failed: 0, skipped: 0 },
+    window: p.window ?? { ok: 0, failed: 0, skipped: 0, stopped: 0 },
     history: p.history ?? [],
   }));
   return {
@@ -58,6 +58,7 @@ function normalise(d: Partial<BackupsOverview>): BackupsOverview & { counted: bo
     counted: !!d.totals,
     staleHours: d.staleHours ?? 14,
     failures: d.failures ?? [],
+    retry: d.retry ?? [],
     totals: d.totals ?? {
       stored: { count: portals.reduce((n, p) => n + (p.kept ?? 0), 0), bytes: portals.reduce((n, p) => n + (p.keptBytes ?? 0), 0) },
       window: { days: d.schedule?.keepDays ?? 30, runs: 0, ok: 0, failed: 0, skipped: 0 },
@@ -70,7 +71,12 @@ const STATUS: Record<BackupStatus, { label: string; variant: "success" | "destru
   failed: { label: "Failed", variant: "destructive" },
   skipped: { label: "Not backed up", variant: "warning" },
   running: { label: "Running", variant: "secondary" },
+  stopped: { label: "Stopped", variant: "secondary" },
 };
+
+/** A Root API from before Stop and Retry (2026-10-17) has no such endpoints. */
+const buttonError = (e: unknown, fallback: string) =>
+  notYet(e) ? "The Root API needs updating before this button works" : apiErrorMessage(e, fallback);
 
 export default function BackupsPage() {
   const qc = useQueryClient();
@@ -90,6 +96,24 @@ export default function BackupsPage() {
     onError: (e) => toast.error(apiErrorMessage(e, "Could not start the backup")),
   });
 
+  /** Stop, Finish, Restart, Retry failed (2026-10-17). */
+  const act = useMutation({
+    mutationFn: async (what: "stop" | "finish" | "restart" | "retry") => {
+      await api.post(`/backups/${what}`);
+      return what;
+    },
+    onSuccess: (what) => {
+      toast.success(
+        what === "stop" ? "Stopping now" : what === "finish" ? "Stopping after this portal" : what === "restart" ? "Restarting from the first portal" : "Retrying the failed ones"
+      );
+      qc.invalidateQueries({ queryKey: ["backups"] });
+    },
+    onError: (e) => toast.error(buttonError(e, "That did not work")),
+  });
+  const ask = (what: "stop" | "finish" | "restart", question: string) => {
+    if (window.confirm(question)) act.mutate(what);
+  };
+
   const download = useMutation({
     mutationFn: async (id: string) => (await api.get(`/backups/${id}/link`)).data.data as { url: string; file: string },
     onSuccess: (d) => {
@@ -108,6 +132,9 @@ export default function BackupsPage() {
 
   const o = q.data;
   const busy = !!o?.running || run.isPending;
+  /** The run going now, and whether a stop is already asked of it. */
+  const live = o?.running ? o.runs.find((r) => r.status === "running") : undefined;
+  const stopping = live?.stop ?? "";
 
   return (
     <div className="space-y-8">
@@ -129,10 +156,39 @@ export default function BackupsPage() {
             </p>
           )}
         </div>
-        <Button onClick={() => run.mutate(undefined)} disabled={busy || !o?.store.ready}>
-          {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-          {busy ? "Backing up…" : "Back up now"}
-        </Button>
+        {o?.running ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {stopping === "now" ? (live?.restart ? "Restarting…" : "Stopping…") : stopping === "after" ? "Stopping after this portal…" : "Backing up…"}
+            </span>
+            <Button variant="destructive" size="sm" disabled={act.isPending || stopping === "now"}
+              onClick={() => ask("stop", "Stop the backup now? The portal being copied is dropped; the ones already done keep their backups.")}>
+              <Square className="mr-1.5 h-3.5 w-3.5" /> Stop
+            </Button>
+            <Button variant="outline" size="sm" disabled={act.isPending || !!stopping}
+              onClick={() => ask("finish", "Finish the portal being copied, then stop?")}>
+              <SkipForward className="mr-1.5 h-3.5 w-3.5" /> Finish
+            </Button>
+            <Button variant="outline" size="sm" disabled={act.isPending || !!live?.restart}
+              onClick={() => ask("restart", "Stop this backup and start again from the first portal?")}>
+              <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> Restart
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {!!o?.retry?.length && (
+              <Button variant="outline" disabled={busy || act.isPending || !o.store.ready} onClick={() => act.mutate("retry")}
+                title={`Back up again: ${o.retry.join(", ")}`}>
+                <RotateCcw className="mr-2 h-4 w-4" /> Retry failed ({o.retry.length})
+              </Button>
+            )}
+            <Button onClick={() => run.mutate(undefined)} disabled={busy || !o?.store.ready}>
+              {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+              {busy ? "Backing up…" : "Back up now"}
+            </Button>
+          </div>
+        )}
       </motion.div>
 
       {notYet(q.error) && (
@@ -215,13 +271,14 @@ export default function BackupsPage() {
                       {p.window.ok} of {p.history.length} worked in {o.totals.window.days} days
                       {p.window.failed > 0 && <span className="text-destructive"> · {p.window.failed} failed</span>}
                       {p.window.skipped > 0 && <span className="text-amber-500"> · {p.window.skipped} not backed up</span>}
+                      {!!p.window.stopped && <span> · {p.window.stopped} stopped</span>}
                     </p>
                     {/* A dot per backup, oldest first: a portal that keeps failing is a red streak. */}
                     <div className="flex flex-wrap gap-1" aria-label={`${p.label}: each backup in ${o.totals.window.days} days`}>
                       {p.history.map((h) => (
                         <span key={h.id} title={`${when(h.startedAt)} — ${STATUS[h.status].label}${h.error ? `: ${h.error}` : ""}`}
                           className={cn("h-2 w-2 rounded-full",
-                            h.status === "complete" ? "bg-emerald-500" : h.status === "failed" ? "bg-destructive" : "bg-amber-500")} />
+                            h.status === "complete" ? "bg-emerald-500" : h.status === "failed" ? "bg-destructive" : h.status === "stopped" ? "bg-muted-foreground/40" : "bg-amber-500")} />
                       ))}
                     </div>
                   </div>
@@ -292,6 +349,7 @@ export default function BackupsPage() {
                 <span className="text-muted-foreground">{r.trigger === "scheduled" ? "Scheduled" : `By ${r.triggeredBy}`}</span>
                 <Badge variant={r.status === "complete" ? "success" : r.status === "failed" ? "destructive" : "secondary"}>
                   {r.status === "running" ? "Running" : `${done.length}/${r.backups.length} backed up`}
+                  {r.status === "stopped" && " · stopped"}
                 </Badge>
                 <span className="text-muted-foreground">{size(done.reduce((n, b) => n + b.bytes, 0))}</span>
               </summary>

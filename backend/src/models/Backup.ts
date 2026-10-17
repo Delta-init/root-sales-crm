@@ -9,7 +9,8 @@ import mongoose, { Schema, type Types } from "mongoose";
  * has a slot of its own ("manual-<time>").
  */
 
-export type BackupStatus = "running" | "complete" | "failed" | "skipped";
+/** "stopped": somebody pressed Stop, Finish or Restart before this portal was done (2026-10-17). */
+export type BackupStatus = "running" | "complete" | "failed" | "skipped" | "stopped";
 
 export interface IBackupRun {
   _id: Types.ObjectId;
@@ -18,7 +19,16 @@ export interface IBackupRun {
   triggeredBy: string;
   /** Only these portals, for a manual run of one; empty is all of them. */
   portals: string[];
-  status: "running" | "complete" | "failed";
+  status: "running" | "complete" | "failed" | "stopped";
+  /**
+   * A stop asked for from the Backups page: "now" drops the portal being
+   * copied, "after" lets it finish. Read by whichever process runs the backup,
+   * so it works with more than one API process.
+   */
+  stop: "" | "now" | "after";
+  stopBy: string;
+  /** Restart: once this one has stopped, a new run starts from the first portal. */
+  restart: boolean;
   startedAt: Date;
   finishedAt: Date | null;
 }
@@ -56,7 +66,10 @@ const runSchema = new Schema<IBackupRun>(
     trigger: { type: String, enum: ["scheduled", "manual"], required: true },
     triggeredBy: { type: String, default: "" },
     portals: { type: [String], default: [] },
-    status: { type: String, enum: ["running", "complete", "failed"], default: "running" },
+    status: { type: String, enum: ["running", "complete", "failed", "stopped"], default: "running" },
+    stop: { type: String, enum: ["", "now", "after"], default: "" },
+    stopBy: { type: String, default: "" },
+    restart: { type: Boolean, default: false },
     startedAt: { type: Date, default: () => new Date() },
     finishedAt: { type: Date, default: null },
   },
@@ -70,7 +83,7 @@ const backupSchema = new Schema<IBackup>(
     portal: { type: String, required: true },
     label: { type: String, default: "" },
     database: { type: String, default: "" },
-    status: { type: String, enum: ["running", "complete", "failed", "skipped"], default: "running" },
+    status: { type: String, enum: ["running", "complete", "failed", "skipped", "stopped"], default: "running" },
     error: { type: String, default: "" },
     key: { type: String, default: "" },
     bytes: { type: Number, default: 0 },

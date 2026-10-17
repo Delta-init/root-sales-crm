@@ -191,7 +191,11 @@ export type AuditAction =
   | "traffic_access_changed"
   // A backup started by hand, and an archive taken home — each is a whole portal's data.
   | "backup_run"
-  | "backup_downloaded";
+  | "backup_downloaded"
+  // Stop, Finish and Restart on a running backup.
+  | "backup_stopped"
+  | "backup_finish_requested"
+  | "backup_restarted";
 
 export interface IAuditLog extends Document {
   admin: Types.ObjectId | null;

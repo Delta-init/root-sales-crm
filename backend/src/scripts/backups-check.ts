@@ -129,6 +129,7 @@ async function main() {
   step("Back up now — every portal");
   const started = await call("POST", "/backups/run");
   check("started (202)", started.status === 202 && /^manual /.test(started.body?.data?.slot ?? ""), show(started.body));
+  check("a manual run's name is its own, to the millisecond", /^manual \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}Z [0-9a-f]{4}$/.test(started.body?.data?.slot ?? ""), started.body?.data?.slot);
   const again = await call("POST", "/backups/run");
   check("a second run while one runs is refused (409)", again.status === 409, show(again));
   const after = await waitIdle();
@@ -149,10 +150,10 @@ async function main() {
   check("Draw's card: last is the failure, no good one", after.portals.find((p: Json) => p.code === "draw").last?.status === "failed" && !after.portals.find((p: Json) => p.code === "draw").lastGood);
 
   step("Counted: the last 30 days, each portal, the failures");
-  check("1 run, 7 worked, 1 failed, 2 not backed up", show(after.totals.window) === show({ days: 30, runs: 1, ok: 7, failed: 1, skipped: 2 }), show(after.totals.window));
+  check("1 run, 7 worked, 1 failed, 2 not backed up", show(after.totals.window) === show({ days: 30, runs: 1, ok: 7, failed: 1, skipped: 2, stopped: 0 }), show(after.totals.window));
   check("7 backups stored", after.totals.stored.count === 7 && after.totals.stored.bytes > 0, show(after.totals.stored));
   const deltaCard = after.portals.find((p: Json) => p.code === "delta");
-  check("the Sales CRM: 1 of 1 worked, a dot for it", show(deltaCard.window) === show({ ok: 1, failed: 0, skipped: 0 }) && deltaCard.history.length === 1 && deltaCard.history[0].status === "complete");
+  check("the Sales CRM: 1 of 1 worked, a dot for it", show(deltaCard.window) === show({ ok: 1, failed: 0, skipped: 0, stopped: 0 }) && deltaCard.history.length === 1 && deltaCard.history[0].status === "complete");
   check("the failures: Draw, Remote, Media ERP, with why",
     show(after.failures.map((f: Json) => f.label).sort()) === show(["Draw CRM", "Media ERP", "Remote CRM"]) && after.failures.every((f: Json) => f.error), show(after.failures));
   check("…no password in them", !/secretpw|mongodb:/.test(JSON.stringify(after.failures)));
@@ -259,6 +260,74 @@ async function main() {
   const { AuditLog } = await import("../models/AuditLog.js");
   check("who started a run", (await AuditLog.countDocuments({ action: "backup_run", adminEmail: "root@backups-e2e.test" })) === 2);
   check("who downloaded what", (await AuditLog.countDocuments({ action: "backup_downloaded", detail: new RegExp(`Sales CRM: ${row("delta").file}`) })) === 1);
+
+  step("Stop, Finish, Restart, Retry failed");
+  // Draw's server is down: its connection waits 15 seconds before failing — a window to press the buttons in.
+  const latestRun = async () => (await overview()).runs[0];
+  const waitFor = async (what: string, ok: (o: Json) => boolean, ms = 30_000) => {
+    for (let t = 0; t < ms; t += 200) {
+      const o = await overview();
+      if (ok(o)) return o;
+      await sleep(200);
+    }
+    throw new Error(`timed out waiting for ${what}: ${show((await overview()).runs.slice(0, 2).map((r: Json) => [r.status, r.backups.map((b: Json) => `${b.portal}:${b.status}`)]))}`);
+  };
+  const drawRunning = (o: Json) => o.running && o.runs[0]?.backups.some((b: Json) => b.portal === "draw" && b.status === "running");
+  check("nothing running: Stop is refused (409)", (await call("POST", "/backups/stop")).status === 409);
+  check("members can't stop, finish, restart or retry",
+    (await Promise.all(["stop", "finish", "restart", "retry"].map((a) => call("POST", `/backups/${a}`, member)))).every((r) => r.status === 403));
+
+  // Stop: right away, mid-portal.
+  await call("POST", "/backups/run");
+  await waitFor("Draw to start", drawRunning);
+  const pressed = Date.now();
+  const stopRes = await call("POST", "/backups/stop");
+  check("Stop while it runs (202)", stopRes.status === 202 && stopRes.body?.data?.stop === "now", show(stopRes.body));
+  await waitFor("the run to stop", (o) => !o.running);
+  const stoppedIn = Date.now() - pressed;
+  const sRun = await latestRun();
+  check(`stopped right away (${stoppedIn} ms, not the 15 s Draw's connection would take)`, stoppedIn < 8000);
+  check("the run is Stopped", sRun.status === "stopped" && sRun.stop === "now" && sRun.stopBy === "root@backups-e2e.test", show(sRun));
+  check("the Sales CRM, done before, kept its backup", sRun.backups.find((b: Json) => b.portal === "delta")?.status === "complete");
+  check("Draw, being copied, is Stopped — not Failed", sRun.backups.find((b: Json) => b.portal === "draw")?.status === "stopped" && /while it was being copied/.test(sRun.backups.find((b: Json) => b.portal === "draw").error));
+  const notReached = sRun.backups.filter((b: Json) => !["delta", "draw"].includes(b.portal));
+  check("every portal not reached is Stopped, nothing uploaded", notReached.length === 8 && notReached.every((b: Json) => b.status === "stopped" && !b.bytes && /before it started/.test(b.error)), show(notReached.map((b: Json) => b.status)));
+  const afterStop = await overview();
+  check("stopped is not a failure: not in Failures, counted apart", afterStop.failures.every((f: Json) => f.status !== "stopped") && afterStop.totals.window.stopped === 9, show(afterStop.totals.window));
+  check("Retry failed is offered for the stopped ones", afterStop.retry.length === 9 && afterStop.retry.includes("Draw CRM"), show(afterStop.retry));
+
+  // Finish: the portal being copied finishes, then it stops.
+  await call("POST", "/backups/run");
+  await waitFor("Draw to start", drawRunning);
+  const finRes = await call("POST", "/backups/finish");
+  check("Finish while it runs (202)", finRes.status === 202 && finRes.body?.data?.stop === "after");
+  await waitFor("the run to finish", (o) => !o.running);
+  const fRun = await latestRun();
+  check("Draw was let finish (its own way: the server is down, so Failed)", fRun.backups.find((b: Json) => b.portal === "draw")?.status === "failed");
+  check("…then nothing more started", fRun.status === "stopped" && fRun.backups.filter((b: Json) => !["delta", "draw"].includes(b.portal)).every((b: Json) => b.status === "stopped"));
+
+  // Restart: stopped, then a new run from the first portal.
+  await call("POST", "/backups/run");
+  await waitFor("Draw to start", drawRunning);
+  const oldId = (await latestRun()).id;
+  const rsRes = await call("POST", "/backups/restart");
+  check("Restart while it runs (202)", rsRes.status === 202 && rsRes.body?.data?.restart === true);
+  const restarted = await waitFor("a new run", (o) => o.runs[0]?.id !== oldId && o.runs[0]?.trigger === "manual");
+  const stoppedRun = restarted.runs.find((r: Json) => r.id === oldId);
+  check("the old run stopped, marked as restarted", stoppedRun?.status === "stopped" && stoppedRun.restart === true);
+  check("a new run, by whoever pressed it, from the first portal", restarted.runs[0].triggeredBy === "root@backups-e2e.test" && restarted.runs[0].backups[0]?.portal === "delta");
+  const done3 = await waitFor("the new run to end", (o) => !o.running, 60_000);
+  check("…and it backed every portal up again", done3.runs[0].backups.length === 10 && done3.runs[0].backups.filter((b: Json) => b.status === "complete").length === 7);
+
+  // Retry failed: only what failed or was stopped last time.
+  const rtRes = await call("POST", "/backups/retry");
+  check("Retry failed: Draw only (it failed), not the 7 that worked", rtRes.status === 202 && show(rtRes.body?.data?.portals) === show(["Draw CRM"]), show(rtRes.body));
+  const done4 = await waitFor("the retry to end", (o) => !o.running, 60_000);
+  check("…a run of Draw alone", done4.runs[0].backups.length === 1 && done4.runs[0].backups[0].portal === "draw");
+  const { AuditLog: Audit } = await import("../models/AuditLog.js");
+  check("Stop, Finish, Restart and the retry are in the audit log",
+    (await Audit.countDocuments({ action: { $in: ["backup_stopped", "backup_finish_requested", "backup_restarted"] } })) === 3
+      && (await Audit.countDocuments({ action: "backup_run", detail: "retry: Draw CRM" })) === 1);
 
   console.log(`\n${checks - failures}/${checks} checks passed`);
   await mongoose.disconnect();

@@ -928,7 +928,7 @@ export interface CsPending {
 }
 
 // ─── Backups (2026-10-16) ─────────────────────────────────────────────────────
-export type BackupStatus = "running" | "complete" | "failed" | "skipped";
+export type BackupStatus = "running" | "complete" | "failed" | "skipped" | "stopped";
 
 export interface BackupRow {
   id: string;
@@ -952,6 +952,8 @@ export interface BackupTally {
   ok: number;
   failed: number;
   skipped: number;
+  /** Stopped from the page; an API from before Stop (2026-10-17) leaves it out. */
+  stopped?: number;
 }
 
 export interface BackupFailure {
@@ -967,6 +969,8 @@ export interface BackupsOverview {
   totals: { stored: { count: number; bytes: number }; window: BackupTally & { days: number; runs: number } };
   staleHours: number;
   failures: BackupFailure[];
+  /** The portals Retry failed would back up again (the last run's failed or stopped). */
+  retry?: string[];
   store: { ready: boolean; missing: string[]; bucket: string };
   schedule: { times: string[]; timezone: string; next: string | null; keepDays: number; worker: boolean };
   running: boolean;
@@ -987,7 +991,11 @@ export interface BackupsOverview {
     slot: string;
     trigger: "scheduled" | "manual";
     triggeredBy: string;
-    status: "running" | "complete" | "failed";
+    status: "running" | "complete" | "failed" | "stopped";
+    /** A stop asked for: "now" or "after" this portal ("" none), by whom, and whether a new run follows. */
+    stop?: "" | "now" | "after";
+    stopBy?: string;
+    restart?: boolean;
     startedAt: string;
     finishedAt: string | null;
     backups: BackupRow[];

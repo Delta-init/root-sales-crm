@@ -4,7 +4,7 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { stat, unlink } from "node:fs/promises";
 import { once } from "node:events";
 import { finished } from "node:stream/promises";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { env } from "../config/env.js";
@@ -113,7 +113,13 @@ export function resolvePortals(): ResolvedPortal[] {
 
 const stampOf = (d: Date) => d.toISOString().slice(0, 19).replace(/:/g, "-") + "Z"; // 2026-10-17T09-30-00Z
 
-async function backupPortal(runId: mongoose.Types.ObjectId, p: ResolvedPortal): Promise<IBackup> {
+interface StopState {
+  stop: "" | "now" | "after";
+  stopBy: string;
+  restart: boolean;
+}
+
+async function backupPortal(runId: mongoose.Types.ObjectId, p: ResolvedPortal, stopState: () => Promise<StopState>): Promise<IBackup> {
   const started = new Date();
   const row = await Backup.create({ run: runId, portal: p.code, label: p.label, database: p.database, startedAt: started });
   if (p.problem) {
@@ -131,6 +137,28 @@ async function backupPortal(runId: mongoose.Types.ObjectId, p: ResolvedPortal): 
     readPreference: "secondaryPreferred",
     appName: "root-backup",
   });
+  /*
+   * Stop (2026-10-17): checked every second while this portal is copied. On
+   * "now" the database connection is closed under the copy, which ends
+   * whatever it is waiting on — connecting, reading — and the half-written file
+   * is thrown away, never uploaded. "after" is left alone: this portal finishes.
+   */
+  let stopped = false;
+  let checking = false;
+  const watch = setInterval(async () => {
+    if (stopped || checking) return;
+    checking = true;
+    try {
+      if ((await stopState()).stop === "now") {
+        stopped = true;
+        await client.close(true).catch(() => {});
+      }
+    } catch {
+      /* the next tick asks again */
+    } finally {
+      checking = false;
+    }
+  }, 1000);
   try {
     await client.connect();
     const db = client.db(p.database);
@@ -178,6 +206,7 @@ async function backupPortal(runId: mongoose.Types.ObjectId, p: ResolvedPortal): 
     // The run's id in the name as well as the time: two runs in the same second
     // must never share a file, or removing the older one would take the newer.
     const key = `${p.code}/${p.code}_${stampOf(started)}_${String(runId).slice(-6)}.ndjson.gz`;
+    if (stopped || (await stopState()).stop === "now") throw new Error("stopped");
     await backupStore.upload(key, tmp);
 
     Object.assign(row, {
@@ -187,18 +216,33 @@ async function backupPortal(runId: mongoose.Types.ObjectId, p: ResolvedPortal): 
     await row.save();
     return row.toObject();
   } catch (e) {
+    clearInterval(watch);
+    const st = await stopState().catch(() => null);
+    if (stopped || st?.stop === "now") {
+      Object.assign(row, { status: "stopped", error: `Stopped by ${st?.stopBy || "a root admin"} while it was being copied`, finishedAt: new Date(), durationMs: Date.now() - started.getTime() });
+      await row.save();
+      return row.toObject();
+    }
     // The connection string can be inside a driver message; never put it on a page or in a log.
     const message = (e instanceof Error ? e.message : String(e)).replace(/mongodb(\+srv)?:\/\/\S+/g, "<database address>");
     Object.assign(row, { status: "failed", error: message.slice(0, 500), finishedAt: new Date(), durationMs: Date.now() - started.getTime() });
     await row.save();
     return row.toObject();
   } finally {
+    clearInterval(watch);
     await client.close().catch(() => {});
     await unlink(tmp).catch(() => {});
   }
 }
 
 /* ── A run: every portal ─────────────────────────────────────────────────── */
+
+/**
+ * A manual run's name. Unique to the millisecond and then some: two presses in
+ * the same second once shared a name, and the second run's claim on it failed
+ * quietly — "Backup started" on the page and nothing running.
+ */
+const manualSlot = () => `manual ${new Date().toISOString().slice(0, 23).replace("T", " ")}Z ${randomBytes(2).toString("hex")}`;
 
 let busy = false;
 
@@ -218,13 +262,29 @@ export async function runBackups(opts: { slot: string; trigger: "scheduled" | "m
     throw e;
   }
   busy = true;
+  let restartBy = "";
+  // Read fresh each time: the Stop / Finish / Restart buttons write it, maybe from another process.
+  const stopState = async (): Promise<StopState> =>
+    ((await BackupRun.findById(run._id).select("stop stopBy restart").lean()) as StopState | null) ?? { stop: "", stopBy: "", restart: false };
   try {
     const all = resolvePortals();
     const list = opts.portals?.length ? all.filter((p) => opts.portals!.includes(p.code)) : all;
     const rows: IBackup[] = [];
-    for (const p of list) {
+    for (const [i, p] of list.entries()) {
+      // Stop or Finish: nothing more starts. The portals not reached are listed as stopped.
+      const st = await stopState();
+      if (st.stop) {
+        for (const q of list.slice(i)) {
+          const row = await Backup.create({
+            run: run._id, portal: q.code, label: q.label, database: q.database, status: "stopped",
+            error: `Stopped by ${st.stopBy || "a root admin"} before it started`, finishedAt: new Date(),
+          });
+          rows.push(row.toObject());
+        }
+        break;
+      }
       try {
-        rows.push(await backupPortal(run._id, p));
+        rows.push(await backupPortal(run._id, p, stopState));
       } catch (e) {
         // Only the bookkeeping can throw here (this portal's own database
         // stumbling); the next portal still gets its backup.
@@ -234,9 +294,11 @@ export async function runBackups(opts: { slot: string; trigger: "scheduled" | "m
         rows.push({ portal: p.code, label: p.label, status: "failed", error, bytes: 0 } as IBackup);
       }
     }
-    run.status = rows.some((r) => r.status === "failed") ? "failed" : "complete";
+    const final = await stopState();
+    run.status = final.stop ? "stopped" : rows.some((r) => r.status === "failed") ? "failed" : "complete";
     run.finishedAt = new Date();
     await run.save();
+    if (final.restart) restartBy = final.stopBy || "a root admin";
 
     const done = rows.filter((r) => r.status === "complete");
     console.log(`💾 backup ${opts.slot}: ${done.length}/${rows.length} portals, ${(done.reduce((n, r) => n + r.bytes, 0) / 1048576).toFixed(1)} MB`);
@@ -254,6 +316,16 @@ export async function runBackups(opts: { slot: string; trigger: "scheduled" | "m
     throw e;
   } finally {
     busy = false;
+    // Restart: the stopped run is put away first, then a new one from the first portal.
+    if (restartBy) {
+      const slot = manualSlot();
+      console.log(`💾 backup restarted by ${restartBy} — ${slot}`);
+      setTimeout(() => {
+        runBackups({ slot, trigger: "manual", triggeredBy: restartBy }).catch((e) =>
+          console.error(`💾 backup ${slot} FAILED:`, e instanceof Error ? e.message : e)
+        );
+      }, 0);
+    }
   }
 }
 
@@ -465,7 +537,10 @@ export async function backupOverview() {
     ok: list.filter((r) => r.status === "complete").length,
     failed: list.filter((r) => r.status === "failed").length,
     skipped: list.filter((r) => r.status === "skipped").length,
+    // Stopped from the page: not a failure, and not counted as one.
+    stopped: list.filter((r) => r.status === "stopped").length,
   });
+  const retry = await retryable();
   const kept = [...byPortal.values()];
 
   return {
@@ -474,8 +549,9 @@ export async function backupOverview() {
       window: { days: keepDays(), runs: await BackupRun.countDocuments({ startedAt: { $gte: since } }), ...tally(counted) },
     },
     staleHours: STALE_HOURS,
+    retry: retry ? retry.rows.map((r) => r.label) : [],
     failures: counted
-      .filter((r) => r.status !== "complete")
+      .filter((r) => r.status === "failed" || r.status === "skipped")
       .reverse()
       .slice(0, 100)
       .map((r) => ({ id: String(r._id), portal: r.portal, label: r.label, status: r.status, error: r.error, startedAt: r.startedAt })),
@@ -511,6 +587,9 @@ export async function backupOverview() {
       trigger: r.trigger,
       triggeredBy: r.triggeredBy,
       status: r.status,
+      stop: r.stop ?? "",
+      stopBy: r.stopBy ?? "",
+      restart: !!r.restart,
       startedAt: r.startedAt,
       finishedAt: r.finishedAt,
       backups: (byRun.get(String(r._id)) ?? [])
@@ -554,6 +633,40 @@ export async function backupSummary() {
   };
 }
 
+/* ── Stop, Finish, Restart, Retry failed (2026-10-17) ────────────────────── */
+
+const runningRun = () =>
+  BackupRun.findOne({ status: "running", startedAt: { $gte: new Date(Date.now() - 3 * HOUR) } }).sort({ startedAt: -1 });
+
+/**
+ * Ask the running backup to stop: "now" drops the portal being copied, "after"
+ * lets it finish; either way nothing more starts. Restart is a stop now that
+ * starts a new run from the first portal once this one has stopped. A Finish
+ * already asked for can still become a Stop, never the other way round.
+ */
+export async function requestStop(by: string, mode: "now" | "after", restart = false) {
+  const run = await runningRun();
+  if (!run) throw err("No backup is running", 409);
+  const stop = mode === "now" || run.stop === "now" ? "now" : "after";
+  await BackupRun.updateOne({ _id: run._id }, { $set: { stop, stopBy: by, ...(restart ? { restart: true } : {}) } });
+  return { slot: run.slot, stop, restart: restart || !!run.restart };
+}
+
+/** The last finished run's portals that failed or were stopped — what Retry failed backs up again. */
+async function retryable() {
+  const last = await BackupRun.findOne({ status: { $ne: "running" } }).sort({ startedAt: -1 }).lean();
+  if (!last) return null;
+  const rows = (await Backup.find({ run: last._id, status: { $in: ["failed", "stopped"] } }).lean()) as IBackup[];
+  return rows.length ? { run: last, rows } : null;
+}
+
+export async function retryFailed(by: string) {
+  const r = await retryable();
+  if (!r) throw err("Nothing failed or was stopped in the last backup", 400);
+  const started = await startManualRun(by, r.rows.map((x) => x.portal));
+  return { ...started, portals: r.rows.map((x) => x.label) };
+}
+
 /** Start a run now, in the background. Every portal, or the ones named. */
 export async function startManualRun(by: string, portals?: string[]) {
   const missing = storeMissing();
@@ -565,7 +678,7 @@ export async function startManualRun(by: string, portals?: string[]) {
   if (busy || (await BackupRun.exists({ status: "running", startedAt: { $gte: recent } }))) {
     throw err("A backup is already running — wait for it to finish", 409);
   }
-  const slot = `manual ${new Date().toISOString().slice(0, 19).replace("T", " ")}Z`;
+  const slot = manualSlot();
   runBackups({ slot, trigger: "manual", triggeredBy: by, portals: wanted }).catch((e) =>
     console.error(`💾 backup ${slot} FAILED:`, e instanceof Error ? e.message : e)
   );
