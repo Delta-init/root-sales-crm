@@ -36,6 +36,35 @@ const ago = (iso: string) => {
 };
 const secs = (ms: number) => (ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Math.max(1, Math.round(ms / 1000))} s`);
 
+/**
+ * The answer, with anything a Root API from before the counts (b8abc7f) leaves
+ * out filled in — the web deploys on its own and can be ahead of the API, and
+ * a page that crashes on a missing field shows nothing at all. `counted` says
+ * whether the counts and failures came back; without them those sections say
+ * the API needs updating instead.
+ */
+function normalise(d: Partial<BackupsOverview>): BackupsOverview & { counted: boolean } {
+  const portals = (d.portals ?? []).map((p) => ({
+    ...p,
+    window: p.window ?? { ok: 0, failed: 0, skipped: 0 },
+    history: p.history ?? [],
+  }));
+  return {
+    store: d.store ?? { ready: false, missing: [], bucket: "" },
+    schedule: d.schedule ?? { times: [], timezone: "Dubai", next: null, keepDays: 30, worker: false },
+    running: !!d.running,
+    runs: (d.runs ?? []).map((r) => ({ ...r, backups: r.backups ?? [] })),
+    portals,
+    counted: !!d.totals,
+    staleHours: d.staleHours ?? 14,
+    failures: d.failures ?? [],
+    totals: d.totals ?? {
+      stored: { count: portals.reduce((n, p) => n + (p.kept ?? 0), 0), bytes: portals.reduce((n, p) => n + (p.keptBytes ?? 0), 0) },
+      window: { days: d.schedule?.keepDays ?? 30, runs: 0, ok: 0, failed: 0, skipped: 0 },
+    },
+  };
+}
+
 const STATUS: Record<BackupStatus, { label: string; variant: "success" | "destructive" | "warning" | "secondary" }> = {
   complete: { label: "Backed up", variant: "success" },
   failed: { label: "Failed", variant: "destructive" },
@@ -47,7 +76,7 @@ export default function BackupsPage() {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["backups"],
-    queryFn: async () => (await api.get("/backups")).data.data as BackupsOverview,
+    queryFn: async () => normalise((await api.get("/backups")).data.data as Partial<BackupsOverview>),
     // Every few seconds while a backup runs, so the page follows it.
     refetchInterval: (query) => ((query.state.data as BackupsOverview | undefined)?.running ? 3000 : 60_000),
   });
@@ -126,7 +155,15 @@ export default function BackupsPage() {
         </Card>
       )}
 
-      {o?.totals && (
+      {o && !o.counted && (
+        <Card>
+          <CardContent className="pt-6 text-sm text-muted-foreground">
+            The Root API is on the previous version, so the 30-day counts and the failures list are not shown yet. They appear once the API is updated.
+          </CardContent>
+        </Card>
+      )}
+
+      {o?.counted && (
         <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Tile label="Stored now" value={o.totals.stored.count.toLocaleString("en-US")} sub={size(o.totals.stored.bytes)} />
           <Tile label={`Backed up · ${o.totals.window.days} days`} value={o.totals.window.ok.toLocaleString("en-US")}
@@ -208,7 +245,7 @@ export default function BackupsPage() {
         })}
       </section>
 
-      {o && (
+      {o?.counted && (
         <section className="space-y-3">
           <h3 className="text-lg font-semibold">Failures · {o.totals.window.days} days</h3>
           {o.failures.length === 0 ? (

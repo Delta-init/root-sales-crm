@@ -25,7 +25,8 @@ export function BackupStatusCard() {
     refetchInterval: 5 * 60_000,
   });
   const s = q.data;
-  if (!s) return null;
+  // Nothing from a server from before the summary (404), or an answer without its parts.
+  if (!s || !Array.isArray(s.problems)) return null;
 
   const tone = !s.ready ? "warn" : s.problems.length ? "bad" : "good";
   const Icon = s.running ? Loader2 : tone === "good" ? CheckCircle2 : tone === "bad" ? XCircle : AlertTriangle;
