@@ -29,6 +29,12 @@ export interface IBackupRun {
   stopBy: string;
   /** Restart: once this one has stopped, a new run starts from the first portal. */
   restart: boolean;
+  /**
+   * "Still alive": the process running it writes this every few seconds
+   * (2026-10-17). A run marked running with no recent mark lost its process —
+   * the API restarted under it — and is settled as interrupted.
+   */
+  heartbeatAt: Date | null;
   startedAt: Date;
   finishedAt: Date | null;
 }
@@ -70,6 +76,7 @@ const runSchema = new Schema<IBackupRun>(
     stop: { type: String, enum: ["", "now", "after"], default: "" },
     stopBy: { type: String, default: "" },
     restart: { type: Boolean, default: false },
+    heartbeatAt: { type: Date, default: () => new Date() },
     startedAt: { type: Date, default: () => new Date() },
     finishedAt: { type: Date, default: null },
   },

@@ -116,6 +116,8 @@ const envSchema = z.object({
   BACKUP_TIMES: z.string().default("02:30,13:30"),
   BACKUP_KEEP_DAYS: z.string().default("30"),
   BACKUP_WORKER: z.string().default("true"),
+  /** A running backup with no "still alive" mark for this long lost its process (the API restarted). */
+  BACKUP_DEAD_AFTER_SECONDS: z.string().default("120"),
   /** Who is emailed when a portal's backup fails or cannot run. Comma separated; empty sends nothing. */
   BACKUP_ALERT_EMAIL: z.string().default(""),
 });

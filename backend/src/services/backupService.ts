@@ -263,6 +263,10 @@ export async function runBackups(opts: { slot: string; trigger: "scheduled" | "m
   }
   busy = true;
   let restartBy = "";
+  // Still alive: the mark that tells every process (and the page) this run has somebody working on it.
+  const beat = setInterval(() => {
+    BackupRun.updateOne({ _id: run._id }, { $set: { heartbeatAt: new Date() } }).catch(() => {});
+  }, heartbeatMs());
   // Read fresh each time: the Stop / Finish / Restart buttons write it, maybe from another process.
   const stopState = async (): Promise<StopState> =>
     ((await BackupRun.findById(run._id).select("stop stopBy restart").lean()) as StopState | null) ?? { stop: "", stopBy: "", restart: false };
@@ -315,6 +319,7 @@ export async function runBackups(opts: { slot: string; trigger: "scheduled" | "m
     await run.save().catch(() => {});
     throw e;
   } finally {
+    clearInterval(beat);
     busy = false;
     // Restart: the stopped run is put away first, then a new one from the first portal.
     if (restartBy) {
@@ -369,16 +374,44 @@ export async function prune(now = new Date()) {
   return removed;
 }
 
-/** A run left "running" by a process that stopped part way is not running. */
-async function settleInterrupted() {
-  const stale = new Date(Date.now() - 3 * HOUR);
-  const runs = await BackupRun.find({ status: "running", startedAt: { $lt: stale } });
-  for (const r of runs) {
-    await Backup.updateMany({ run: r._id, status: "running" }, { $set: { status: "failed", error: "Interrupted — the server stopped during the backup", finishedAt: new Date() } });
+/* ── Still alive (2026-10-17) ─────────────────────────────────────────────
+ * A run is "running" in the database, but only its process can finish it. When
+ * the API restarts mid-backup (a deploy, an .env change) the process is gone
+ * and the run used to stay "running" for three hours: the page stuck on
+ * "Backing up…", Stop and Restart with nobody to hear them, Back up now
+ * refused. Now the process marks the run every few seconds, and a run whose
+ * mark is older than BACKUP_DEAD_AFTER_SECONDS is settled as interrupted the
+ * next time anybody looks. */
+
+const deadAfterMs = () => Math.max(5, Number(env.BACKUP_DEAD_AFTER_SECONDS) || 120) * 1000;
+/** Well inside the dead window, so a live run is never mistaken for a dead one. */
+const heartbeatMs = () => Math.min(10_000, Math.floor(deadAfterMs() / 4));
+
+/** Runs still being worked on by a live process. */
+const aliveFilter = () => {
+  const cutoff = new Date(Date.now() - deadAfterMs());
+  return {
+    status: "running" as const,
+    // A run from before the mark existed has none: judged by when it started.
+    $or: [{ heartbeatAt: { $gte: cutoff } }, { heartbeatAt: null, startedAt: { $gte: cutoff } }],
+  };
+};
+
+/** Every run marked running whose process is gone: interrupted, its unfinished portal with it. */
+export async function settleDead() {
+  const alive = await BackupRun.find(aliveFilter()).select("_id").lean();
+  const dead = await BackupRun.find({ status: "running", _id: { $nin: alive.map((r) => r._id) } });
+  for (const r of dead) {
+    await Backup.updateMany(
+      { run: r._id, status: "running" },
+      { $set: { status: "failed", error: "Interrupted — the server restarted during the backup", finishedAt: new Date() } }
+    );
     r.status = "failed";
     r.finishedAt = new Date();
     await r.save();
+    console.error(`💾 backup ${r.slot}: interrupted — its process stopped (the server restarted); settled`);
   }
+  return dead.length;
 }
 
 /* ── When ────────────────────────────────────────────────────────────────── */
@@ -451,9 +484,13 @@ export function startBackupWorker() {
     }, Math.max(1000, wait));
   };
 
+  // At once, not after the minute below: whatever this server was running before it restarted is over.
+  setTimeout(() => {
+    settleDead().catch((e) => console.error("💾 backup settle failed:", e instanceof Error ? e.message : e));
+  }, deadAfterMs() + 1000).unref?.();
+
   setTimeout(async () => {
     try {
-      await settleInterrupted();
       const last = lastSlot();
       if (last && Date.now() - last.getTime() < 6 * HOUR && !(await BackupRun.exists({ slot: slotId(last) }))) {
         console.log(`💾 backup ${slotId(last)} was missed while the server was down — running it now`);
@@ -517,6 +554,7 @@ async function latestPerPortal(codes: string[]) {
 const staleHours = (good: IBackup | null, now: Date) => (good ? (now.getTime() - new Date(good.startedAt).getTime()) / HOUR : Infinity);
 
 export async function backupOverview() {
+  await settleDead();
   const portals = resolvePortals();
   const codes = portals.map((p) => p.code);
   const runs = await BackupRun.find({}).sort({ startedAt: -1 }).limit(20).lean();
@@ -563,7 +601,7 @@ export async function backupOverview() {
       keepDays: keepDays(),
       worker: env.BACKUP_WORKER !== "false",
     },
-    running: busy || runs.some((r) => r.status === "running" && now.getTime() - new Date(r.startedAt).getTime() < 3 * HOUR),
+    running: busy || !!(await BackupRun.exists(aliveFilter())),
     portals: portals.map((p) => {
       const l = byPortal.get(p.code);
       const mine = counted.filter((r) => r.portal === p.code);
@@ -605,6 +643,7 @@ export async function backupOverview() {
  * STALE_HOURS old — two runs a day, so older means one was missed.
  */
 export async function backupSummary() {
+  await settleDead();
   const portals = resolvePortals();
   const byPortal = await latestPerPortal(portals.map((p) => p.code));
   const now = new Date();
@@ -622,7 +661,7 @@ export async function backupSummary() {
   return {
     ready: storeMissing().length === 0,
     missing: storeMissing(),
-    running: busy || !!(await BackupRun.exists({ status: "running", startedAt: { $gte: new Date(now.getTime() - 3 * HOUR) } })),
+    running: busy || !!(await BackupRun.exists(aliveFilter())),
     portals: counted.length,
     healthy: counted.length - problems.length,
     problems,
@@ -635,8 +674,7 @@ export async function backupSummary() {
 
 /* ── Stop, Finish, Restart, Retry failed (2026-10-17) ────────────────────── */
 
-const runningRun = () =>
-  BackupRun.findOne({ status: "running", startedAt: { $gte: new Date(Date.now() - 3 * HOUR) } }).sort({ startedAt: -1 });
+const runningRun = () => BackupRun.findOne(aliveFilter()).sort({ startedAt: -1 });
 
 /**
  * Ask the running backup to stop: "now" drops the portal being copied, "after"
@@ -645,8 +683,16 @@ const runningRun = () =>
  * already asked for can still become a Stop, never the other way round.
  */
 export async function requestStop(by: string, mode: "now" | "after", restart = false) {
+  await settleDead();
   const run = await runningRun();
-  if (!run) throw err("No backup is running", 409);
+  if (!run) {
+    // Restart on a run whose process is gone: it was settled just now, so start afresh here.
+    if (restart) {
+      const started = await startManualRun(by);
+      return { slot: started.slot, stop: "now" as const, restart: true };
+    }
+    throw err("No backup is running", 409);
+  }
   const stop = mode === "now" || run.stop === "now" ? "now" : "after";
   await BackupRun.updateOne({ _id: run._id }, { $set: { stop, stopBy: by, ...(restart ? { restart: true } : {}) } });
   return { slot: run.slot, stop, restart: restart || !!run.restart };
@@ -674,8 +720,8 @@ export async function startManualRun(by: string, portals?: string[]) {
   const known = new Set(PORTALS.map((p) => p.code));
   const wanted = (portals ?? []).filter((c) => known.has(c));
   if (portals?.length && !wanted.length) throw err("No such portal", 400);
-  const recent = new Date(Date.now() - 3 * HOUR);
-  if (busy || (await BackupRun.exists({ status: "running", startedAt: { $gte: recent } }))) {
+  await settleDead();
+  if (busy || (await BackupRun.exists(aliveFilter()))) {
     throw err("A backup is already running — wait for it to finish", 409);
   }
   const slot = manualSlot();

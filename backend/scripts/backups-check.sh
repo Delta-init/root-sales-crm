@@ -83,6 +83,8 @@ export MEDIA_ERP_MONGODB_URI="$MONGO"                         # no database name
 export BACKUP_R2_ENDPOINT="http://127.0.0.1:$R2_PORT" BACKUP_R2_ACCOUNT_ID=""
 export BACKUP_R2_ACCESS_KEY_ID="e2e-key" BACKUP_R2_SECRET_ACCESS_KEY="e2e-secret" BACKUP_R2_BUCKET="delta-backups-e2e"
 export BACKUP_TIMES="02:30,13:30" BACKUP_KEEP_DAYS="30" BACKUP_WORKER=false BACKUP_ALERT_EMAIL=""
+# A run with no "still alive" mark for 8 s is dead here (2 min in production), so the check can wait it out.
+export BACKUP_DEAD_AFTER_SECONDS=8
 export E2E_API_PORT="$API_PORT" E2E_R2_DIR="$WORK/r2/delta-backups-e2e" E2E_OUT="$WORK/out" E2E_MONGO="$MONGO"
 
 # From the scratch directory, so dotenv finds no .env to fill the gaps with.

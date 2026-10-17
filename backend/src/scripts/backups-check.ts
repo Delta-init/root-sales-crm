@@ -329,6 +329,39 @@ async function main() {
     (await Audit.countDocuments({ action: { $in: ["backup_stopped", "backup_finish_requested", "backup_restarted"] } })) === 3
       && (await Audit.countDocuments({ action: "backup_run", detail: "retry: Draw CRM" })) === 1);
 
+  step("A backup whose server restarted under it");
+  const ago = (ms: number) => new Date(Date.now() - ms);
+  const ghost = async (slot: string) => {
+    const r = await BackupRun.create({ slot, trigger: "manual", triggeredBy: "root@backups-e2e.test", status: "running", heartbeatAt: ago(60_000), startedAt: ago(60_000) });
+    await Backup.create({ run: r._id, portal: "hrms", label: "HRMS", database: "hrms-bk-e2e", status: "running", startedAt: ago(50_000) });
+    return String(r._id);
+  };
+  const g1 = await ghost("ghost one");
+  const seen = await overview();
+  check("not shown as running — nobody is working on it", seen.running === false, show(seen.runs[0]));
+  const g1Run = seen.runs.find((r: Json) => r.id === g1);
+  check("settled: the run failed, its portal Interrupted", g1Run?.status === "failed" && /Interrupted — the server restarted/.test(g1Run.backups[0]?.error ?? ""), show(g1Run));
+  check("the summary agrees", (await call("GET", "/backups/summary")).body?.data?.running === false);
+  await ghost("ghost two");
+  const fresh = await call("POST", "/backups/run", root, { portals: ["hrms"] });
+  check("Back up now is not blocked by it", fresh.status === 202, show(fresh));
+  const live = await waitFor("that backup to end", (o) => !o.running, 60_000);
+  check("…and it ran", live.runs[0].backups[0]?.portal === "hrms" && live.runs[0].backups[0].status === "complete");
+  const g3 = await ghost("ghost three");
+  const rs = await call("POST", "/backups/restart");
+  check("Restart on it starts a fresh backup (202)", rs.status === 202 && rs.body?.data?.restart === true, show(rs));
+  const after3 = await waitFor("the fresh backup to end", (o) => !o.running && o.runs[0].trigger === "manual" && o.runs[0].backups.length === 10, 90_000);
+  check("…the dead one settled, a new run from the first portal", after3.runs.find((r: Json) => r.id === g3)?.status === "failed" && after3.runs[0].backups[0].portal === "delta");
+  check("Stop on it: nothing is running (409)", (await (async () => { await ghost("ghost four"); return (await call("POST", "/backups/stop")).status; })()) === 409);
+  // A live backup longer than the 8-second window stays alive: Draw waits 15 s on its dead server.
+  await call("POST", "/backups/run");
+  await waitFor("Draw to start", drawRunning);
+  await sleep(10_000);
+  const still = await overview();
+  check("a live backup past the dead window is still running (its mark keeps it alive)", still.running === true && still.runs[0].status === "running", show(still.runs[0]?.status));
+  await call("POST", "/backups/stop");
+  await waitFor("it to stop", (o) => !o.running);
+
   console.log(`\n${checks - failures}/${checks} checks passed`);
   await mongoose.disconnect();
   process.exit(failures ? 1 : 0);
