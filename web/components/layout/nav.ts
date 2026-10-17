@@ -8,7 +8,7 @@
  */
 import type { LucideIcon } from "lucide-react";
 import {
-  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, DatabaseBackup, Headset, Inbox, LayoutGrid, Phone, Shuffle, Users2,
+  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, DatabaseBackup, FileBarChart, Headset, Inbox, LayoutGrid, Phone, Shuffle, Users2,
 } from "lucide-react";
 
 export interface NavLink {
@@ -33,8 +33,8 @@ export const NAV: NavItem[] = [
   // What is waiting in every portal, and for whom — each portal's sidebar
   // counts on one page. Root admins only: it is everybody's queue at once.
   { href: "/pending", label: "Pending", icon: Inbox, rootOnly: true },
-  // Tetra Commission's CSEs: students, deposits, commission and what waits on each (2026-10-11).
-  { href: "/cses", label: "CSEs", icon: Headset, rootOnly: true },
+  // What got done in a period, a tab per portal like Pending (2026-10-17). Root admins only.
+  { href: "/portal-reports", label: "Reports", icon: FileBarChart, rootOnly: true },
   /*
    * Sales, root admins only.
    *
@@ -54,6 +54,8 @@ export const NAV: NavItem[] = [
       { href: "/reports", label: "Group report", icon: BarChart3, rootOnly: true },
       // Everyone in the sales CRMs, each with their own page (2026-10-11).
       { href: "/salespeople", label: "Salespeople", icon: Users2, rootOnly: true },
+      // Tetra Commission's CSEs: students, deposits, commission and what waits on each (2026-10-11) — in Sales since 2026-10-17.
+      { href: "/cses", label: "CSEs", icon: Headset, rootOnly: true },
       // Every portal's 3CX calls and their recordings (2026-10-14).
       { href: "/calls", label: "3CX calls", icon: Phone, rootOnly: true },
       { href: "/tracker", label: "Daily tracker", icon: ClipboardList, rootOnly: true },

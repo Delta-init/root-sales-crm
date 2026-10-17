@@ -51,3 +51,26 @@ export const getCse = async (userId: string, p: Period) => {
  * (GET /api/v1/service/cs-pending). Nothing is changed.
  */
 export const csPending = async () => ({ ...(await ask<Record<string, unknown>>("/cs-pending", "it has no CS pending list yet")), studentLink: studentLink() });
+
+/*
+ * Reports → CS portal (the user, 2026-10-17): what the CSs did in a period —
+ * revenue, follow-ups and contacted, calls, program scheduling, onboarded
+ * clients, bonuses, commission, course upgrades — per CS, team and month, as
+ * Tetra Commission's own Reports section counts them (GET /service/cs-report).
+ * The period arrives as instants (the range picker's) and goes as Gulf days;
+ * none is all time. Read-only.
+ */
+const gulfDay = (iso: string) => new Date(Date.parse(iso) + 4 * 3_600_000).toISOString().slice(0, 10);
+export const csReport = async (q: Record<string, unknown>) => {
+  const from = typeof q.from === "string" && q.from ? q.from : "", to = typeof q.to === "string" && q.to ? q.to : "";
+  for (const v of [from, to]) if (v && !Number.isFinite(Date.parse(v))) throw Object.assign(new Error("from / to must be dates"), { statusCode: 400 });
+  const params = new URLSearchParams();
+  if (from || to) {
+    params.set("period", "custom");
+    params.set("from", gulfDay(from || to));
+    params.set("to", gulfDay(to || new Date().toISOString()));
+  } else params.set("period", "all");
+  if (q.location === "dubai" || q.location === "bangalore") params.set("location", q.location);
+  for (const k of ["team", "cs"] as const) if (typeof q[k] === "string" && /^[0-9a-f]{24}$/i.test(q[k] as string)) params.set(k, q[k] as string);
+  return { ...(await ask<Record<string, unknown>>(`/cs-report?${params}`, "it has no CS report yet")), studentLink: studentLink() };
+};

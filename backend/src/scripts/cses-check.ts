@@ -9,6 +9,9 @@
  *   Case 3  errors       bad dates, an id that is not one, a CSE it does not know
  *   Case 4  permission   no session, an admin who is not a root admin
  *
+ * And Reports → CS portal (GET /portal-reports/cs, 2026-10-17): the period as
+ * Gulf days to Tetra Commission's /service/cs-report, the filters passed on.
+ *
  * And Pending → CS portal (GET /pending/cs): what waits on each CS, as Tetra
  * Commission's /service/cs-pending says, with the student link (2026-10-17).
  *
@@ -61,6 +64,9 @@ const stand = createServer((req, res) => {
       summary: figures, followups: [{ studentId: "s1", student: "Asha", code: "STU-1", stage: "Interested", title: "Call", due: "2026-10-11", overdue: false }],
       dues: [], bonus: [], notOnboarded: [], deposits: [], commission: [] } });
   }
+  if (url.pathname === "/commission/api/v1/service/cs-report") {
+    return send(200, { success: true, data: { period: url.searchParams.get("period"), revenue: { total: { deposit_usd: 1500 }, people: [], teams: [], months: [], rows: [] } } });
+  }
   if (url.pathname === "/commission/api/v1/service/cs-pending") {
     return send(200, { success: true, data: { today: "2026-10-17", totals: { onboarding: 2, onboarding_late: 1, bonus: 1, total: 3 },
       people: [{ id: CS, name: "Cee One", email: "cs1@tetra.test", role: "cs", active: true, location: "dubai", counts: { onboarding: 2, onboarding_late: 1, bonus: 1 }, total: 3 }],
@@ -98,6 +104,16 @@ async function main() {
   check("…asked of its /service/cs-pending with the portal secret, with the student link", seen.at(-1)?.path === "/commission/api/v1/service/cs-pending"
     && seen.at(-1)?.secret === "cses-e2e-commission-secret" && r.body?.data?.studentLink === "https://tetra.example.test/StudentDetail?id=", show(seen.at(-1)));
 
+  r = await call("GET", "/portal-reports/cs?from=2026-09-30T20:00:00.000Z&to=2026-10-31T19:59:59.999Z&location=bangalore&team=6ac000000000000000000009&cs=nope", root);
+  const rp = new URLSearchParams(seen.at(-1)?.search ?? "");
+  check("Reports → CS portal: Tetra Commission's report, with the student link", r.status === 200 && r.body?.data?.revenue?.total?.deposit_usd === 1500
+    && r.body.data.studentLink === "https://tetra.example.test/StudentDetail?id=" && seen.at(-1)?.path === "/commission/api/v1/service/cs-report", show(r.body));
+  check("…the period as Gulf days, location and team passed, a bad cs id dropped", rp.get("period") === "custom" && rp.get("from") === "2026-10-01" && rp.get("to") === "2026-10-31"
+    && rp.get("location") === "bangalore" && rp.get("team") === "6ac000000000000000000009" && !rp.has("cs"), seen.at(-1)?.search);
+  await call("GET", "/portal-reports/cs", root);
+  check("…no period: all time", new URLSearchParams(seen.at(-1)?.search ?? "").get("period") === "all", seen.at(-1)?.search);
+  check("…a date that is not one: 400", (await call("GET", "/portal-reports/cs?from=whenever", root)).status === 400);
+
   r = await call("GET", `/cses/${CS}?from=2026-10-01&to=2026-10-31`, root);
   check("one CSE's page: the figures and the lists", r.status === 200 && r.body?.data?.person?.name === "Cee One" && r.body.data.followups[0].student === "Asha"
     && r.body.data.summary.followupsToday === 1, show(r.body));
@@ -111,6 +127,8 @@ async function main() {
   oldServer = true;
   r = await call("GET", "/cses", root);
   check("a Tetra Commission from before this page: says its server needs updating", r.status === 409 && /needs updating/.test(r.body?.message ?? ""), show(r.body));
+  r = await call("GET", "/portal-reports/cs", root);
+  check("…and the Reports tab says so too", r.status === 409 && /no CS report yet/.test(r.body?.message ?? ""), show(r.body));
   r = await call("GET", "/pending/cs", root);
   check("…and the CS portal tab says so too", r.status === 409 && /needs updating — it has no CS pending list yet/.test(r.body?.message ?? ""), show(r.body));
   oldServer = false;
@@ -125,6 +143,7 @@ async function main() {
   step("Case 4 — root admins only");
   check("no session: 401", (await call("GET", "/cses")).status === 401 && (await call("GET", `/cses/${CS}`)).status === 401);
   check("an admin who is not a root admin: 403", (await call("GET", "/cses", member)).status === 403);
+  check("Reports too: 401 with no session, 403 for a non-root admin", (await call("GET", "/portal-reports/cs")).status === 401 && (await call("GET", "/portal-reports/cs", member)).status === 403);
   check("the CS portal tab too: 401 with no session, 403 for a non-root admin", (await call("GET", "/pending/cs")).status === 401 && (await call("GET", "/pending/cs", member)).status === 403);
 
   console.log(`\n${checks - failures}/${checks} checks passed`);

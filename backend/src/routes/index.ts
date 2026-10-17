@@ -10,6 +10,7 @@ import serviceRoutes from "./serviceRoutes.js";
 import mentorRoutes from "./mentorRoutes.js";
 import taskRoutes from "./taskRoutes.js";
 import trafficRoutes from "./trafficRoutes.js";
+import portalReportRoutes from "./portalReportRoutes.js";
 import pendingRoutes from "./pendingRoutes.js";
 import salespersonRoutes from "./salespersonRoutes.js";
 import callRoutes from "./callRoutes.js";
@@ -31,6 +32,8 @@ router.use("/mentors", mentorRoutes);
 router.use("/tasks", taskRoutes);
 router.use("/traffic", trafficRoutes);
 router.use("/pending", pendingRoutes);
+// Reports, a tab per portal — what got done in a period (2026-10-17).
+router.use("/portal-reports", portalReportRoutes);
 router.use("/salespeople", salespersonRoutes);
 // Every portal's 3CX calls and recordings (2026-10-14).
 router.use("/calls", callRoutes);
