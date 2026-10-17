@@ -148,6 +148,20 @@ async function main() {
   check("the Sales CRM card: last good backup, 1 kept", portalCard.lastGood?.id === row("delta").id && portalCard.kept === 1 && portalCard.keptBytes === row("delta").bytes);
   check("Draw's card: last is the failure, no good one", after.portals.find((p: Json) => p.code === "draw").last?.status === "failed" && !after.portals.find((p: Json) => p.code === "draw").lastGood);
 
+  step("Counted: the last 30 days, each portal, the failures");
+  check("1 run, 7 worked, 1 failed, 2 not backed up", show(after.totals.window) === show({ days: 30, runs: 1, ok: 7, failed: 1, skipped: 2 }), show(after.totals.window));
+  check("7 backups stored", after.totals.stored.count === 7 && after.totals.stored.bytes > 0, show(after.totals.stored));
+  const deltaCard = after.portals.find((p: Json) => p.code === "delta");
+  check("the Sales CRM: 1 of 1 worked, a dot for it", show(deltaCard.window) === show({ ok: 1, failed: 0, skipped: 0 }) && deltaCard.history.length === 1 && deltaCard.history[0].status === "complete");
+  check("the failures: Draw, Remote, Media ERP, with why",
+    show(after.failures.map((f: Json) => f.label).sort()) === show(["Draw CRM", "Media ERP", "Remote CRM"]) && after.failures.every((f: Json) => f.error), show(after.failures));
+  check("…no password in them", !/secretpw|mongodb:/.test(JSON.stringify(after.failures)));
+  const sum1 = (await call("GET", "/backups/summary")).body?.data;
+  check("Pending's line: 7 of 10 portals fine", sum1?.ready === true && sum1.portals === 10 && sum1.healthy === 7, show(sum1));
+  check("…naming the 3 that are not, and why", show(sum1.problems.map((p: Json) => p.code).sort()) === show(["draw", "media-erp", "remote"]) && /not set up/i.test(sum1.problems.find((p: Json) => p.code === "remote").reason), show(sum1.problems));
+  check("…no scheduled run yet, the next one named", sum1.lastScheduled === null && !!sum1.next);
+  check("…root admins only", (await call("GET", "/backups/summary", member)).status === 403);
+
   step("In R2");
   const deltaKey = `delta/${row("delta").file}`;
   const inR2 = join(R2_DIR, deltaKey);
@@ -209,6 +223,9 @@ async function main() {
   const hrmsKeys = [row("hrms").file, (a ?? b)!.rows[0].key.split("/").pop()];
   check("two backups of a portal in the same minute are two files", hrmsKeys[0] !== hrmsKeys[1] && hrmsKeys.every((f) => existsSync(join(R2_DIR, `hrms/${f}`))), show(hrmsKeys));
 
+  const sum2 = (await call("GET", "/backups/summary")).body?.data;
+  check("Pending's line names the last scheduled run", sum2?.lastScheduled?.slot === "2026-10-17 13:30" && sum2.lastScheduled.ok === 1 && sum2.lastScheduled.total === 1, show(sum2?.lastScheduled));
+
   step("The times (Dubai)");
   const iso = (d: Date | null) => d?.toISOString() ?? "";
   check("13:00 Dubai → next 13:30", iso(svc.nextSlot(new Date("2026-10-17T09:00:00Z"))) === "2026-10-17T09:30:00.000Z");
@@ -217,9 +234,10 @@ async function main() {
   check("the slot's name is Dubai time", svc.slotId(new Date("2026-10-17T22:30:00Z")) === "2026-10-18 02:30");
 
   step("After 30 days");
-  const { Backup } = await import("../models/Backup.js");
+  const { Backup, BackupRun } = await import("../models/Backup.js");
   const old = new Date(Date.now() - 40 * 86_400_000);
   await Backup.updateMany({ run: new mongoose.Types.ObjectId(String(run1.id)) }, { $set: { startedAt: old } });
+  await BackupRun.updateOne({ _id: new mongoose.Types.ObjectId(String(run1.id)) }, { $set: { startedAt: old } });
   const second = await call("POST", "/backups/run", root, { portals: ["delta"] });
   check("one portal backed up on its own", second.status === 202);
   const pruned = await waitIdle();
@@ -230,6 +248,11 @@ async function main() {
   check("…its row stays as history", !!oldRun.backups.find((x: Json) => x.portal === "delta"));
   check("the LMS's old one stays — still its newest good backup", existsSync(join(R2_DIR, `lms/${row("lms").file}`)) && oldRun.backups.find((x: Json) => x.portal === "lms").expired === false);
   check("HRMS: the old one left, the newer one from the same minute stayed", !existsSync(join(R2_DIR, `hrms/${hrmsKeys[0]}`)) && existsSync(join(R2_DIR, `hrms/${hrmsKeys[1]}`)));
+  check("40-day-old backups are out of the 30-day counts", pruned.totals.window.runs === 2 && pruned.totals.window.failed === 0, show(pruned.totals.window));
+  const sum3 = (await call("GET", "/backups/summary")).body?.data;
+  const lmsProblem = sum3.problems.find((p: Json) => p.code === "lms");
+  check("the LMS, last good 40 days ago, is flagged as missed", /No good backup for \d+ hours/.test(lmsProblem?.reason ?? ""), show(sum3.problems));
+  check("…the Sales CRM, backed up just now, is not", !sum3.problems.some((p: Json) => p.code === "delta"));
   check("a removed one has no link (410)", (await call("GET", `/backups/${row("delta").id}/link`)).status === 410);
 
   step("The audit log");

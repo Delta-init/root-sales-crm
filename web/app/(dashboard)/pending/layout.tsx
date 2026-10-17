@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
 import { Inbox } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { BackupStatusCard } from "@/components/backups/BackupStatusCard";
 
 /*
  * Pending, a page per tab (the user, 2026-10-17: "add separate tab view for
@@ -34,6 +35,8 @@ export default function PendingLayout({ children }: { children: React.ReactNode 
           What is waiting in each portal, and for whom — the counts each portal&apos;s own sidebar shows.
         </p>
       </motion.div>
+      {/* Every portal backed up or not, on every Pending tab (2026-10-17). */}
+      <BackupStatusCard />
       {/* Scrolls sideways on a phone rather than wrapping into a block of buttons. */}
       <nav className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0" aria-label="Pending tabs">
         <div className="flex w-max gap-1 border-b border-border/60">

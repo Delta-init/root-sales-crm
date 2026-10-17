@@ -1,5 +1,5 @@
 import type { Response, NextFunction } from "express";
-import { backupOverview, downloadLink, startManualRun } from "../services/backupService.js";
+import { backupOverview, backupSummary, downloadLink, startManualRun } from "../services/backupService.js";
 import { record } from "../services/auditService.js";
 import { sendSuccess } from "../utils/response.js";
 import type { AuthenticatedRequest } from "../types/index.js";
@@ -8,6 +8,15 @@ import type { AuthenticatedRequest } from "../types/index.js";
 export const overview = async (_req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     sendSuccess(res, "Backups", await backupOverview());
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** GET /backups/summary — every portal backed up or not, in one line (the card on Pending). */
+export const summary = async (_req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    sendSuccess(res, "Backups summary", await backupSummary());
   } catch (error) {
     next(error);
   }

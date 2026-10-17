@@ -36,9 +36,6 @@ const ago = (iso: string) => {
 };
 const secs = (ms: number) => (ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Math.max(1, Math.round(ms / 1000))} s`);
 
-/** Two runs a day: a good copy older than this means one was missed. */
-const STALE_HOURS = 14;
-
 const STATUS: Record<BackupStatus, { label: string; variant: "success" | "destructive" | "warning" | "secondary" }> = {
   complete: { label: "Backed up", variant: "success" },
   failed: { label: "Failed", variant: "destructive" },
@@ -129,11 +126,23 @@ export default function BackupsPage() {
         </Card>
       )}
 
+      {o?.totals && (
+        <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Tile label="Stored now" value={o.totals.stored.count.toLocaleString("en-US")} sub={size(o.totals.stored.bytes)} />
+          <Tile label={`Backed up · ${o.totals.window.days} days`} value={o.totals.window.ok.toLocaleString("en-US")}
+            sub={`in ${o.totals.window.runs} run${o.totals.window.runs === 1 ? "" : "s"}`} tone="good" />
+          <Tile label={`Failed · ${o.totals.window.days} days`} value={o.totals.window.failed.toLocaleString("en-US")}
+            sub="a portal's server or R2 did not answer" tone={o.totals.window.failed ? "bad" : undefined} />
+          <Tile label={`Not backed up · ${o.totals.window.days} days`} value={o.totals.window.skipped.toLocaleString("en-US")}
+            sub="a portal not set up" tone={o.totals.window.skipped ? "warn" : undefined} />
+        </section>
+      )}
+
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {q.isLoading && [0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-40" />)}
         {o?.portals.map((p) => {
           const good = p.lastGood;
-          const stale = !good || (Date.now() - new Date(good.startedAt).getTime()) / 3_600_000 > STALE_HOURS;
+          const stale = !good || (Date.now() - new Date(good.startedAt).getTime()) / 3_600_000 > o.staleHours;
           const last = p.last;
           return (
             <Card key={p.code} className={cn(stale && o.store.ready && "border-destructive/40")}>
@@ -163,6 +172,23 @@ export default function BackupsPage() {
                 ) : (
                   !p.problem && <p className="text-muted-foreground">No backup yet.</p>
                 )}
+                {p.history.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-muted-foreground">
+                      {p.window.ok} of {p.history.length} worked in {o.totals.window.days} days
+                      {p.window.failed > 0 && <span className="text-destructive"> · {p.window.failed} failed</span>}
+                      {p.window.skipped > 0 && <span className="text-amber-500"> · {p.window.skipped} not backed up</span>}
+                    </p>
+                    {/* A dot per backup, oldest first: a portal that keeps failing is a red streak. */}
+                    <div className="flex flex-wrap gap-1" aria-label={`${p.label}: each backup in ${o.totals.window.days} days`}>
+                      {p.history.map((h) => (
+                        <span key={h.id} title={`${when(h.startedAt)} — ${STATUS[h.status].label}${h.error ? `: ${h.error}` : ""}`}
+                          className={cn("h-2 w-2 rounded-full",
+                            h.status === "complete" ? "bg-emerald-500" : h.status === "failed" ? "bg-destructive" : "bg-amber-500")} />
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-center justify-between gap-2 pt-1">
                   <span className="text-xs text-muted-foreground">{p.kept} kept · {size(p.keptBytes)}</span>
                   <div className="flex gap-2">
@@ -181,6 +207,41 @@ export default function BackupsPage() {
           );
         })}
       </section>
+
+      {o && (
+        <section className="space-y-3">
+          <h3 className="text-lg font-semibold">Failures · {o.totals.window.days} days</h3>
+          {o.failures.length === 0 ? (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <CheckCircle2 className="h-4 w-4 text-emerald-500" /> Nothing failed in {o.totals.window.days} days.
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border bg-card">
+              <table className="w-full min-w-[560px] text-sm">
+                <thead className="text-left text-xs text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-2 font-medium">When (Dubai)</th>
+                    <th className="px-4 py-2 font-medium">Portal</th>
+                    <th className="px-4 py-2 font-medium">What happened</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {o.failures.map((f) => (
+                    <tr key={f.id} className="border-t align-top">
+                      <td className="whitespace-nowrap px-4 py-2 tabular-nums">{when(f.startedAt)}</td>
+                      <td className="whitespace-nowrap px-4 py-2">{f.label}</td>
+                      <td className="px-4 py-2">
+                        <Badge variant={STATUS[f.status].variant}>{STATUS[f.status].label}</Badge>
+                        <span className="ml-2 text-muted-foreground">{f.error}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="space-y-3">
         <h3 className="text-lg font-semibold">Recent backups</h3>
@@ -254,5 +315,18 @@ bun --no-env-file src/scripts/backup-restore.ts <file> --to 'mongodb://…/lms_r
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function Tile({ label, value, sub, tone }: { label: string; value: string; sub: string; tone?: "good" | "bad" | "warn" }) {
+  return (
+    <Card>
+      <CardContent className="pt-5">
+        <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+        <p className={cn("mt-1 text-2xl font-bold tabular-nums",
+          tone === "good" && "text-emerald-500", tone === "bad" && "text-destructive", tone === "warn" && "text-amber-500")}>{value}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{sub}</p>
+      </CardContent>
+    </Card>
   );
 }

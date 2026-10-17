@@ -416,14 +416,14 @@ const publicRow = (r: IBackup) => ({
   file: r.key ? r.key.split("/").pop() : "",
 });
 
-export async function backupOverview() {
-  const portals = resolvePortals();
-  const codes = portals.map((p) => p.code);
-  const runs = await BackupRun.find({}).sort({ startedAt: -1 }).limit(20).lean();
-  const rows = await Backup.find({ run: { $in: runs.map((r) => r._id) } }).lean();
-  const byRun = new Map<string, IBackup[]>();
-  for (const r of rows) byRun.set(String(r.run), [...(byRun.get(String(r.run)) ?? []), r as IBackup]);
+/** Two runs a day: a portal whose last good backup is older than this missed one. */
+export const STALE_HOURS = 14;
 
+/** Not a backup that went wrong: the portal shares a database backed up under another name. */
+const notAProblem = (r: Pick<IBackup, "status" | "error">) => r.status === "skipped" && r.error.startsWith("Same database");
+
+/** Each portal's last backup, its last good one, and what is kept of it. */
+async function latestPerPortal(codes: string[]) {
   const latest = await Backup.aggregate<{ _id: string; last: IBackup; good: IBackup | null; kept: number; keptBytes: number }>([
     { $match: { portal: { $in: codes } } },
     { $sort: { startedAt: -1 } },
@@ -437,10 +437,48 @@ export async function backupOverview() {
       },
     },
   ]);
-  const byPortal = new Map(latest.map((l) => [l._id, l]));
+  return new Map(
+    latest.map((l) => [l._id, { last: l.last, good: (l.good as unknown as { row?: IBackup } | null)?.row ?? null, kept: l.kept, keptBytes: l.keptBytes }])
+  );
+}
+
+const staleHours = (good: IBackup | null, now: Date) => (good ? (now.getTime() - new Date(good.startedAt).getTime()) / HOUR : Infinity);
+
+export async function backupOverview() {
+  const portals = resolvePortals();
+  const codes = portals.map((p) => p.code);
+  const runs = await BackupRun.find({}).sort({ startedAt: -1 }).limit(20).lean();
+  const rows = await Backup.find({ run: { $in: runs.map((r) => r._id) } }).lean();
+  const byRun = new Map<string, IBackup[]>();
+  for (const r of rows) byRun.set(String(r.run), [...(byRun.get(String(r.run)) ?? []), r as IBackup]);
+  const byPortal = await latestPerPortal(codes);
   const now = new Date();
 
+  // The keep window, counted: how many backups worked, failed, could not run.
+  const since = new Date(now.getTime() - keepDays() * 24 * HOUR);
+  const recent = (await Backup.find({ portal: { $in: codes }, startedAt: { $gte: since }, status: { $ne: "running" } })
+    .select("portal label status error startedAt")
+    .sort({ startedAt: 1 })
+    .lean()) as IBackup[];
+  const counted = recent.filter((r) => !notAProblem(r));
+  const tally = (list: IBackup[]) => ({
+    ok: list.filter((r) => r.status === "complete").length,
+    failed: list.filter((r) => r.status === "failed").length,
+    skipped: list.filter((r) => r.status === "skipped").length,
+  });
+  const kept = [...byPortal.values()];
+
   return {
+    totals: {
+      stored: { count: kept.reduce((n, l) => n + l.kept, 0), bytes: kept.reduce((n, l) => n + l.keptBytes, 0) },
+      window: { days: keepDays(), runs: await BackupRun.countDocuments({ startedAt: { $gte: since } }), ...tally(counted) },
+    },
+    staleHours: STALE_HOURS,
+    failures: counted
+      .filter((r) => r.status !== "complete")
+      .reverse()
+      .slice(0, 100)
+      .map((r) => ({ id: String(r._id), portal: r.portal, label: r.label, status: r.status, error: r.error, startedAt: r.startedAt })),
     store: { ready: storeMissing().length === 0, missing: storeMissing(), bucket: backupStore.bucket() },
     schedule: {
       times: backupTimes().map((t) => `${String(t.h).padStart(2, "0")}:${String(t.m).padStart(2, "0")}`),
@@ -452,16 +490,19 @@ export async function backupOverview() {
     running: busy || runs.some((r) => r.status === "running" && now.getTime() - new Date(r.startedAt).getTime() < 3 * HOUR),
     portals: portals.map((p) => {
       const l = byPortal.get(p.code);
-      const good = (l?.good as unknown as { row?: IBackup } | null)?.row ?? null;
+      const mine = counted.filter((r) => r.portal === p.code);
       return {
         code: p.code,
         label: p.label,
         database: p.database,
         problem: p.problem,
         last: l?.last ? publicRow(l.last) : null,
-        lastGood: good ? publicRow(good) : null,
+        lastGood: l?.good ? publicRow(l.good) : null,
         kept: l?.kept ?? 0,
         keptBytes: l?.keptBytes ?? 0,
+        window: tally(mine),
+        /** Every backup in the window, oldest first: a dot each on the page. */
+        history: mine.map((r) => ({ id: String(r._id), status: r.status, startedAt: r.startedAt, error: r.error })),
       };
     }),
     runs: runs.map((r) => ({
@@ -476,6 +517,40 @@ export async function backupOverview() {
         .sort((a, b) => codes.indexOf(a.portal) - codes.indexOf(b.portal))
         .map(publicRow),
     })),
+  };
+}
+
+/**
+ * One line's worth, for the card on Pending: is every portal backed up, and if
+ * not, which and why. A portal is fine when its last good backup is under
+ * STALE_HOURS old — two runs a day, so older means one was missed.
+ */
+export async function backupSummary() {
+  const portals = resolvePortals();
+  const byPortal = await latestPerPortal(portals.map((p) => p.code));
+  const now = new Date();
+  const lastScheduled = await BackupRun.findOne({ trigger: "scheduled", status: { $ne: "running" } }).sort({ startedAt: -1 }).lean();
+  const scheduledRows = lastScheduled ? ((await Backup.find({ run: lastScheduled._id }).lean()) as IBackup[]).filter((r) => !notAProblem(r)) : [];
+  const counted = portals.filter((p) => !p.problem.startsWith("Same database"));
+  const problems = counted.flatMap((p) => {
+    const l = byPortal.get(p.code);
+    if (staleHours(l?.good ?? null, now) <= STALE_HOURS) return [];
+    const why = p.problem
+      || (l?.last && l.last.status !== "complete" ? l.last.error : "")
+      || (l?.good ? `No good backup for ${Math.round(staleHours(l.good, now))} hours` : "Never backed up");
+    return [{ code: p.code, label: p.label, reason: why }];
+  });
+  return {
+    ready: storeMissing().length === 0,
+    missing: storeMissing(),
+    running: busy || !!(await BackupRun.exists({ status: "running", startedAt: { $gte: new Date(now.getTime() - 3 * HOUR) } })),
+    portals: counted.length,
+    healthy: counted.length - problems.length,
+    problems,
+    lastScheduled: lastScheduled
+      ? { slot: lastScheduled.slot, finishedAt: lastScheduled.finishedAt, ok: scheduledRows.filter((r) => r.status === "complete").length, total: scheduledRows.length }
+      : null,
+    next: nextSlot(now),
   };
 }
 

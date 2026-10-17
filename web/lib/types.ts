@@ -948,7 +948,25 @@ export interface BackupRow {
   file: string;
 }
 
+export interface BackupTally {
+  ok: number;
+  failed: number;
+  skipped: number;
+}
+
+export interface BackupFailure {
+  id: string;
+  portal: string;
+  label: string;
+  status: BackupStatus;
+  error: string;
+  startedAt: string;
+}
+
 export interface BackupsOverview {
+  totals: { stored: { count: number; bytes: number }; window: BackupTally & { days: number; runs: number } };
+  staleHours: number;
+  failures: BackupFailure[];
   store: { ready: boolean; missing: string[]; bucket: string };
   schedule: { times: string[]; timezone: string; next: string | null; keepDays: number; worker: boolean };
   running: boolean;
@@ -961,6 +979,8 @@ export interface BackupsOverview {
     lastGood: BackupRow | null;
     kept: number;
     keptBytes: number;
+    window: BackupTally;
+    history: { id: string; status: BackupStatus; startedAt: string; error: string }[];
   }[];
   runs: {
     id: string;
@@ -972,4 +992,16 @@ export interface BackupsOverview {
     finishedAt: string | null;
     backups: BackupRow[];
   }[];
+}
+
+/** The one line on Pending: is every portal backed up. */
+export interface BackupsSummary {
+  ready: boolean;
+  missing: string[];
+  running: boolean;
+  portals: number;
+  healthy: number;
+  problems: { code: string; label: string; reason: string }[];
+  lastScheduled: { slot: string; finishedAt: string | null; ok: number; total: number } | null;
+  next: string | null;
 }
