@@ -21,7 +21,8 @@ import { ReportBody, n0, usd, aed, pct, when, type Group, type Row, type Section
  * section counts them (GET /service/cs-report): a row for whoever it counts
  * for, their team and its location, and by month (Gulf days). Each section has
  * total cards, every CS's / team's / month's figures, and the rows behind
- * them; a CS opens their own. Root admins only; read-only.
+ * them; a CS opens their own. All money in AED (2026-10-17) — only a bonus
+ * shows its USD, beside the AED paid. Root admins only; read-only.
  */
 
 type SectionKey = "revenue" | "followups" | "calls" | "programs" | "onboarded" | "bonus" | "commission" | "upgrades";
@@ -37,22 +38,28 @@ const STAGE: Record<string, { label: string; cls: string }> = {
 };
 const csCell = (r: Row) => <div key="cs"><div>{r.cs}</div><div className="text-xs text-muted-foreground">{r.team}{r.location === "bangalore" ? " · Bangalore" : ""}</div></div>;
 
+/* All in AED (the user, 2026-10-17) — and from a Tetra Commission before it sent AED, its USD at the portal's 3.67. */
+const AED_PER_USD = 3.67;
+const withdrawalAed = (t: Record<string, number>) => t.withdrawal_aed ?? (t.withdrawal_usd ?? 0) * AED_PER_USD;
+const netAed = (t: Record<string, number>) => t.net_aed ?? (t.deposit_aed ?? 0) - withdrawalAed(t);
+const commissionAed = (t: Record<string, number>) => t.aed ?? (t.usd ?? 0) * AED_PER_USD;
+
 const SECTIONS: Section<SectionKey>[] = [
   {
     key: "revenue", label: "Revenue", icon: Wallet, accent: "emerald",
-    headline: (t) => usd(t.deposit_usd), headlineHint: (t) => `${n0(t.deposits)} deposits · net ${usd(t.net_usd)}`,
+    headline: (t) => aed(t.deposit_aed), headlineHint: (t) => `${n0(t.deposits)} deposits · net ${aed(netAed(t))}`,
     cards: (t) => [
-      { title: "Deposits", value: usd(t.deposit_usd), hint: `${n0(t.deposits)} approved · ${aed(t.deposit_aed)}` },
-      { title: "Withdrawals", value: usd(t.withdrawal_usd), hint: `${n0(t.withdrawals)} approved` },
-      { title: "Net (deposits − withdrawals)", value: usd(t.net_usd), alert: (t.net_usd ?? 0) < 0 },
+      { title: "Deposits", value: aed(t.deposit_aed), hint: `${n0(t.deposits)} approved` },
+      { title: "Withdrawals", value: aed(withdrawalAed(t)), hint: `${n0(t.withdrawals)} approved` },
+      { title: "Net (deposits − withdrawals)", value: aed(netAed(t)), alert: netAed(t) < 0 },
       { title: "Course payments", value: aed(t.course_payment_aed), hint: `${n0(t.course_payments)} approved by finance` },
     ],
-    cols: [{ key: "deposits", label: "Deposits" }, { key: "deposit_usd", label: "Deposit USD", fmt: "usd" }, { key: "deposit_aed", label: "Deposit AED", fmt: "aed" },
-      { key: "withdrawals", label: "Withdrawals" }, { key: "withdrawal_usd", label: "Withdrawn USD", fmt: "usd" }, { key: "net_usd", label: "Net USD", fmt: "usd" },
+    cols: [{ key: "deposits", label: "Deposits" }, { key: "deposit_aed", label: "Deposit AED", fmt: "aed" },
+      { key: "withdrawals", label: "Withdrawals" }, { key: "withdrawal_aed", label: "Withdrawn AED", fmt: "aed" }, { key: "net_aed", label: "Net AED", fmt: "aed" },
       { key: "course_payments", label: "Course payments" }, { key: "course_payment_aed", label: "Course AED", fmt: "aed" }],
     rowHead: ["When", "Student", "CS", "What", "Amount"],
     row: (r, link) => [when(r.at), link(r), csCell(r), r.kind === "course_payment" ? `Course payment${r.course ? ` · ${r.course}` : ""}` : r.kind === "deposit" ? "Deposit" : "Withdrawal",
-      <span key="a" className={cn("tabular-nums", r.kind === "withdrawal" && "text-rose-500")}>{r.kind === "course_payment" ? aed(r.aed) : `${usd(r.usd)} · ${aed(r.aed)}`}</span>],
+      <span key="a" className={cn("tabular-nums", r.kind === "withdrawal" && "text-rose-500")}>{aed(r.aed)}</span>],
   },
   {
     key: "followups", label: "Follow-ups & contacted", icon: MessageSquareText, accent: "blue",
@@ -112,27 +119,30 @@ const SECTIONS: Section<SectionKey>[] = [
   },
   {
     key: "bonus", label: "Bonus", icon: Gift, accent: "rose",
-    headline: (t) => usd(t.approved_usd), headlineHint: (t) => `${n0(t.approved)} approved of ${n0(t.count)} raised`,
+    // The AED the student paid, and the MT5 bonus in USD it earned (the user, 2026-10-17: "2000 AED, he gets 500 USD").
+    headline: (t) => aed(t.approved_aed), headlineHint: (t) => `→ ${usd(t.approved_usd)} bonus · ${n0(t.approved)} approved of ${n0(t.count)}`,
     cards: (t) => [
-      { title: "Raised", value: usd(t.usd), hint: `${n0(t.count)} bonuses · ${aed(t.aed)} paid` },
-      { title: "Approved (done)", value: usd(t.approved_usd), hint: `${n0(t.approved)} · ${aed(t.approved_aed)} collected` },
+      { title: "Raised", value: aed(t.aed), hint: `→ ${usd(t.usd)} bonus · ${n0(t.count)} bonuses` },
+      { title: "Approved (done)", value: aed(t.approved_aed), hint: `→ ${usd(t.approved_usd)} bonus · ${n0(t.approved)} approved` },
       { title: "With finance", value: n0(t.with_finance) }, { title: "Waiting for broker admin", value: n0(t.waiting_broker) },
       { title: "Needs a call", value: n0(t.needs_call), alert: (t.needs_call ?? 0) > 0 }, { title: "Rejected", value: n0(t.rejected) },
     ],
-    cols: [{ key: "count", label: "Raised" }, { key: "usd", label: "USD", fmt: "usd" }, { key: "aed", label: "AED paid", fmt: "aed" }, { key: "approved", label: "Approved" },
-      { key: "approved_usd", label: "Approved USD", fmt: "usd" }, { key: "with_finance", label: "With finance" }, { key: "waiting_broker", label: "Broker admin" },
-      { key: "needs_call", label: "Needs call" }, { key: "rejected", label: "Rejected" }],
-    rowHead: ["Raised", "Student", "CS", "Bonus", "Where it is"],
-    row: (r, link) => [when(r.at), link(r), csCell(r), <span key="b" className="tabular-nums">{usd(r.usd)}{r.aed ? ` · ${aed(r.aed)}` : ""}<span className="block text-xs text-muted-foreground">{r.kind}{r.mt5 ? ` · MT5 ${r.mt5}` : ""}</span></span>,
+    cols: [{ key: "count", label: "Raised" }, { key: "aed", label: "AED paid", fmt: "aed" }, { key: "usd", label: "Bonus USD", fmt: "usd" }, { key: "approved", label: "Approved" },
+      { key: "approved_aed", label: "Approved AED", fmt: "aed" }, { key: "approved_usd", label: "Approved bonus USD", fmt: "usd" }, { key: "with_finance", label: "With finance" },
+      { key: "waiting_broker", label: "Broker admin" }, { key: "needs_call", label: "Needs call" }, { key: "rejected", label: "Rejected" }],
+    rowHead: ["Raised", "Student", "CS", "Paid → bonus", "Where it is"],
+    row: (r, link) => [when(r.at), link(r), csCell(r),
+      <span key="b" className="tabular-nums">{r.aed ? `${aed(r.aed)} → ` : ""}{usd(r.usd)} bonus<span className="block text-xs text-muted-foreground">{r.kind}{r.mt5 ? ` · MT5 ${r.mt5}` : ""}</span></span>,
       <span key="s" className={STAGE[r.raw_stage]?.cls ?? STAGE[r.stage]?.cls}>{STAGE[r.raw_stage]?.label ?? STAGE[r.stage]?.label ?? r.stage}{r.decided_at ? <span className="block text-xs text-muted-foreground">{when(r.decided_at)}</span> : null}</span>],
   },
   {
     key: "commission", label: "Commission", icon: Coins, accent: "cyan",
-    headline: (t) => usd(t.usd), headlineHint: (t) => `${n0(t.credits)} credits`,
-    cards: (t) => [{ title: "Commission credited", value: usd(t.usd), hint: `${n0(t.credits)} credits` }],
-    cols: [{ key: "credits", label: "Credits" }, { key: "usd", label: "USD", fmt: "usd" }],
+    headline: (t) => aed(commissionAed(t)), headlineHint: (t) => `${n0(t.credits)} credits`,
+    cards: (t) => [{ title: "Commission credited", value: aed(commissionAed(t)), hint: `${n0(t.credits)} credits` }],
+    cols: [{ key: "credits", label: "Credits" }, { key: "aed", label: "AED", fmt: "aed" }],
     rowHead: ["When", "Student", "Credited to", "For", "Commission"],
-    row: (r, link) => [when(r.at), link(r), csCell(r), <span key="f">{String(r.type || "").toLowerCase() || "—"}{r.level ? ` · level ${r.level}` : ""}</span>, <span key="u" className="tabular-nums">{usd(r.usd)}</span>],
+    row: (r, link) => [when(r.at), link(r), csCell(r), <span key="f">{String(r.type || "").toLowerCase() || "—"}{r.level ? ` · level ${r.level}` : ""}</span>,
+      <span key="u" className="tabular-nums">{aed(r.aed ?? (r.usd ?? 0) * AED_PER_USD)}</span>],
   },
   {
     key: "upgrades", label: "Course upgrades", icon: ArrowUpCircle, accent: "violet",
