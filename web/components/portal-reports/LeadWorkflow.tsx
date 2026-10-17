@@ -27,7 +27,8 @@ interface PersonRef { id: string; name: string }
 interface LeadWorkflow {
   generatedAt: string;
   period: { from: string; to: string; days: number };
-  rule: { limitMinutes: number; hours: { start: string; end: string }; timezone: string };
+  /** breaks: false — a CRM that keeps no breaks (Draw, Remote); absent from the Sales CRM, which does. */
+  rule: { limitMinutes: number; hours: { start: string; end: string }; timezone: string; breaks?: boolean };
   totals: WorkflowCounts & { moves: number };
   statuses: Array<{ status: string; count: number }>;
   timeline: { unit: "hour" | "day"; rows: Array<{ key: string; came: number }> };
@@ -81,17 +82,19 @@ export function LeadWorkflowSection({ code, period, team, person }: { code: stri
 /** The map and the charts for one answer — also what Root shows for this CRM. */
 export function LeadWorkflowBody({ data, personName, onPerson }: { data: LeadWorkflow; personName?: string; onPerson?: (id: string) => void }) {
   const t = data.totals;
+  // A CRM that keeps no breaks (Draw, Remote) says so: no break box or columns for it.
+  const breaks = data.rule.breaks !== false;
   const days = data.period.from === data.period.to ? dayLabel(data.period.from) : `${dayLabel(data.period.from)} – ${dayLabel(data.period.to)}`;
   return (
     <div className="space-y-4">
-      <WorkflowMap totals={t} statuses={data.statuses} title={`${personName ? `${personName}'s leads` : "Leads"} that came in · ${days}`}
-        note={`Inactive = no action from the owner within ${data.rule.limitMinutes} min of the moving hours (${data.rule.hours.start}–${data.rule.hours.end}), breaks not counted. ${t.moves} moves in all.`} />
+      <WorkflowMap totals={t} statuses={data.statuses} breaks={breaks} title={`${personName ? `${personName}'s leads` : "Leads"} that came in · ${days}`}
+        note={`Inactive = no action from the owner within ${data.rule.limitMinutes} min of the ${breaks ? "moving" : "working"} hours (${data.rule.hours.start}–${data.rule.hours.end})${breaks ? ", breaks not counted" : ""}. ${t.moves} moves in all.`} />
       <div className="grid gap-4 lg:grid-cols-3">
         <TimelineCard data={data} />
         <StatusCard data={data} />
       </div>
-      <TeamsCard data={data} />
-      <PeopleCard data={data} onPerson={onPerson} />
+      <TeamsCard data={data} breaks={breaks} />
+      <PeopleCard data={data} onPerson={onPerson} breaks={breaks} />
       <MovesCard data={data} />
     </div>
   );
@@ -113,7 +116,7 @@ function Box({ n, label, of, tone, className }: { n: number; label: string; of?:
 const Down = () => <div className="mx-auto h-4 w-px bg-border" aria-hidden />;
 
 /** Came in → assigned → worked / within the limit / went inactive → how the inactive ones ended → their statuses now. */
-export function WorkflowMap({ totals: t, statuses, title, note }: { totals: WorkflowCounts; statuses: LeadWorkflow["statuses"]; title: string; note: string }) {
+export function WorkflowMap({ totals: t, statuses, title, note, breaks = true }: { totals: WorkflowCounts; statuses: LeadWorkflow["statuses"]; title: string; note: string; breaks?: boolean }) {
   const total = statuses.reduce((n, s) => n + s.count, 0);
   return (
     <Card className="border-border/50">
@@ -132,10 +135,10 @@ export function WorkflowMap({ totals: t, statuses, title, note }: { totals: Work
           <Box n={t.inactive} label="went inactive" of={t.assigned} tone="bad" />
         </div>
         <Down />
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <div className={cn("grid grid-cols-2 gap-3", breaks ? "sm:grid-cols-5" : "sm:grid-cols-4")}>
           <Box n={t.movedAuto} label="moved automatically" tone="bad" />
           <Box n={t.movedHand} label="moved by hand" tone="bad" />
-          <Box n={t.onBreak} label="owner on a break" tone="bad" />
+          {breaks && <Box n={t.onBreak} label="owner on a break" tone="bad" />}
           <Box n={t.nobodyLeft} label="nobody left to take" tone="bad" />
           <Box n={t.waiting} label="still waiting" tone="bad" />
         </div>
@@ -238,7 +241,7 @@ function StatusCard({ data }: { data: LeadWorkflow }) {
   );
 }
 
-function TeamsCard({ data }: { data: LeadWorkflow }) {
+function TeamsCard({ data, breaks }: { data: LeadWorkflow; breaks: boolean }) {
   const rows = data.teams.map((t) => ({ name: t.name, worked: t.worked, fresh: t.fresh, inactive: t.inactive, unassigned: t.unassigned }));
   if (!rows.length) return null;
   return (
@@ -261,13 +264,13 @@ function TeamsCard({ data }: { data: LeadWorkflow }) {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-sm">
             <thead><tr className="border-b border-border/40 text-left text-xs text-muted-foreground">
-              {["Team", "Came in", "Worked", "Within limit", "Went inactive", "Moved auto", "By hand", "On a break", "Nobody left", "Not assigned"].map((h, i) => <th key={h} className={cn("pb-2 pr-3 font-medium", i && "text-right")}>{h}</th>)}
+              {["Team", "Came in", "Worked", "Within limit", "Went inactive", "Moved auto", "By hand", ...(breaks ? ["On a break"] : []), "Nobody left", "Not assigned"].map((h, i) => <th key={h} className={cn("pb-2 pr-3 font-medium", i && "text-right")}>{h}</th>)}
             </tr></thead>
             <tbody>
               {data.teams.map((t) => (
                 <tr key={t.id ?? "none"} className="border-b border-border/20 last:border-0">
                   <td className="py-2 pr-3 font-medium">{t.name}</td>
-                  {[t.came, t.worked, t.fresh, t.inactive, t.movedAuto, t.movedHand, t.onBreak, t.nobodyLeft, t.unassigned].map((v, i) => (
+                  {[t.came, t.worked, t.fresh, t.inactive, t.movedAuto, t.movedHand, ...(breaks ? [t.onBreak] : []), t.nobodyLeft, t.unassigned].map((v, i) => (
                     <td key={i} className={cn("py-2 pr-3 text-right tabular-nums", !v && "text-muted-foreground/50", i === 3 && v > 0 && "text-rose-500")}>{v || "—"}</td>
                   ))}
                 </tr>
@@ -280,7 +283,7 @@ function TeamsCard({ data }: { data: LeadWorkflow }) {
   );
 }
 
-function PeopleCard({ data, onPerson }: { data: LeadWorkflow; onPerson?: (id: string) => void }) {
+function PeopleCard({ data, onPerson, breaks }: { data: LeadWorkflow; onPerson?: (id: string) => void; breaks: boolean }) {
   const rows = useMemo(() => data.people.map((p) => ({ name: p.name, worked: p.worked, fresh: p.fresh, inactive: p.inactiveNow, lost: p.lost })), [data.people]);
   if (!rows.length) return null;
   return (
@@ -306,8 +309,8 @@ function PeopleCard({ data, onPerson }: { data: LeadWorkflow; onPerson?: (id: st
         <div className="overflow-x-auto">
           <table className="w-full min-w-[820px] text-sm">
             <thead><tr className="border-b border-border/40 text-left text-xs text-muted-foreground">
-              {["Employee", "Held", "Theirs now", "Worked", "Within limit", "Inactive now", "Moved away", "Got from moves", "On a break", "Status of theirs now"].map((h, i) => (
-                <th key={h} className={cn("pb-2 pr-3 font-medium", i > 0 && i < 9 && "text-right")}>{h}</th>
+              {["Employee", "Held", "Theirs now", "Worked", "Within limit", "Inactive now", "Moved away", "Got from moves", ...(breaks ? ["On a break"] : []), "Status of theirs now"].map((h, i, all) => (
+                <th key={h} className={cn("pb-2 pr-3 font-medium", i > 0 && i < all.length - 1 && "text-right")}>{h}</th>
               ))}
             </tr></thead>
             <tbody>
@@ -320,7 +323,7 @@ function PeopleCard({ data, onPerson }: { data: LeadWorkflow; onPerson?: (id: st
                   {[p.held, p.now, p.worked, p.fresh, p.inactiveNow, p.lost, p.got].map((v, i) => (
                     <td key={i} className={cn("py-2 pr-3 text-right tabular-nums", !v && "text-muted-foreground/50", (i === 4 || i === 5) && v > 0 && "text-rose-500")}>{v || "—"}</td>
                   ))}
-                  <td className="py-2 pr-3 text-right tabular-nums">{breakWords(p.breakMinutes)}</td>
+                  {breaks && <td className="py-2 pr-3 text-right tabular-nums">{breakWords(p.breakMinutes)}</td>}
                   <td className="py-2 pr-3">
                     <div className="flex flex-wrap gap-1">
                       {Object.entries(p.statuses).sort((a, b) => b[1] - a[1]).map(([s, n]) => (
