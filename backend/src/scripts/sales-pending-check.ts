@@ -15,7 +15,9 @@
  * period and organization handed on, bad ones refused, finance's old server.
  * And Reports → Sales → a CRM → Lead workflow (/portal-reports/sales/:code/workflow
  * → the CRM's lead-workflow): Gulf days and ids handed on, Banglore has none, the
- * CRM's refusal and its old server.
+ * CRM's refusal and its old server. And Reports → HRMS (/portal-reports/hrms →
+ * HRMS's hrms-report, 2026-10-18): the period and organization handed on, bad
+ * ones refused, HRMS's reason, its old server.
  *
  * Run through scripts/sales-pending-check.sh. Scratch databases on 127.0.0.1 only.
  */
@@ -109,6 +111,11 @@ const stand = createServer((req, res) => {
   }
   if (url.pathname.startsWith("/hrms/")) {
     if (secret !== "sales-e2e-hrms-secret") return send(401, { success: false, message: "Bad secret" });
+    if (!hrmsOld && url.pathname === "/hrms/api/v1/service/hrms-report") {
+      if (url.searchParams.get("org") === "0".repeat(24)) return send(400, { success: false, message: "No such organization" });
+      return send(200, { success: true, data: { org: { id: "h1", name: "Delta HQ", currency: "AED" }, organizations: [{ id: "h1", name: "Delta HQ", currency: "AED" }],
+        payroll: { total: { net: 90000 }, people: [], teams: [], months: [], rows: [] } } });
+    }
     if (hrmsOld || url.pathname !== "/hrms/api/v1/service/hrms-watch") return send(404, { success: false, message: "Route not found" });
     return send(200, { success: true, data: { today: today, counts: { leave: 1, on_leave_today: 1 },
       items: { leave: [{ id: "l1", person: "Asha", department: "Sales" }], regularization: [], hiring: [], officeKeeping: [], procurement: [], onLeaveToday: [{ id: "l2", person: "Bilal", department: "Media" }] } } });
@@ -272,12 +279,28 @@ async function main() {
     && (await call("/portal-reports/sales/delta/workflow?team=nope", root)).status === 400);
   check("an unknown CRM: 404", (await call("/portal-reports/sales/nowhere/workflow", root)).status === 404);
 
+  step("Reports → HRMS");
+  const hOrg = "d".repeat(24);
+  r = await call(`/portal-reports/hrms?from=2026-08-31T20:00:00.000Z&to=2026-09-30T19:59:59.999Z&org=${hOrg}`, root);
+  check("HRMS's report, as HRMS counts it", r.status === 200 && r.body?.data?.payroll?.total?.net === 90000 && r.body.data.org.name === "Delta HQ", show(r.body));
+  check("…the period and organization handed on as they came", saw.includes(`/hrms/api/v1/service/hrms-report?from=2026-08-31T20%3A00%3A00.000Z&to=2026-09-30T19%3A59%3A59.999Z&org=${hOrg}`), show(saw.slice(-2)));
+  r = await call("/portal-reports/hrms", root);
+  check("no period: nothing sent (all time)", r.status === 200 && saw.includes("/hrms/api/v1/service/hrms-report"), show(saw.slice(-2)));
+  r = await call(`/portal-reports/hrms?org=${"0".repeat(24)}`, root);
+  check("an organization HRMS doesn't have: HRMS's reason", r.status === 409 && /No such organization/.test(r.body?.message ?? ""), show(r.body));
+  check("bad dates, a malformed organization: 400", (await call("/portal-reports/hrms?from=soon", root)).status === 400 && (await call("/portal-reports/hrms?org=nope", root)).status === 400);
+  hrmsOld = true;
+  r = await call("/portal-reports/hrms", root);
+  check("HRMS from before its report: says its server needs updating", r.status === 409 && /needs updating/.test(r.body?.message ?? ""), show(r.body));
+  hrmsOld = false;
+
   step("Case 4 — root admins only");
   check("no session: 401", (await call("/pending/sales")).status === 401 && (await call("/pending/sales/delta")).status === 401 && (await call("/pending/finance")).status === 401);
   check("not a root admin: 403", (await call("/pending/sales", member)).status === 403 && (await call("/pending/finance", member)).status === 403
     && (await call("/pending/hrms", member)).status === 403 && (await call("/pending/media", member)).status === 403
     && (await call("/portal-reports/finance", member)).status === 403 && (await call("/portal-reports/sales/delta/workflow", member)).status === 403);
   check("lead workflow, no session: 401", (await call("/portal-reports/sales/delta/workflow")).status === 401);
+  check("HRMS report: no session 401, not a root admin 403", (await call("/portal-reports/hrms")).status === 401 && (await call("/portal-reports/hrms", member)).status === 403);
   check("finance report, no session: 401", (await call("/portal-reports/finance")).status === 401);
 
   console.log(`\n${checks - failures}/${checks} checks passed`);

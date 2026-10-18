@@ -3,6 +3,7 @@ import { authenticate, requireRole } from "../middleware/auth.js";
 import { csReport } from "../services/cseService.js";
 import { salesLeadWorkflow, salesReport } from "../services/salesReportService.js";
 import { financeReport } from "../services/financeReportService.js";
+import { hrmsReport } from "../services/hrmsReportService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
 import type { AuthenticatedRequest } from "../types/index.js";
 
@@ -50,6 +51,17 @@ router.get("/sales/:code/workflow", async (req: AuthenticatedRequest, res: Respo
 router.get("/finance", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     sendSuccess(res, "Finance report", await financeReport(req.query as Record<string, unknown>));
+  } catch (error) {
+    const status = (error as { statusCode?: number }).statusCode;
+    if (status) return sendError(res, (error as Error).message, status);
+    next(error);
+  }
+});
+
+/* HRMS: one organization's attendance, leave, regularization, hiring, joiners and leavers, payroll, requests, claims (2026-10-18). */
+router.get("/hrms", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    sendSuccess(res, "HRMS report", await hrmsReport(req.query as Record<string, unknown>));
   } catch (error) {
     const status = (error as { statusCode?: number }).statusCode;
     if (status) return sendError(res, (error as Error).message, status);
