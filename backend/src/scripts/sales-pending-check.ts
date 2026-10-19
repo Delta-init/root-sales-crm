@@ -69,6 +69,12 @@ const stand = createServer((req, res) => {
   const send = (status: number, body: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
   if (url.pathname.startsWith("/delta/")) {
     if (secret !== "sales-e2e-delta-secret") return send(401, { success: false, message: "Bad secret" });
+    if (url.pathname === "/delta/api/v1/service/lead-workflow/leads") {
+      if (workflowOld) return send(404, { success: false, message: "Route not found" });
+      if (url.searchParams.get("box") === "zzz") return send(400, { success: false, message: "Say which box" });
+      return send(200, { success: true, data: { box: url.searchParams.get("box"), status: url.searchParams.get("status"), total: 1, capped: false,
+        rows: [{ id: "l1", name: "Lena", status: "followup" }], byOwner: [], byTeam: [] } });
+    }
     if (url.pathname === "/delta/api/v1/service/lead-workflow") {
       if (workflowOld) return send(404, { success: false, message: "Route not found" });
       if (url.searchParams.get("from") === "2026-01-01") return send(400, { success: false, message: "At most 92 days at a time" });
@@ -279,6 +285,21 @@ async function main() {
     && (await call("/portal-reports/sales/delta/workflow?team=nope", root)).status === 400);
   check("an unknown CRM: 404", (await call("/portal-reports/sales/nowhere/workflow", root)).status === 404);
 
+  step("Reports → Sales → Lead workflow → the leads behind a box");
+  r = await call(`/portal-reports/sales/delta/workflow/leads?from=2026-10-18T20:00:00.000Z&to=2026-10-19T19:59:59.999Z&box=status&status=followup&team=${team}`, root);
+  check("the CRM's list for that box", r.status === 200 && r.body?.data?.rows?.[0]?.name === "Lena", show(r.body));
+  check("…the period as Gulf days, the box, status and team handed on", saw.includes(`/delta/api/v1/service/lead-workflow/leads?from=2026-10-19&to=2026-10-19&teamId=${team}&box=status&status=followup`), show(saw.slice(-2)));
+  r = await call("/portal-reports/sales/delta/workflow", root);
+  check("the workflow says where the CRM's pages are (for the lead links)", r.status === 200 && typeof r.body?.data?.appUrl === "string", show(r.body));
+  check("no box, a malformed box: 400", (await call("/portal-reports/sales/delta/workflow/leads", root)).status === 400 && (await call("/portal-reports/sales/delta/workflow/leads?box=Bad%20Box!", root)).status === 400);
+  r = await call("/portal-reports/sales/delta/workflow/leads?box=zzz", root);
+  check("a box the CRM doesn't know: its reason", r.status === 409 && /Say which box/.test(r.body?.message ?? ""), show(r.body));
+  check("Banglore: 404", (await call("/portal-reports/sales/banglore/workflow/leads?box=came", root)).status === 404);
+  workflowOld = true;
+  r = await call("/portal-reports/sales/delta/workflow/leads?box=came", root);
+  check("a CRM from before: says its server needs updating", r.status === 409 && /needs updating/.test(r.body?.message ?? ""), show(r.body));
+  workflowOld = false;
+
   step("Reports → HRMS");
   const hOrg = "d".repeat(24);
   r = await call(`/portal-reports/hrms?from=2026-08-31T20:00:00.000Z&to=2026-09-30T19:59:59.999Z&org=${hOrg}`, root);
@@ -300,6 +321,8 @@ async function main() {
     && (await call("/pending/hrms", member)).status === 403 && (await call("/pending/media", member)).status === 403
     && (await call("/portal-reports/finance", member)).status === 403 && (await call("/portal-reports/sales/delta/workflow", member)).status === 403);
   check("lead workflow, no session: 401", (await call("/portal-reports/sales/delta/workflow")).status === 401);
+  check("box leads: no session 401, not a root admin 403", (await call("/portal-reports/sales/delta/workflow/leads?box=came")).status === 401
+    && (await call("/portal-reports/sales/delta/workflow/leads?box=came", member)).status === 403);
   check("HRMS report: no session 401, not a root admin 403", (await call("/portal-reports/hrms")).status === 401 && (await call("/portal-reports/hrms", member)).status === 403);
   check("finance report, no session: 401", (await call("/portal-reports/finance")).status === 401);
 

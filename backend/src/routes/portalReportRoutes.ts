@@ -1,7 +1,7 @@
 import { Router, type Response, type NextFunction } from "express";
 import { authenticate, requireRole } from "../middleware/auth.js";
 import { csReport } from "../services/cseService.js";
-import { salesLeadWorkflow, salesReport } from "../services/salesReportService.js";
+import { salesLeadWorkflow, salesLeadWorkflowLeads, salesReport } from "../services/salesReportService.js";
 import { financeReport } from "../services/financeReportService.js";
 import { hrmsReport } from "../services/hrmsReportService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
@@ -40,6 +40,17 @@ router.get("/sales/:code", async (req: AuthenticatedRequest, res: Response, next
 router.get("/sales/:code/workflow", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     sendSuccess(res, "Lead workflow", await salesLeadWorkflow(String(req.params.code), req.query as Record<string, unknown>));
+  } catch (error) {
+    const status = (error as { statusCode?: number }).statusCode;
+    if (status) return sendError(res, (error as Error).message, status);
+    next(error);
+  }
+});
+
+/* The leads behind one box of a sales CRM's workflow map (2026-10-19). */
+router.get("/sales/:code/workflow/leads", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    sendSuccess(res, "Workflow leads", await salesLeadWorkflowLeads(String(req.params.code), req.query as Record<string, unknown>));
   } catch (error) {
     const status = (error as { statusCode?: number }).statusCode;
     if (status) return sendError(res, (error as Error).message, status);

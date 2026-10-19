@@ -3,6 +3,7 @@ import { getSources } from "./crmConnections.js";
 import { CALL_PORTALS, callsOverview } from "./callsService.js";
 import { markedOf } from "./salesPendingService.js";
 import { resolveTarget, callTarget } from "../lib/targetClient.js";
+import { targetConfig } from "../config/targets.js";
 
 /*
  * Reports → Sales, a tab per sales CRM (the user, 2026-10-17): what each
@@ -270,10 +271,8 @@ export async function salesReport(code: string, q: { from?: unknown; to?: unknow
 const NO_INACTIVE_LEADS = new Set(["banglore"]);
 const gulfDay = (iso: string) => new Date(Date.parse(iso) + 4 * 3_600_000).toISOString().slice(0, 10);
 
-export async function salesLeadWorkflow(code: string, q: { from?: unknown; to?: unknown; team?: unknown; person?: unknown }) {
-  const org = await Organization.findOne({ code, isActive: true, kind: "crm" }).select("code name").lean();
-  if (!org) throw httpError("No such sales CRM", 404);
-  if (NO_INACTIVE_LEADS.has(code)) return { available: false, message: `${org.name} has no inactive leads or mover, so there is no workflow to show.` };
+/** The workflow's period and filters as the CRM takes them: Gulf days, team and person ids. */
+function workflowParams(q: { from?: unknown; to?: unknown; team?: unknown; person?: unknown }) {
   const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : "");
   const from = str(q.from), to = str(q.to);
   for (const v of [from, to]) if (v && !Number.isFinite(Date.parse(v))) throw httpError("from / to must be dates", 400);
@@ -287,13 +286,42 @@ export async function salesLeadWorkflow(code: string, q: { from?: unknown; to?: 
     if (!/^[0-9a-f]{24}$/i.test(v)) throw httpError(`${k === "teamId" ? "team" : "person"} is not an id`, 400);
     params.set(k, v);
   }
+  return params;
+}
+
+export async function salesLeadWorkflow(code: string, q: { from?: unknown; to?: unknown; team?: unknown; person?: unknown }) {
+  const org = await Organization.findOne({ code, isActive: true, kind: "crm" }).select("code name").lean();
+  if (!org) throw httpError("No such sales CRM", 404);
+  if (NO_INACTIVE_LEADS.has(code)) return { available: false, message: `${org.name} has no inactive leads or mover, so there is no workflow to show.` };
+  const params = workflowParams(q);
   const target = await resolveTarget(code);
   try {
     const data = await callTarget<Record<string, unknown>>(target, `/lead-workflow${params.size ? `?${params}` : ""}`, { method: "GET", verb: "share its lead workflow" });
-    return { available: true, data };
+    // Where the CRM's pages are, so a lead in a box's list opens there ("" when its address is not set).
+    return { available: true, data, appUrl: targetConfig(code).appUrl.replace(/\/+$/, "") };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not be read";
     if (/not found/i.test(message)) return { available: false, message: `${org.name}'s server needs updating — it has no lead workflow yet.` };
+    throw error;
+  }
+}
+
+/** The leads behind one box of the workflow map (?box, and ?status for a status) — the CRM's own list (2026-10-19). */
+export async function salesLeadWorkflowLeads(code: string, q: { from?: unknown; to?: unknown; team?: unknown; person?: unknown; box?: unknown; status?: unknown }) {
+  const org = await Organization.findOne({ code, isActive: true, kind: "crm" }).select("code name").lean();
+  if (!org) throw httpError("No such sales CRM", 404);
+  if (NO_INACTIVE_LEADS.has(code)) throw httpError(`${org.name} has no inactive leads or mover`, 404);
+  const box = typeof q.box === "string" ? q.box.trim() : "";
+  if (!/^[a-z_]{2,20}$/.test(box)) throw httpError("Say which box", 400);
+  const params = workflowParams(q);
+  params.set("box", box);
+  if (typeof q.status === "string" && q.status.trim()) params.set("status", q.status.trim().slice(0, 40));
+  const target = await resolveTarget(code);
+  try {
+    return await callTarget<Record<string, unknown>>(target, `/lead-workflow/leads?${params}`, { method: "GET", verb: "share the leads behind that box" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not be read";
+    if (/not found/i.test(message)) throw httpError(`${org.name}'s server needs updating — it can't list a box's leads yet`, 409);
     throw error;
   }
 }
