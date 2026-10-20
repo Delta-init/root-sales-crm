@@ -168,6 +168,12 @@ async function main() {
   wp = new URLSearchParams(seen.at(-1)?.search ?? "");
   check("…a stage of the legend: passed on, with the team", wp.get("stage") === "Session with CM" && wp.get("teamId") === "6ac000000000000000000009" && !wp.has("box"), seen.at(-1)?.search);
   asked = seen.length;
+  for (const box of ["bonus_pending", "bonus_sent_back", "bonus_after_payment", "bonus_needs_call", "bonus_with_finance", "bonus_waiting_broker"]) {
+    await call("GET", `/portal-reports/cs/workflow/students?box=${box}`, root);
+    wp = new URLSearchParams(seen.at(-1)?.search ?? "");
+    check(`…bonus pending's ${box}: accepted and passed on`, wp.get("box") === box, seen.at(-1)?.search);
+  }
+  asked = seen.length;
   r = await call("GET", "/portal-reports/cs/workflow/students?box=everything", root);
   check("…a box that is not one: 400 naming the boxes, without asking", r.status === 400 && /came, assigned, pool/.test(r.body?.message ?? "") && seen.length === asked, show(r.body));
   check("…no box and no stage, a bad teamId or csId: 400, without asking", (await call("GET", "/portal-reports/cs/workflow/students", root)).status === 400

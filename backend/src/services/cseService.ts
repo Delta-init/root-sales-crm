@@ -85,7 +85,11 @@ export const csReport = async (q: Record<string, unknown>) => {
  * (GET /service/student-workflow/students). The period arrives as instants or
  * days and goes as Gulf days; none is all time. Read-only.
  */
-export const WORKFLOW_BOXES = ["came", "assigned", "pool", "onboarded", "waiting", "late", "enrolled", "contacted", "deposited", "moved", "moved_inactivity"] as const;
+export const WORKFLOW_BOXES = [
+  "came", "assigned", "pool", "onboarded", "waiting", "late", "enrolled", "contacted", "deposited", "moved", "moved_inactivity",
+  // Bonus pending, and each reason it waits (2026-10-20)
+  "bonus_pending", "bonus_sent_back", "bonus_after_payment", "bonus_needs_call", "bonus_with_finance", "bonus_waiting_broker",
+] as const;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const ID = /^[0-9a-f]{24}$/i;
 const bad = (message: string) => Object.assign(new Error(message), { statusCode: 400 });

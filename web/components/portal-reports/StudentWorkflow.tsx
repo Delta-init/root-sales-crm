@@ -26,11 +26,15 @@ import { cn } from "@/lib/utils";
 interface Totals {
   came: number; assigned: number; pool: number; onboarded: number; waiting: number; late: number;
   enrolled: number; contacted: number; deposited: number; moved: number; moved_inactivity: number;
+  bonus_pending?: number; bonus_sent_back?: number; bonus_after_payment?: number; bonus_needs_call?: number; bonus_with_finance?: number; bonus_waiting_broker?: number;
 }
+type BonusReason = "sent_back" | "after_payment" | "needs_call" | "with_finance" | "waiting_broker";
 type BoxKey = keyof Totals;
 interface StudentWorkflow {
   period: string; since: string | null; until: string | null; generated_at: string; wait_hours: number;
   totals: Totals;
+  /** Pending bonuses of these students and why each waits (2026-10-20); missing from a TC not updated yet. */
+  bonus?: { students: number; usd: number; reasons: Array<{ reason: BonusReason; students: number; usd: number }> };
   stages: Array<{ stage: string; count: number }>;
   sources: Array<{ source: string; count: number }>;
   teams: Array<Totals & { id: string | null; name: string; location: string }>;
@@ -42,6 +46,7 @@ export interface StudentRow {
   id: string; name: string; code: string; came_at: string | null; source: string; location: string;
   cs: { id: string; name: string; team: string | null } | null;
   onboarded_at: string | null; stage: string; late: boolean; contacted: boolean; deposited: boolean; enrolled: boolean; moved: boolean;
+  bonus?: { usd: number; reason: BonusReason; reasons: BonusReason[] } | null;
 }
 interface StudentList { total: number; students: StudentRow[]; studentLink?: string }
 
@@ -55,10 +60,22 @@ const STAGES: Record<string, string> = {
 };
 const stageColor = (s: string) => STAGES[s] ?? "#64748b";
 const SOURCE: Record<string, string> = { finance: "finance", lms: "LMS", sheet: "sheets", manual: "by hand" };
+/* Why a bonus waits, as Tetra Commission says (its students/bonusPending.ts), in the order a CS can act on them. */
+const BONUS_REASON: Record<BonusReason, string> = {
+  sent_back: "sent back to the CS", after_payment: "waiting for full payment", needs_call: "needs a connected call",
+  with_finance: "with finance", waiting_broker: "waiting for a broker admin",
+};
+const usd = (n: number | undefined) => `$${(n ?? 0).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 // 1 of 300 is "<1%", not "0%".
 const pctOf = (n: number, of: number) => (!of ? "—" : n > 0 && Math.round((n / of) * 100) === 0 ? "<1%" : `${Math.round((n / of) * 100)}%`);
 const n0 = (n: number | undefined) => (n ?? 0).toLocaleString("en-US");
-const dayLabel = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+/** A day, Dubai time: a YYYY-MM-DD as it is, or an instant (Tetra Commission sends the period's ends as instants). */
+const dayLabel = (v: string) => {
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T12:00:00+04:00`) : new Date(v);
+  return Number.isNaN(d.getTime()) ? "…" : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Dubai" });
+};
+/** The period's last day: its end is the start of the day after, so a moment before it. */
+const lastDayLabel = (v: string) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? dayLabel(v) : dayLabel(new Date(new Date(v).getTime() - 1).toISOString()));
 const gstWhen = (iso: string | null) => (iso ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)) : "—");
 const errorText = (e: unknown, what: string) => (e instanceof AxiosError && (e.response?.data as { message?: string } | undefined)?.message)
   || (e instanceof AxiosError && e.response?.status === 404 ? "Root's server is still on the previous version — this shows once it is updated." : `Could not load the ${what}. Refresh in a moment.`);
@@ -100,7 +117,8 @@ export function StudentWorkflowSection({ period, location, team, cs }: { period:
 }
 
 export function StudentWorkflowBody({ data, onPick }: { data: StudentWorkflow; onPick?: (p: Pick) => void }) {
-  const days = !data.since && !data.until ? "all time" : data.since === data.until ? dayLabel(String(data.since)) : `${data.since ? dayLabel(data.since) : "…"} – ${data.until ? dayLabel(data.until) : "today"}`;
+  const first = data.since ? dayLabel(data.since) : "…", last = data.until ? lastDayLabel(data.until) : "today";
+  const days = !data.since && !data.until ? "all time" : first === last ? first : `${first} – ${last}`;
   return (
     <div className="space-y-4">
       <WorkflowMap data={data} onPick={onPick} title={`Students who came in · ${days}`} />
@@ -173,6 +191,27 @@ function WorkflowMap({ data, title, onPick }: { data: StudentWorkflow; title: st
             ) : null}
           </Box>
         </div>
+        {data.bonus ? (
+          <>
+            <Down />
+            <div className={cn("rounded-xl border px-3 py-2.5", data.bonus.students ? "border-amber-500/30 bg-amber-500/10" : "border-border/60 bg-card")}>
+              <button type="button" disabled={!onPick} onClick={() => onPick?.({ box: "bonus_pending", label: "Bonus pending" })}
+                className={cn("flex w-full items-baseline justify-center gap-2", onPick && "cursor-pointer hover:underline")}>
+                <span className={cn("text-xl font-bold tabular-nums", data.bonus.students > 0 && "text-amber-600 dark:text-amber-400")}>{n0(data.bonus.students)}</span>
+                <span className="text-xs text-muted-foreground">bonus pending · {usd(data.bonus.usd)}</span>
+              </button>
+              <div className="mt-2 flex flex-wrap justify-center gap-2">
+                {data.bonus.reasons.map((r) => (
+                  <button key={r.reason} type="button" disabled={!onPick || !r.students}
+                    onClick={() => onPick?.({ box: `bonus_${r.reason}` as BoxKey, label: `Bonus pending — ${BONUS_REASON[r.reason] ?? r.reason}` })}
+                    className={cn("rounded-full border px-2.5 py-0.5 text-xs", r.students ? "border-amber-500/40 text-amber-700 hover:bg-amber-500/10 dark:text-amber-300" : "border-border/60 text-muted-foreground/60")}>
+                    {BONUS_REASON[r.reason] ?? r.reason} · <span className="font-semibold tabular-nums">{n0(r.students)}</span>{r.students ? ` · ${usd(r.usd)}` : ""}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        ) : null}
         <Down />
         <div>
           <p className="mb-1.5 text-xs font-medium text-muted-foreground">Where they stand now (follow-up stage)</p>
@@ -276,7 +315,8 @@ function StageCard({ data, onPick }: { data: StudentWorkflow; onPick?: (p: Pick)
 
 const COLS: Array<{ key: BoxKey; label: string; bad?: boolean }> = [
   { key: "came", label: "Came in" }, { key: "onboarded", label: "Onboarded" }, { key: "late", label: "Late", bad: true },
-  { key: "contacted", label: "Contacted" }, { key: "deposited", label: "First deposit" }, { key: "moved", label: "Moved", bad: true },
+  { key: "contacted", label: "Contacted" }, { key: "deposited", label: "First deposit" }, { key: "bonus_pending", label: "Bonus pending" },
+  { key: "moved", label: "Moved", bad: true },
 ];
 
 function Counts({ row }: { row: Totals }) {
@@ -405,7 +445,7 @@ function StudentBreakdown({ pick, data, loading, error, onRetry, onClose, studen
             <>
               <table className="w-full min-w-[820px] text-sm">
                 <thead className="sticky top-0 bg-background"><tr className="border-b border-border/40 text-left text-xs text-muted-foreground">
-                  {["Student", "CS", "Came in", "Onboarded", "Stage", "Flags"].map((h) => <th key={h} className="pb-2 pr-3 font-medium">{h}</th>)}
+                  {["Student", "CS", "Came in", "Onboarded", "Stage", "Bonus pending", "Flags"].map((h) => <th key={h} className="pb-2 pr-3 font-medium">{h}</th>)}
                 </tr></thead>
                 <tbody>
                   {data.students.map((s) => {
@@ -421,6 +461,10 @@ function StudentBreakdown({ pick, data, loading, error, onRetry, onClose, studen
                         <td className="py-2 pr-3 text-xs">{gstWhen(s.came_at)}<div className="text-muted-foreground">{SOURCE[s.source] ?? (s.source || "—")}</div></td>
                         <td className="py-2 pr-3 text-xs">{s.onboarded_at ? gstWhen(s.onboarded_at) : <span className={s.late ? "text-rose-500" : "text-muted-foreground"}>{s.late ? "late" : "not yet"}</span>}</td>
                         <td className="py-2 pr-3"><span className="rounded-full border px-1.5 py-0.5 text-[11px]" style={{ borderColor: stageColor(s.stage), color: stageColor(s.stage) }}>{s.stage || "No follow-up"}</span></td>
+                        <td className="py-2 pr-3 text-xs">{s.bonus ? (
+                          <><span className="font-medium text-amber-600 dark:text-amber-400">{usd(s.bonus.usd)}</span>
+                            <div className="text-muted-foreground">{(s.bonus.reasons?.length ? s.bonus.reasons : [s.bonus.reason]).map((x) => BONUS_REASON[x] ?? x).join(" · ")}</div></>
+                        ) : <span className="text-muted-foreground/60">—</span>}</td>
                         <td className="py-2 pr-3">
                           <div className="flex flex-wrap gap-1">
                             <Flag on={s.late} label="late" bad /><Flag on={s.enrolled} label="LMS" /><Flag on={s.contacted} label="contacted" />
