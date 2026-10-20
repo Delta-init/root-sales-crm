@@ -1,6 +1,6 @@
 import { Router, type Response, type NextFunction } from "express";
 import { authenticate, requireRole } from "../middleware/auth.js";
-import { csReport } from "../services/cseService.js";
+import { csReport, csStudentWorkflow, csStudentWorkflowStudents } from "../services/cseService.js";
 import { salesLeadWorkflow, salesLeadWorkflowLeads, salesReport } from "../services/salesReportService.js";
 import { financeReport } from "../services/financeReportService.js";
 import { hrmsReport } from "../services/hrmsReportService.js";
@@ -18,6 +18,28 @@ router.use(authenticate, requireRole("root_admin"));
 router.get("/cs", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     sendSuccess(res, "CS report", await csReport(req.query as Record<string, unknown>));
+  } catch (error) {
+    const status = (error as { statusCode?: number }).statusCode;
+    if (status) return sendError(res, (error as Error).message, status);
+    next(error);
+  }
+});
+
+/* The CS portal's student workflow: where the period's students went, as Tetra Commission counts them (2026-10-20). */
+router.get("/cs/workflow", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    sendSuccess(res, "Student workflow", await csStudentWorkflow(req.query as Record<string, unknown>));
+  } catch (error) {
+    const status = (error as { statusCode?: number }).statusCode;
+    if (status) return sendError(res, (error as Error).message, status);
+    next(error);
+  }
+});
+
+/* The students behind one box or stage of that workflow (2026-10-20). */
+router.get("/cs/workflow/students", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    sendSuccess(res, "Workflow students", await csStudentWorkflowStudents(req.query as Record<string, unknown>));
   } catch (error) {
     const status = (error as { statusCode?: number }).statusCode;
     if (status) return sendError(res, (error as Error).message, status);

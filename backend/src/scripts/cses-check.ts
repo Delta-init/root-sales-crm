@@ -15,6 +15,11 @@
  * And Pending → CS portal (GET /pending/cs): what waits on each CS, as Tetra
  * Commission's /service/cs-pending says, with the student link (2026-10-17).
  *
+ * And Reports → CS portal → Student workflow (GET /portal-reports/cs/workflow and
+ * /cs/workflow/students, 2026-10-20): the filters as Gulf days and ids to Tetra
+ * Commission's /service/student-workflow, a box or stage checked, its being
+ * down said plainly.
+ *
  * Run through scripts/cses-check.sh. Scratch database on 127.0.0.1 only.
  */
 import { createServer } from "node:http";
@@ -46,7 +51,7 @@ async function call(method: string, path: string, headers: Record<string, string
 
 // ── A stand-in Tetra Commission ──────────────────────────────────────────────
 const seen: { path: string; search: string; secret: string }[] = [];
-let oldServer = false;
+let oldServer = false, down = false;
 const figures = { students: 3, deposits: { count: 2, usd: 1400 }, commissionUsd: 50, followupsToday: 1, followupsOverdue: 1,
   upcoming: { count: 1, amount: { AED: 3000 } }, overdueDues: { count: 1, amount: { USD: 500 } }, balance: { students: 2, amount: { AED: 3000, USD: 500 } },
   bonus: { clients: 1, usd: 500, needsCall: 0, withFinance: 0, waitingBroker: 1 }, notOnboarded: 1, notOnboardedLate: 1 };
@@ -54,6 +59,8 @@ const stand = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://x");
   seen.push({ path: url.pathname, search: url.search, secret: String(req.headers["x-portal-secret"] ?? "") });
   const send = (status: number, body: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
+  // Down: the connection dropped without an answer.
+  if (down) { req.socket.destroy(); return; }
   if (req.headers["x-portal-secret"] !== "cses-e2e-commission-secret") return send(401, { success: false, error: { message: "Bad secret" } });
   if (oldServer) return send(404, { success: false, message: "Route not found" });
   if (url.pathname === "/commission/api/v1/service/cs-overview") {
@@ -66,6 +73,18 @@ const stand = createServer((req, res) => {
   }
   if (url.pathname === "/commission/api/v1/service/cs-report") {
     return send(200, { success: true, data: { period: url.searchParams.get("period"), revenue: { total: { deposit_usd: 1500 }, people: [], teams: [], months: [], rows: [] } } });
+  }
+  if (url.pathname === "/commission/api/v1/service/student-workflow") {
+    const totals = { came: 300, assigned: 300, pool: 0, onboarded: 286, waiting: 1, late: 13, enrolled: 226, contacted: 167, deposited: 1, moved: 13, moved_inactivity: 2 };
+    return send(200, { success: true, data: { period: url.searchParams.get("period") ?? "custom", since: url.searchParams.get("from"), until: url.searchParams.get("to"), scope: {},
+      generated_at: "2026-10-20T08:00:00.000Z", wait_hours: 6, totals, stages: [{ stage: "No follow-up", count: 163 }, { stage: "Contacted", count: 119 }],
+      sources: [{ source: "finance", count: 71 }, { source: "lms", count: 123 }, { source: "sheet", count: 106 }],
+      teams: [{ id: "6ac000000000000000000009", name: "Falcons", location: "dubai", ...totals }], people: [{ id: CS, name: "Cee One", team: "Falcons", location: "dubai", ...totals }],
+      timeline: [{ day: "2026-10-01", came: 12 }] } });
+  }
+  if (url.pathname === "/commission/api/v1/service/student-workflow/students") {
+    return send(200, { success: true, data: { total: 1, students: [{ id: "s1", name: "Asha", code: "STU-1", came_at: "2026-10-02T06:00:00.000Z", source: "lms", location: "dubai",
+      cs: { id: CS, name: "Cee One", team: "Falcons" }, onboarded_at: null, stage: "New", late: true, contacted: false, deposited: false, enrolled: true, moved: false }] } });
   }
   if (url.pathname === "/commission/api/v1/service/cs-pending") {
     return send(200, { success: true, data: { today: "2026-10-17", totals: { onboarding: 2, onboarding_late: 1, bonus: 1, total: 3 },
@@ -114,6 +133,54 @@ async function main() {
   check("…no period: all time", new URLSearchParams(seen.at(-1)?.search ?? "").get("period") === "all", seen.at(-1)?.search);
   check("…a date that is not one: 400", (await call("GET", "/portal-reports/cs?from=whenever", root)).status === 400);
 
+  r = await call("GET", "/portal-reports/cs/workflow?from=2026-09-30T20:00:00.000Z&to=2026-10-31T19:59:59.999Z&location=dubai&team=6ac000000000000000000009&cs=" + CS, root);
+  let wp = new URLSearchParams(seen.at(-1)?.search ?? "");
+  check("Student workflow: Tetra Commission's totals, stages, sources, teams, people, with the student link", r.status === 200 && r.body?.data?.totals?.came === 300
+    && r.body.data.totals.late === 13 && r.body.data.stages[0].stage === "No follow-up" && r.body.data.sources.length === 3 && r.body.data.people[0].name === "Cee One"
+    && r.body.data.wait_hours === 6 && r.body.data.studentLink === "https://tetra.example.test/StudentDetail?id=", show(r.body));
+  check("…asked of its /service/student-workflow with the portal secret", seen.at(-1)?.path === "/commission/api/v1/service/student-workflow"
+    && seen.at(-1)?.secret === "cses-e2e-commission-secret", show(seen.at(-1)));
+  check("…the period as Gulf days, location, team and cs passed on", wp.get("from") === "2026-10-01" && wp.get("to") === "2026-10-31" && !wp.has("period")
+    && wp.get("location") === "dubai" && wp.get("team") === "6ac000000000000000000009" && wp.get("cs") === CS, seen.at(-1)?.search);
+  await call("GET", "/portal-reports/cs/workflow?from=2026-10-05&to=2026-10-06", root);
+  wp = new URLSearchParams(seen.at(-1)?.search ?? "");
+  check("…days given as days are passed as they are", wp.get("from") === "2026-10-05" && wp.get("to") === "2026-10-06", seen.at(-1)?.search);
+  await call("GET", "/portal-reports/cs/workflow", root);
+  check("…no period: all time", new URLSearchParams(seen.at(-1)?.search ?? "").get("period") === "all", seen.at(-1)?.search);
+  let asked = seen.length;
+  check("…a date that is not one, from after to, a bad location or team id: 400, without asking",
+    (await call("GET", "/portal-reports/cs/workflow?from=whenever", root)).status === 400
+    && (await call("GET", "/portal-reports/cs/workflow?from=2026-10-31&to=2026-10-01", root)).status === 400
+    && (await call("GET", "/portal-reports/cs/workflow?location=mars", root)).status === 400
+    && (await call("GET", "/portal-reports/cs/workflow?team=nope", root)).status === 400 && seen.length === asked);
+
+  r = await call("GET", `/portal-reports/cs/workflow/students?from=2026-10-01&to=2026-10-31&location=bangalore&box=late&csId=${CS}`, root);
+  wp = new URLSearchParams(seen.at(-1)?.search ?? "");
+  check("A box's students: Tetra Commission's list, with the student link", r.status === 200 && r.body?.data?.total === 1 && r.body.data.students[0].name === "Asha"
+    && r.body.data.students[0].late === true && r.body.data.studentLink === "https://tetra.example.test/StudentDetail?id=", show(r.body));
+  check("…asked of /service/student-workflow/students with the secret, the box, csId and filters passed on", seen.at(-1)?.path === "/commission/api/v1/service/student-workflow/students"
+    && seen.at(-1)?.secret === "cses-e2e-commission-secret" && wp.get("box") === "late" && wp.get("csId") === CS && wp.get("location") === "bangalore"
+    && wp.get("from") === "2026-10-01" && !wp.has("teamId"), seen.at(-1)?.search);
+  await call("GET", "/portal-reports/cs/workflow/students?box=came&teamId=", root);
+  wp = new URLSearchParams(seen.at(-1)?.search ?? "");
+  check("…the open pool's row: teamId passed on empty", wp.has("teamId") && wp.get("teamId") === "" && wp.get("box") === "came", seen.at(-1)?.search);
+  await call("GET", "/portal-reports/cs/workflow/students?stage=Session%20with%20CM&teamId=6ac000000000000000000009", root);
+  wp = new URLSearchParams(seen.at(-1)?.search ?? "");
+  check("…a stage of the legend: passed on, with the team", wp.get("stage") === "Session with CM" && wp.get("teamId") === "6ac000000000000000000009" && !wp.has("box"), seen.at(-1)?.search);
+  asked = seen.length;
+  r = await call("GET", "/portal-reports/cs/workflow/students?box=everything", root);
+  check("…a box that is not one: 400 naming the boxes, without asking", r.status === 400 && /came, assigned, pool/.test(r.body?.message ?? "") && seen.length === asked, show(r.body));
+  check("…no box and no stage, a bad teamId or csId: 400, without asking", (await call("GET", "/portal-reports/cs/workflow/students", root)).status === 400
+    && (await call("GET", "/portal-reports/cs/workflow/students?box=came&teamId=x", root)).status === 400
+    && (await call("GET", "/portal-reports/cs/workflow/students?box=came&csId=x", root)).status === 400 && seen.length === asked);
+
+  down = true;
+  r = await call("GET", "/portal-reports/cs/workflow", root);
+  check("Tetra Commission down: 502 saying it could not be reached", r.status === 502 && /Tetra Commission could not be reached/.test(r.body?.message ?? ""), show(r.body));
+  r = await call("GET", "/portal-reports/cs/workflow/students?box=came", root);
+  check("…for a box's students too", r.status === 502 && /could not be reached/.test(r.body?.message ?? ""), show(r.body));
+  down = false;
+
   r = await call("GET", `/cses/${CS}?from=2026-10-01&to=2026-10-31`, root);
   check("one CSE's page: the figures and the lists", r.status === 200 && r.body?.data?.person?.name === "Cee One" && r.body.data.followups[0].student === "Asha"
     && r.body.data.summary.followupsToday === 1, show(r.body));
@@ -129,6 +196,10 @@ async function main() {
   check("a Tetra Commission from before this page: says its server needs updating", r.status === 409 && /needs updating/.test(r.body?.message ?? ""), show(r.body));
   r = await call("GET", "/portal-reports/cs", root);
   check("…and the Reports tab says so too", r.status === 409 && /no CS report yet/.test(r.body?.message ?? ""), show(r.body));
+  r = await call("GET", "/portal-reports/cs/workflow", root);
+  check("…and the student workflow says so too", r.status === 409 && /needs updating — it has no student workflow yet/.test(r.body?.message ?? ""), show(r.body));
+  r = await call("GET", "/portal-reports/cs/workflow/students?box=came", root);
+  check("…and a box's students say so too", r.status === 409 && /needs updating — it can't list a workflow box's students yet/.test(r.body?.message ?? ""), show(r.body));
   r = await call("GET", "/pending/cs", root);
   check("…and the CS portal tab says so too", r.status === 409 && /needs updating — it has no CS pending list yet/.test(r.body?.message ?? ""), show(r.body));
   oldServer = false;
@@ -144,6 +215,9 @@ async function main() {
   check("no session: 401", (await call("GET", "/cses")).status === 401 && (await call("GET", `/cses/${CS}`)).status === 401);
   check("an admin who is not a root admin: 403", (await call("GET", "/cses", member)).status === 403);
   check("Reports too: 401 with no session, 403 for a non-root admin", (await call("GET", "/portal-reports/cs")).status === 401 && (await call("GET", "/portal-reports/cs", member)).status === 403);
+  check("the student workflow too: 401 with no session, 403 for a non-root admin", (await call("GET", "/portal-reports/cs/workflow")).status === 401
+    && (await call("GET", "/portal-reports/cs/workflow", member)).status === 403 && (await call("GET", "/portal-reports/cs/workflow/students?box=came")).status === 401
+    && (await call("GET", "/portal-reports/cs/workflow/students?box=came", member)).status === 403);
   check("the CS portal tab too: 401 with no session, 403 for a non-root admin", (await call("GET", "/pending/cs")).status === 401 && (await call("GET", "/pending/cs", member)).status === 403);
 
   console.log(`\n${checks - failures}/${checks} checks passed`);

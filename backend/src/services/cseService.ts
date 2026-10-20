@@ -74,3 +74,73 @@ export const csReport = async (q: Record<string, unknown>) => {
   for (const k of ["team", "cs"] as const) if (typeof q[k] === "string" && /^[0-9a-f]{24}$/i.test(q[k] as string)) params.set(k, q[k] as string);
   return { ...(await ask<Record<string, unknown>>(`/cs-report?${params}`, "it has no CS report yet")), studentLink: studentLink() };
 };
+
+/*
+ * Reports → CS portal → Student workflow (the user, 2026-10-20): the period's
+ * students and where each went — came in (finance, LMS, sheet, by hand) →
+ * assigned to a CS or left in the open pool → onboarded / waiting (within
+ * 6 h) / late → enrolled in the LMS, contacted, first deposit, moved by hand —
+ * and their follow-up stage now, per team and CS, as Tetra Commission counts
+ * them (GET /service/student-workflow); the students behind one box or stage
+ * (GET /service/student-workflow/students). The period arrives as instants or
+ * days and goes as Gulf days; none is all time. Read-only.
+ */
+export const WORKFLOW_BOXES = ["came", "assigned", "pool", "onboarded", "waiting", "late", "enrolled", "contacted", "deposited", "moved", "moved_inactivity"] as const;
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const ID = /^[0-9a-f]{24}$/i;
+const bad = (message: string) => Object.assign(new Error(message), { statusCode: 400 });
+
+function workflowParams(q: Record<string, unknown>) {
+  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  const asDay = (v: string) => {
+    if (!v) return "";
+    if (!Number.isFinite(Date.parse(v))) throw bad("from / to must be dates");
+    return DAY.test(v) ? v : gulfDay(v);
+  };
+  let from = asDay(str(q.from)), to = asDay(str(q.to));
+  const params = new URLSearchParams();
+  if (from || to) {
+    from ||= to;
+    to ||= gulfDay(new Date().toISOString());
+    if (from > to) throw bad("from must be on or before to");
+    params.set("from", from);
+    params.set("to", to);
+  } else params.set("period", "all");
+  const location = str(q.location);
+  if (location) {
+    if (location !== "dubai" && location !== "bangalore") throw bad("location must be dubai or bangalore");
+    params.set("location", location);
+  }
+  for (const k of ["team", "cs"] as const) {
+    const v = str(q[k]);
+    if (!v) continue;
+    if (!ID.test(v)) throw bad(`${k === "team" ? "team" : "cs"} is not an id`);
+    params.set(k, v);
+  }
+  return params;
+}
+
+export const csStudentWorkflow = async (q: Record<string, unknown>) =>
+  ({ ...(await ask<Record<string, unknown>>(`/student-workflow?${workflowParams(q)}`, "it has no student workflow yet")), studentLink: studentLink() });
+
+export const csStudentWorkflowStudents = async (q: Record<string, unknown>) => {
+  const params = workflowParams(q);
+  const box = typeof q.box === "string" ? q.box.trim() : "";
+  const stage = typeof q.stage === "string" ? q.stage.trim() : "";
+  if (box && !(WORKFLOW_BOXES as readonly string[]).includes(box)) throw bad(`box must be one of ${WORKFLOW_BOXES.join(", ")}`);
+  if (!box && !stage) throw bad("Say which box or stage");
+  if (stage.length > 40) throw bad("stage is too long");
+  if (box) params.set("box", box);
+  if (stage) params.set("stage", stage);
+  // A team's row: its id, or empty for the open pool (students with no CS) — so "present but empty" is passed on.
+  if (typeof q.teamId === "string") {
+    const v = q.teamId.trim();
+    if (v && !ID.test(v)) throw bad("teamId is not an id");
+    params.set("teamId", v);
+  }
+  if (typeof q.csId === "string" && q.csId.trim()) {
+    if (!ID.test(q.csId.trim())) throw bad("csId is not an id");
+    params.set("csId", q.csId.trim());
+  }
+  return { ...(await ask<Record<string, unknown>>(`/student-workflow/students?${params}`, "it can't list a workflow box's students yet")), studentLink: studentLink() };
+};

@@ -13,6 +13,7 @@ import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
 import { talkTime } from "@/lib/calls";
 import { ReportBody, n0, usd, aed, pct, when, type Group, type Row, type Section } from "@/components/portal-reports/ReportBody";
+import { StudentWorkflowSection } from "@/components/portal-reports/StudentWorkflow";
 
 /**
  * Reports → CS portal (the user, 2026-10-17): what Tetra Commission's CSs did
@@ -201,6 +202,8 @@ export function CsReportView() {
           <Button variant="outline" size="sm" onClick={() => q.refetch()} disabled={q.isFetching}><RefreshCw className={cn(q.isFetching && "animate-spin")} /> Refresh</Button>
         </div>
       </div>
+
+      <StudentWorkflowSection period={period} location={location} team={team} cs={cs} />
 
       {q.isLoading ? (
         <div className="space-y-4">
