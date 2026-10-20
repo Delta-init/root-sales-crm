@@ -60,11 +60,24 @@ export function hrmsConfigured(): boolean {
 async function signedGet<T>(
   signedPath: string,
 ): Promise<{ data?: T; pagination?: { total: number } }> {
+  return signedCall<T>("GET", signedPath);
+}
+
+/**
+ * One signed call. A POST signs the exact JSON string it then sends — the
+ * hash has to be of those bytes, not of a second serialisation of the object.
+ */
+async function signedCall<T>(
+  method: "GET" | "POST",
+  signedPath: string,
+  body?: unknown,
+): Promise<{ data?: T; pagination?: { total: number } }> {
   const baseUrl = env.HRMS_API_URL.replace(/\/+$/, "").replace(/\/api\/v1$/, "");
   const timestamp = String(Date.now());
   const nonce = crypto.randomBytes(16).toString("hex");
-  const bodyHash = crypto.createHash("sha256").update("").digest("hex");
-  const canonical = ["GET", signedPath, timestamp, nonce, bodyHash].join("\n");
+  const raw = body === undefined ? "" : JSON.stringify(body);
+  const bodyHash = crypto.createHash("sha256").update(raw).digest("hex");
+  const canonical = [method, signedPath, timestamp, nonce, bodyHash].join("\n");
   const signature = crypto
     .createHmac("sha256", env.HRMS_INTEGRATION_SECRET)
     .update(canonical)
@@ -74,6 +87,7 @@ async function signedGet<T>(
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
     const res = await fetch(`${baseUrl}${signedPath}`, {
+      method,
       headers: {
         "Content-Type": "application/json",
         "X-Delta-Client": env.HRMS_CLIENT_ID,
@@ -81,6 +95,7 @@ async function signedGet<T>(
         "X-Delta-Nonce": nonce,
         "X-Delta-Signature": signature,
       },
+      body: body === undefined ? undefined : raw,
       signal: controller.signal,
     });
 
@@ -161,5 +176,34 @@ export async function listDepartments(): Promise<DirectoryDepartment[]> {
   const body = await signedGet<DirectoryDepartment[]>(
     `/api/v1/integrations/directory/departments?${qs}`,
   );
+  return body.data ?? [];
+}
+
+/** One person as HRMS's work-modes answer has them — photoUrl is a signed link, good for a few hours. */
+export interface WorkModeRow {
+  email: string;
+  matchedBy: string | null;
+  hrmsEmail: string | null;
+  hrmsName: string | null;
+  workMode: string | null;
+  location: string | null;
+  status: string | null;
+  designation: string | null;
+  photoUrl: string | null;
+}
+
+/** Whether the signed client can call at all — work-modes needs no organization. */
+export function hrmsSigningConfigured(): boolean {
+  return Boolean(env.HRMS_API_URL && env.HRMS_CLIENT_ID && env.HRMS_INTEGRATION_SECRET);
+}
+
+/**
+ * Where these people work and their photo (the Sales TV's on-break panel,
+ * 2026-10-20). Matched by email, then name; answered in the order asked.
+ */
+export async function workModes(people: { email: string; name?: string }[]): Promise<WorkModeRow[]> {
+  if (!hrmsSigningConfigured()) throw httpError("HRMS is not configured.", 503);
+  if (!people.length) return [];
+  const body = await signedCall<WorkModeRow[]>("POST", "/api/v1/integrations/directory/work-modes", { people: people.slice(0, 300) });
   return body.data ?? [];
 }
