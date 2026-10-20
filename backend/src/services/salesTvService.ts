@@ -252,6 +252,7 @@ export async function salesTv(opts: SalesTvOptions = {}) {
       return pub ? {
         id: p.id, name: p.name, team: p.team, closingsMonth: p.closingsMonth, closingsToday: p.closingsToday,
         callsToday: p.callsToday, connectedToday: p.connectedToday, talkSecondsToday: p.talkSecondsToday, photoUrl,
+        revenueMonth: p.revenueMonth,
       } : { ...p, photoUrl };
     });
     return {

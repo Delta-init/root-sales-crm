@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type R
 import { AlertTriangle, Maximize, Minimize, Trophy, Volume2, VolumeX } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
-  breakLabel, crmTag, crmTone, fmtClock, fmtInt, fmtMoney, fmtTalk, initials, monthLabel,
+  breakLabel, crmTag, crmTone, fmtClock, fmtInt, fmtMoney, fmtRevenue, fmtTalk, initials, monthLabel,
   type SalesTvBreak, type SalesTvClose, type SalesTvCrm, type SalesTvFetcher, type SalesTvPerson,
 } from "@/lib/salesTv";
 import { setSoundPref, soundUnlocked, unlockSound, useSoundPref, useSoundUnlocked, type SaleClosed } from "@/lib/saleAnnouncement";
@@ -13,9 +13,10 @@ import { boardFont } from "./font";
 
 /*
  * The Sales TV board (the user, 2026-10-20): the Dubai Sales CRM, Draw and
- * Remote side by side — closings this month and today, calls today (connected
- * of total) and talk time — who is on a break now (HRMS photo, live timer),
- * and every close celebrated with the amount, a sparkle and a voice.
+ * Remote side by side — closings this month and today, revenue this month,
+ * calls today (connected of total) and talk time — who is on a break now
+ * (HRMS photo, live timer), and every close celebrated with the amount, a
+ * sparkle and a voice.
  *
  * Each CRM opens with a podium (the user's reference, 2026-10-20): the top
  * three on 3D steps with their HRMS photos and a gold, silver or bronze
@@ -259,7 +260,13 @@ function Header({ tv, serverNow, lastOk, now, fetchError, rootRef }: {
 
 // ── A CRM: the podium, then the standings ──────────────────────────────────────
 
-const COLS = "grid grid-cols-[clamp(1.7rem,1.9vw,2.9rem)_minmax(0,1fr)_repeat(2,minmax(0,clamp(1.7rem,1.9vw,2.9rem)))_minmax(0,clamp(3.2rem,3.5vw,5.2rem))_minmax(0,clamp(3.4rem,3.6vw,5.4rem))] items-center whitespace-nowrap gap-x-[clamp(0.15rem,0.25vw,0.45rem)]";
+/*
+ * #, salesperson, closings this month and today, revenue this month, calls today; talk time too where the screen is
+ * wide enough (a TV) — on a laptop the names need the room.
+ */
+const COLS = "grid grid-cols-[clamp(1.7rem,1.9vw,2.9rem)_minmax(0,1fr)_repeat(2,minmax(0,clamp(1.7rem,1.9vw,2.9rem)))_minmax(0,clamp(3.6rem,4vw,6rem))_minmax(0,clamp(3.2rem,3.5vw,5.2rem))] min-[1500px]:grid-cols-[clamp(1.7rem,1.9vw,2.9rem)_minmax(0,1fr)_repeat(2,minmax(0,clamp(1.7rem,1.9vw,2.9rem)))_minmax(0,clamp(3.6rem,4vw,6rem))_minmax(0,clamp(3.2rem,3.5vw,5.2rem))_minmax(0,clamp(3.4rem,3.6vw,5.4rem))] items-center whitespace-nowrap gap-x-[clamp(0.15rem,0.25vw,0.45rem)]";
+/** The talk-time column: only where it fits. */
+const WIDE = "hidden min-[1500px]:block";
 
 /** The most connected calls and talk time today in this CRM (0 when nobody has any yet). */
 function bests(people: SalesTvPerson[]) {
@@ -274,8 +281,8 @@ function CrmColumn({ crm, tv }: { crm: SalesTvCrm; tv: boolean }) {
   const rest = crm.people.slice(3);
   useAutoScroll(body, tv, rest.length);
   const t = crm.people.reduce(
-    (a, p) => ({ m: a.m + p.closingsMonth, d: a.d + p.closingsToday, c: a.c + p.callsToday, k: a.k + p.connectedToday, s: a.s + p.talkSecondsToday }),
-    { m: 0, d: 0, c: 0, k: 0, s: 0 },
+    (a, p) => ({ m: a.m + p.closingsMonth, d: a.d + p.closingsToday, r: a.r + (p.revenueMonth ?? 0), c: a.c + p.callsToday, k: a.k + p.connectedToday, s: a.s + p.talkSecondsToday }),
+    { m: 0, d: 0, r: 0, c: 0, k: 0, s: 0 },
   );
   const best = bests(crm.people);
   const head = cn("text-right font-medium text-[color:var(--ink2)]", T.tiny);
@@ -312,8 +319,9 @@ function CrmColumn({ crm, tv }: { crm: SalesTvCrm; tv: boolean }) {
             <span className={cn(head, "text-left")}>Salesperson</span>
             <span className={head} title="Closings this month">Month</span>
             <span className={head} title="Closings today">Today</span>
+            <span className={head} title="Revenue this month (AED) — payments collected">Revenue</span>
             <span className={head} title="Calls today: connected / total">Calls</span>
-            <span className={head} title="Talk time today">Talk</span>
+            <span className={cn(head, WIDE)} title="Talk time today">Talk</span>
           </div>
 
           <div ref={body} className="stv-scroll min-h-0 flex-1 overflow-y-auto px-[clamp(0.4rem,0.5vw,0.8rem)]">
@@ -330,8 +338,9 @@ function CrmColumn({ crm, tv }: { crm: SalesTvCrm; tv: boolean }) {
             <span className={cn("col-span-2 truncate font-medium text-[color:var(--mute)]", T.small)}>Total · {crm.people.length} people</span>
             <Num>{fmtInt(t.m)}</Num>
             <Num>{fmtInt(t.d)}</Num>
+            <Num className="text-[color:var(--money)]" title={fmtRevenue(t.r)}>{fmtInt(t.r)}</Num>
             <Num>{fmtInt(t.k)}<span className="text-[color:var(--mute)]">/{fmtInt(t.c)}</span></Num>
-            <Num>{fmtTalk(t.s)}</Num>
+            <Num className={WIDE}>{fmtTalk(t.s)}</Num>
           </div>
         </>
       )}
@@ -390,6 +399,9 @@ function Step({ p, rank }: { p: SalesTvPerson; rank: number }) {
           </span>
           <p className={cn("num mt-1 font-bold leading-none", first ? "text-[clamp(1.6rem,2vw,2.9rem)]" : "text-[clamp(1.3rem,1.55vw,2.25rem)]")}>{fmtInt(p.closingsMonth)}</p>
           <p className={cn("text-[color:var(--mute)]", T.tiny)}>closings</p>
+          <p className={cn("num mt-[clamp(0.2rem,0.3vw,0.45rem)] whitespace-nowrap font-bold text-[color:var(--money)]", first ? T.body : T.small)} title="Revenue this month">
+            {fmtRevenue(p.revenueMonth ?? 0)}
+          </p>
           <div className="my-[clamp(0.25rem,0.35vw,0.5rem)] h-px w-4/5 bg-[color:var(--line)]" />
           <p className={cn("num whitespace-nowrap text-[color:var(--ink2)]", T.tiny)}>
             <span className={p.closingsToday > 0 ? "font-semibold text-[color:var(--good)]" : undefined}>{fmtInt(p.closingsToday)} today</span>
@@ -417,11 +429,12 @@ function PersonRow({ p, rank, best }: { p: SalesTvPerson; rank: number; best: Re
       </span>
       <Num className="font-semibold">{fmtInt(p.closingsMonth)}</Num>
       <Num className={p.closingsToday > 0 ? "font-semibold text-[color:var(--good)]" : zero}>{fmtInt(p.closingsToday)}</Num>
+      <Num className={p.revenueMonth ? "font-semibold text-[color:var(--money)]" : zero} title={fmtRevenue(p.revenueMonth ?? 0)}>{fmtInt(p.revenueMonth ?? 0)}</Num>
       <Num title="Connected / total — orange: the most today in this CRM">
         <span style={hot(p.connectedToday, best.conn)} className={p.connectedToday ? undefined : zero}>{fmtInt(p.connectedToday)}</span>
         <span className={zero}>/{fmtInt(p.callsToday)}</span>
       </Num>
-      <Num className={p.talkSecondsToday ? "text-[color:var(--ink2)]" : zero} style={hot(p.talkSecondsToday, best.talk)}>{fmtTalk(p.talkSecondsToday)}</Num>
+      <Num className={cn(p.talkSecondsToday ? "text-[color:var(--ink2)]" : zero, WIDE)} style={hot(p.talkSecondsToday, best.talk)}>{fmtTalk(p.talkSecondsToday)}</Num>
     </li>
   );
 }

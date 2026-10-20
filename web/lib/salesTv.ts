@@ -2,7 +2,7 @@
  * Sales TV (the user, 2026-10-20): what the backend's GET /sales-tv and the
  * open GET /public/sales-tv answer (services/salesTvService.ts there), and the
  * small formatting the board needs. The open answer is the same without any
- * email or revenue figure.
+ * email (revenue is shown, the user, 2026-10-20).
  */
 
 export type SalesTvCrmStatus = "ok" | "error" | "outdated" | "loading";
@@ -16,10 +16,11 @@ export interface SalesTvPerson {
   callsToday: number;
   connectedToday: number;
   talkSecondsToday: number;
+  /** This month's revenue — payments collected, as the CRM's own leaderboard counts it. */
+  revenueMonth?: number;
   /** HRMS photo (a signed link, good for a few hours), or null for initials. */
   photoUrl?: string | null;
   email?: string;
-  revenueMonth?: number;
 }
 
 export interface SalesTvCrm {
@@ -118,3 +119,6 @@ export function teamTone(team: string): string {
   for (const ch of team.toLowerCase()) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return TEAM_TONES[h % TEAM_TONES.length];
 }
+
+/** Revenue on the board: the CRMs' figures are dirhams, as their close amounts are. "AED 45,500". */
+export const fmtRevenue = (n: number) => fmtMoney(n, "AED");

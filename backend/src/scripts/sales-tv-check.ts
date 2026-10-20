@@ -198,7 +198,7 @@ async function main() {
   const pd = r.body?.data ?? {};
   check("…but names, teams, counts, photo links and close amounts", crmOf(pd, "delta").people?.[0]?.name === "Asha" && crmOf(pd, "delta").people?.[0]?.team === "Falcons"
     && crmOf(pd, "delta").people?.[0]?.closingsMonth === 9 && crmOf(pd, "delta").people?.[1]?.photoUrl?.startsWith("https://") && pd.onBreak?.[0]?.photoUrl?.startsWith("https://") && pd.closes?.[0]?.amount > 0, show(pd));
-  check("…and no revenue figures", !/revenueMonth/.test(r.text));
+  check("…and this month's revenue (the user, 2026-10-20: shown on the TV)", crmOf(pd, "delta").people?.[0]?.revenueMonth === 50000, show(crmOf(pd, "delta").people?.[0]));
 
   step("Case 3 — Draw goes down");
   drawDown = true;
