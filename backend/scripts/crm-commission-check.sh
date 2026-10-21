@@ -34,6 +34,7 @@ release_port() {
 cleanup() {
   local code=$?
   release_port "$API_PORT"
+  release_port "${CRMCOMM_CRM_PORT:-5296}"
   mongod --dbpath "$WORK/db" --port "$MONGO_PORT" --shutdown >/dev/null 2>&1 || true
   release_port "$MONGO_PORT"
   rm -rf "$WORK"
@@ -61,9 +62,11 @@ export JWT_REFRESH_SECRET="crm-commission-e2e-refresh-secret-0123456789abcdef"
 export CLIENT_URL="http://localhost:3100"
 export SMTP_HOST="" SMTP_USER="" SMTP_PASS="" SMTP_EMAIL_FROM=""
 export HRMS_API_URL="" HRMS_CLIENT_ID="" HRMS_INTEGRATION_SECRET="" HRMS_ORG_ID=""
-export DELTA_API_URL="" DRAW_API_URL="" BANGLORE_API_URL="" REMOTE_API_URL=""
+# Sales and Draw answer My Pay through a stand-in the check starts; Remote's API is not set (its figures can't be had).
+export E2E_CRM_PORT="${CRMCOMM_CRM_PORT:-5296}"
+export DELTA_API_URL="http://127.0.0.1:$E2E_CRM_PORT/delta" DRAW_API_URL="http://127.0.0.1:$E2E_CRM_PORT/draw" BANGLORE_API_URL="" REMOTE_API_URL=""
 # A CRM's secret is set so the check can show it does not open finance's door.
-export DELTA_SSO_SECRET="crm-commission-e2e-delta-secret" DRAW_SSO_SECRET="" BANGLORE_SSO_SECRET="" REMOTE_SSO_SECRET=""
+export DELTA_SSO_SECRET="crm-commission-e2e-delta-secret" DRAW_SSO_SECRET="crm-commission-e2e-draw-secret" BANGLORE_SSO_SECRET="" REMOTE_SSO_SECRET=""
 export DELTA_MONGODB_URI="$MONGO/delta-crm-crm-commission-e2e" DRAW_MONGODB_URI="$MONGO/draw-crm-crm-commission-e2e" REMOTE_MONGODB_URI="$MONGO/remote-crm-crm-commission-e2e"
 # Nothing listens on port 1: Banglore cannot be reached.
 export BANGLORE_MONGODB_URI="mongodb://127.0.0.1:1/banglore-crm-crm-commission-e2e"

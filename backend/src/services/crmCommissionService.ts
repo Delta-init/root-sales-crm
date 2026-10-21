@@ -1,4 +1,5 @@
 import { getSources } from "./crmConnections.js";
+import { resolveTarget, callTarget } from "../lib/targetClient.js";
 
 /**
  * GET /service/crm-commission?month=YYYY-MM — finance's CRM commission tab (the user, 2026-10-21: "commission of each
@@ -8,6 +9,10 @@ import { getSources } from "./crmConnections.js";
  * what decided once), per person: their lines as salesperson, team leader or sales manager added up, and the sales
  * behind them. Amounts in the CRM's own currency, major units, as the CRM keeps them. Sales still on their way (in
  * progress or waiting) are counted, not listed. A CRM that can't be reached says so and the others still answer.
+ *
+ * And what finance pays (the user, 2026-10-21: "finance pays My Pay's commission payable"): each person's My Pay
+ * figures from the CRM's own API (GET /service/pay) — the commission earned × their salary-slab level's percent,
+ * "payable" — which can only be worked out there. A CRM whose API can't say gives `payError` and no payable.
  * Read-only.
  */
 
@@ -16,10 +21,27 @@ export interface CommissionLine {
 }
 export interface CommissionPerson {
   userId: string; name: string; roles: string[]; amount: number; sales: number; lines: CommissionLine[];
+  /** My Pay's commission payable, the level's percent and name; null when the CRM's API couldn't say. */
+  payable: number | null; percent: number | null; level: string | null;
 }
 export interface CrmCommission {
   code: string; name: string; currency: string; error: string | null;
   people: CommissionPerson[]; total: number; pending: { progress: number; waiting: number };
+  /** Payable this month, all people; null with payError when the CRM's My Pay figures couldn't be had. */
+  payableTotal: number | null; payError: string | null;
+}
+
+interface PayPerson { user: string; name: string; percent: number; level: string; earned: number; payable: number }
+
+/** A CRM's My Pay figures for the month, through its API — or why not. */
+async function payOf(code: string, month: string): Promise<{ people: PayPerson[] } | { error: string }> {
+  try {
+    const target = await resolveTarget(code);
+    const data = await callTarget<{ people?: PayPerson[] }>(target, `/pay?month=${encodeURIComponent(month)}`, { method: "GET", verb: "share My Pay" });
+    return { people: data?.people ?? [] };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Its My Pay figures could not be had" };
+  }
 }
 
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -32,6 +54,9 @@ export async function crmCommission(month: string): Promise<{ month: string; crm
   const { sources, failures } = await getSources();
   const crms: CrmCommission[] = await Promise.all(sources.map(async ({ org, conn }) => {
     const base = { code: org.code, name: org.name, currency: (org as { currency?: string }).currency || "AED" };
+    const pay = await payOf(org.code, month);
+    const payByUser = "people" in pay ? new Map(pay.people.map((p) => [String(p.user), p])) : null;
+    const payError = "error" in pay ? pay.error : null;
     try {
       const sales = conn.collection("commissionsales");
       const [counted, progress, waiting] = await Promise.all([
@@ -46,7 +71,12 @@ export async function crmCommission(month: string): Promise<{ month: string; crm
           const amount = Number(l.amount) || 0;
           if (!l.user || !(amount > 0)) continue;
           const id = String(l.user);
-          const p = byPerson.get(id) ?? { userId: id, name: String(l.userName || "—"), roles: [], amount: 0, sales: 0, lines: [] };
+          const mine = payByUser?.get(id);
+          const p = byPerson.get(id) ?? {
+            userId: id, name: String(l.userName || "—"), roles: [], amount: 0, sales: 0, lines: [],
+            payable: payByUser ? Math.round((Number(mine?.payable) || 0) * 100) / 100 : null,
+            percent: mine ? Number(mine.percent) || 0 : payByUser ? 0 : null, level: mine?.level ?? null,
+          };
           if (!p.roles.includes(String(l.role))) p.roles.push(String(l.role));
           p.amount += amount;
           if (!sold.has(id)) { p.sales++; sold.add(id); }
@@ -60,11 +90,12 @@ export async function crmCommission(month: string): Promise<{ month: string; crm
       const people = [...byPerson.values()]
         .map((p) => ({ ...p, amount: Math.round(p.amount * 100) / 100 }))
         .sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name));
-      return { ...base, error: null, people, total: Math.round(people.reduce((t, p) => t + p.amount, 0) * 100) / 100, pending: { progress, waiting } };
+      const payableTotal = payByUser ? Math.round(people.reduce((t, p) => t + (p.payable ?? 0), 0) * 100) / 100 : null;
+      return { ...base, error: null, people, total: Math.round(people.reduce((t, p) => t + p.amount, 0) * 100) / 100, pending: { progress, waiting }, payableTotal, payError };
     } catch (e) {
-      return { ...base, error: e instanceof Error ? e.message : "Could not read its commission", people: [], total: 0, pending: { progress: 0, waiting: 0 } };
+      return { ...base, error: e instanceof Error ? e.message : "Could not read its commission", people: [], total: 0, pending: { progress: 0, waiting: 0 }, payableTotal: null, payError };
     }
   }));
-  for (const f of failures) crms.push({ code: f.code, name: f.name, currency: "AED", error: f.error, people: [], total: 0, pending: { progress: 0, waiting: 0 } });
+  for (const f of failures) crms.push({ code: f.code, name: f.name, currency: "AED", error: f.error, people: [], total: 0, pending: { progress: 0, waiting: 0 }, payableTotal: null, payError: null });
   return { month, crms };
 }

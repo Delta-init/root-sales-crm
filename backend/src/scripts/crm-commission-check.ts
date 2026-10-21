@@ -7,11 +7,14 @@
  *                        waiting ones counted, not listed
  *   Case 2  edge         a person with lines in two roles of one sale counts the sale once; a zero line is left out;
  *                        a CRM that cannot be read says so and the rest still answer
+ *   Case 5  payable      each person's My Pay figures from the CRM's API (2026-10-21): payable, percent, level; a
+ *                        CRM whose API is not set up says why, with no payable
  *   Case 3  errors       no month, a bad month → 400
  *   Case 4  permission   no secret, a wrong one, a CRM's secret → 401; finance switched off in the registry → 503
  *
  * Run through scripts/crm-commission-check.sh. Scratch databases on 127.0.0.1 only.
  */
+import http from "node:http";
 import mongoose, { Types } from "mongoose";
 
 const uri = process.env.MONGODB_URI ?? "";
@@ -51,7 +54,23 @@ async function ask(month: string | null, secret: string | null = SECRET): Promis
   return { status: r.status, body: await r.json().catch(() => ({})) };
 }
 
+/* A stand-in for the CRMs' APIs: GET /api/v1/service/pay?month= behind each CRM's secret. */
+const payHits: Array<{ crm: string; month: string | null; secretOk: boolean }> = [];
+const PAY: Record<string, { secret: string; people: unknown[] }> = {};
+const crmApi = http.createServer((req, res) => {
+  const url = new URL(req.url ?? "/", "http://x");
+  const [, crm] = url.pathname.split("/");
+  const cfg = PAY[crm ?? ""];
+  const secretOk = !!cfg && req.headers["x-portal-secret"] === cfg.secret;
+  payHits.push({ crm: crm ?? "", month: url.searchParams.get("month"), secretOk });
+  const send = (code: number, body: unknown) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
+  if (!cfg || url.pathname !== `/${crm}/api/v1/service/pay`) return send(404, { success: false, message: "Route not found" });
+  if (!secretOk) return send(401, { success: false, message: "Bad secret" });
+  send(200, { success: true, message: "Pay", data: { month: url.searchParams.get("month"), people: cfg.people } });
+});
+
 async function main() {
+  await new Promise<void>((ok) => crmApi.listen(Number(process.env.E2E_CRM_PORT), "127.0.0.1", ok));
   mongoose.set("autoIndex", false);
   mongoose.set("autoCreate", false);
   await mongoose.connect(uri);
@@ -85,6 +104,14 @@ async function main() {
     sale({ date: "2026-10-17T08:00:00Z", month: "2026-10", state: "reversed", student: "S6", lines: [["sales", ria, "Ria", 900]] }),
     sale({ date: "2026-09-28T08:00:00Z", month: "2026-09", state: "counted", student: "S7", lines: [["sales", ria, "Ria", 300]] }),
   ]);
+  PAY.delta = { secret: process.env.DELTA_SSO_SECRET ?? "", people: [
+    { user: String(ria), name: "Ria", role: "sales", level: "Level 2", percent: 50, earned: 1200, payable: 600, notCountedYet: 0 },
+    { user: String(lena), name: "Lena", role: "tl", level: "Base", percent: 0, earned: 600, payable: 0, notCountedYet: 0 },
+    { user: String(abrar), name: "Abrar", role: "sm", level: "Level 1", percent: 100, earned: 120, payable: 120, notCountedYet: 0 },
+  ] };
+  PAY.draw = { secret: process.env.DRAW_SSO_SECRET ?? "", people: [
+    { user: String(irfana), name: "Irfana", role: "sales", level: "Level 1", percent: 40, earned: 250, payable: 100, notCountedYet: 0 },
+  ] };
   await drawDb.collection("commissionsales").insertOne(
     sale({ date: "2026-10-05T08:00:00Z", month: "2026-10", state: "counted", student: "D1", lines: [["sales", irfana, "Irfana", 250], ["sm", maneesh, "Maneesh", 25]] }),
   );
@@ -107,6 +134,14 @@ async function main() {
   step("Case 2 — a CRM that cannot be read");
   check("Banglore: says it cannot be read, the others still answered", typeof crm("banglore").error === "string" && crm("banglore").error.length > 0 && delta.people?.length === 3, show(crm("banglore")));
 
+  step("Case 5 — what is payable, from each CRM's My Pay (2026-10-21)");
+  check("Sales CRM: Ria 600 payable at 50% (Level 2), Lena 0 at the base level, Abrar 120 at 100%",
+    JSON.stringify(delta.people?.map((p: Json) => [p.name, p.amount, p.payable, p.percent, p.level])) === JSON.stringify([["Ria", 1200, 600, 50, "Level 2"], ["Lena", 600, 0, 0, "Base"], ["Abrar", 120, 120, 100, "Level 1"]]), show(delta.people));
+  check("…the CRM's payable total, no pay error", delta.payableTotal === 720 && delta.payError === null, show({ t: delta.payableTotal, e: delta.payError }));
+  check("Draw: Irfana 100 payable of 250", crm("draw").people?.[0]?.payable === 100 && crm("draw").payableTotal === 100, show(crm("draw").people));
+  check("asked each CRM's API with its own secret, for the month", payHits.some((h) => h.crm === "delta" && h.secretOk && h.month === "2026-10") && payHits.some((h) => h.crm === "draw" && h.secretOk), show(payHits));
+  check("Remote: its API isn't set up — says why, no payable", typeof crm("remote").payError === "string" && /not configured/.test(crm("remote").payError) && crm("remote").payableTotal === null, show(crm("remote")));
+
   step("Case 3 — errors");
   check("no month: 400", (await ask(null)).status === 400);
   check("a bad month: 400", (await ask("2026-13")).status === 400);
@@ -119,6 +154,7 @@ async function main() {
   check("finance switched off in the registry: 503", (await ask("2026-10")).status === 503);
 
   console.log(`\n${checks - failures}/${checks} checks passed`);
+  crmApi.close();
   await mongoose.disconnect();
   process.exit(failures ? 1 : 0);
 }
