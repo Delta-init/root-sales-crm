@@ -69,7 +69,9 @@ export DELTA_API_URL="$STANDIN/delta" DELTA_SSO_SECRET="sales-tv-e2e-delta"
 export DRAW_API_URL="$STANDIN/draw/api/v1" DRAW_SSO_SECRET="sales-tv-e2e-draw"
 export REMOTE_API_URL="$STANDIN/remote" REMOTE_SSO_SECRET="sales-tv-e2e-remote"
 export BANGLORE_API_URL="" BANGLORE_SSO_SECRET=""
-export DELTA_MONGODB_URI="" DRAW_MONGODB_URI="" BANGLORE_MONGODB_URI="" REMOTE_MONGODB_URI=""
+# Delta's leads in a scratch database (who got leads this month); Draw has none configured, so Draw shows everybody.
+export DELTA_MONGODB_URI="$MONGO/delta-crm-sales-tv-e2e"
+export DRAW_MONGODB_URI="" BANGLORE_MONGODB_URI="" REMOTE_MONGODB_URI=""
 export LEAD_TRAFFIC_SHEET_KEY="" TRAFFIC_WORKER=false BACKUP_WORKER=false
 export E2E_STANDIN_PORT="$STANDIN_PORT"
 export E2E_API_PORT="$API_PORT"

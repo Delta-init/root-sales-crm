@@ -1,6 +1,7 @@
 import { Organization } from "../models/Organization.js";
 import { resolveTarget, callTarget } from "../lib/targetClient.js";
 import { workModes, hrmsSigningConfigured } from "../lib/hrmsClient.js";
+import { getSources } from "./crmConnections.js";
 
 /*
  * Sales TV (the user, 2026-10-20): the Dubai Sales CRM, Draw and Remote on one
@@ -19,6 +20,13 @@ import { workModes, hrmsSigningConfigured } from "../lib/hrmsClient.js";
  *
  * Each CRM keeps its own error: one that is down or older than this feature
  * shows on its own table, and the other two carry on.
+ *
+ * Only the people working this month are shown (the user, 2026-10-22: "only
+ * this month's leads, inactive users not shown"): someone given a lead this
+ * month — a lead reaches them at its createdAt, a hand-over included — or
+ * credited with a close this month. The leads are counted here, read-only from
+ * the CRM's own database (as the Salespeople page reads it), with the people.
+ * A CRM whose leads can't be read shows everybody rather than nobody.
  */
 
 export const SALES_TV_CRMS = ["delta", "draw", "remote"] as const;
@@ -35,6 +43,9 @@ const NAMES_MS = 5 * 60_000;
 /** How long a screen waits on a slow CRM before it gets what is already known. */
 const WAIT_MS = 6_000;
 const PHOTO_WAIT_MS = 2_500;
+const LEADS_QUERY_MS = 10_000;
+const DUBAI_OFFSET_MS = 4 * 3_600_000;
+const MONTH = /^(19|20)\d{2}-(0[1-9]|1[0-2])$/;
 
 const FALLBACK_NAMES: Record<CrmCode, string> = { delta: "Dubai Sales", draw: "Draw", remote: "Remote" };
 
@@ -58,6 +69,8 @@ interface CrmState {
   code: CrmCode;
   people: CrmPerson[] | null;
   month: string | null;
+  /** Leads each person was given this month, by CRM user id — null while unknown (then nobody is hidden). */
+  leadsMonth: Map<string, number> | null;
   onBreak: CrmBreak[];
   /** When each part was last asked for (success or not) — what the windows are measured from. */
   fullAskedAt: number;
@@ -75,7 +88,7 @@ interface CrmState {
 
 const state = new Map<CrmCode, CrmState>(
   SALES_TV_CRMS.map((code) => [code, {
-    code, people: null, month: null, onBreak: [], fullAskedAt: 0, liveAskedAt: 0, peopleAt: 0, liveAt: 0,
+    code, people: null, month: null, leadsMonth: null, onBreak: [], fullAskedAt: 0, liveAskedAt: 0, peopleAt: 0, liveAt: 0,
     error: null, outdated: false, newestClose: null, inflight: null,
   }]),
 );
@@ -139,6 +152,37 @@ function cleanBreaks(list: CrmBreak[] | undefined): CrmBreak[] {
   }));
 }
 
+/** "2026-10" (else the current Dubai month) → that Dubai month's instants. */
+function dubaiMonth(month: string | null): { from: Date; to: Date } {
+  const now = new Date(Date.now() + DUBAI_OFFSET_MS);
+  const [y, m] = month && MONTH.test(month) ? month.split("-").map(Number) as [number, number] : [now.getUTCFullYear(), now.getUTCMonth() + 1];
+  return { from: new Date(Date.UTC(y, m - 1, 1) - DUBAI_OFFSET_MS), to: new Date(Date.UTC(y, m, 1) - DUBAI_OFFSET_MS) };
+}
+
+/** Leads given to each person in the month, from the CRM's database; null when it can't be read. */
+async function leadsThisMonth(code: CrmCode, month: string | null): Promise<Map<string, number> | null> {
+  try {
+    const { sources } = await getSources();
+    const src = sources.find((x) => x.org.code === code);
+    if (!src) return null;
+    const { from, to } = dubaiMonth(month);
+    const rows = await src.conn.collection("leads").aggregate<{ _id: unknown; n: number }>([
+      { $match: { assignedTo: { $ne: null }, createdAt: { $gte: from, $lt: to } } },
+      { $group: { _id: "$assignedTo", n: { $sum: 1 } } },
+    ], { maxTimeMS: LEADS_QUERY_MS }).toArray();
+    return new Map(rows.map((r) => [String(r._id), r.n]));
+  } catch {
+    return null;
+  }
+}
+
+/** Who the TV shows: given a lead this month or credited with a close; everybody while the leads are unknown. */
+function shownPeople(s: CrmState): CrmPerson[] {
+  const people = s.people ?? [];
+  const leads = s.leadsMonth;
+  return leads ? people.filter((p) => (leads.get(p.id) ?? 0) > 0 || p.closingsMonth > 0) : people;
+}
+
 /** One CRM, brought up to date if its window has passed. Concurrent screens share one call. */
 function refreshCrm(code: CrmCode, now: number): Promise<void> {
   const s = state.get(code)!;
@@ -168,6 +212,8 @@ function refreshCrm(code: CrmCode, now: number): Promise<void> {
         s.people = cleanPeople(data.people);
         s.month = str(data.month) || null;
         s.peopleAt = at;
+        // Unreadable this time: the last counts stand (none yet → nobody hidden).
+        s.leadsMonth = (await leadsThisMonth(code, s.month)) ?? s.leadsMonth;
       }
       s.error = null;
       s.outdated = false;
@@ -199,7 +245,7 @@ function refreshPhotos(now: number): Promise<void> {
     if (!known || known.until <= now) want.set(email, name);
   };
   for (const s of state.values()) for (const b of s.onBreak) ask(b.email, b.name);
-  for (const s of state.values()) for (const p of s.people ?? []) ask(p.email, p.name);
+  for (const s of state.values()) for (const p of shownPeople(s)) ask(p.email, p.name);
   if (!want.size) return Promise.resolve();
   const asked = [...want].map(([email, name]) => ({ email, name: name || undefined }));
   photoInflight = (async () => {
@@ -247,7 +293,7 @@ export async function salesTv(opts: SalesTvOptions = {}) {
     const s = state.get(code)!;
     const status = s.error ? (s.outdated ? "outdated" : "error") : s.people ? "ok" : "loading";
     const error = !s.error ? null : s.outdated ? s.error : pub ? `${nameOf(code)} can't be reached right now.` : s.error;
-    const people = (s.people ?? []).map((p) => {
+    const people = shownPeople(s).map((p) => {
       const photoUrl = (p.email && photos.get(p.email)?.url) || null;
       return pub ? {
         id: p.id, name: p.name, team: p.team, closingsMonth: p.closingsMonth, closingsToday: p.closingsToday,

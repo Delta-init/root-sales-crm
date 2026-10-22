@@ -3,6 +3,8 @@
  *
  *   Case 1  happy path   the three CRMs merged: Delta's and Draw's tables, who is on a break with the HRMS
  *                        photo (signed POST to work-modes), the closes of both tagged with their CRM, newest first
+ *                        — only the people working this month: given a lead this month (counted from Delta's
+ *                        database) or credited with a close; Draw, whose leads can't be read, shows everybody
  *   Case 2  edge         the cache — no CRM asked twice inside 5 s, live parts (with ?after=) after 5 s, the people
  *                        again only after 30 s; a close sent twice kept once; ?since= keeps only what is new;
  *                        HRMS asked once per email
@@ -22,6 +24,11 @@ if (!/^mongodb:\/\/127\.0\.0\.1:\d+\/[^/?]*e2e/.test(uri)) {
   console.error(`Refusing to run: MONGODB_URI must be a scratch e2e database on 127.0.0.1, got "${uri}"`);
   process.exit(1);
 }
+const deltaUri = process.env.DELTA_MONGODB_URI ?? "";
+if (!/^mongodb:\/\/127\.0\.0\.1:\d+\/[^/?]*e2e/.test(deltaUri)) {
+  console.error(`Refusing to run: DELTA_MONGODB_URI must be a scratch e2e database on 127.0.0.1, got "${deltaUri}"`);
+  process.exit(1);
+}
 const ROOT = `http://127.0.0.1:${process.env.E2E_API_PORT}/api/v1`;
 const PASSWORD = "SalesTvE2e!pass1";
 
@@ -37,6 +44,7 @@ const show = (v: unknown) => JSON.stringify(v).slice(0, 500);
 const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
+const pd0 = (r: { body: Json }) => r.body?.data ?? {};
 async function call(path: string, headers: Record<string, string> = {}): Promise<{ status: number; body: Json; text: string; headers: Headers }> {
   const r = await fetch(`${ROOT}${path}`, { headers: { "content-type": "application/json", ...headers } });
   const text = await r.text();
@@ -46,6 +54,10 @@ async function call(path: string, headers: Record<string, string> = {}): Promise
 }
 
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
+const MONTH_NOW = (() => { const g = new Date(Date.now() + 4 * 3_600_000); return `${g.getUTCFullYear()}-${String(g.getUTCMonth() + 1).padStart(2, "0")}`; })();
+// Delta's people are CRM users: ObjectIds, as a lead's assignedTo holds them.
+const oid = () => new mongoose.Types.ObjectId();
+const DELTA_ID = { asha: oid(), bina: oid(), cara: oid(), dev: oid(), eli: oid() };
 
 // ── The stand-in: three CRMs and HRMS ────────────────────────────────────────
 const hits: { crm: string; query: string }[] = [];
@@ -75,11 +87,19 @@ function crmAnswer(crm: string, url: URL) {
   if (live) return base;
   const people = crm === "delta"
     ? [
-      { id: "u-asha", name: "Asha", email: "asha@delta-e2e.test", team: "Falcons", closingsMonth: 9, closingsToday: 1, revenueMonth: 50000, callsToday: 40, connectedToday: 22, talkSecondsToday: 5400 },
-      { id: "u-bina", name: "Bina", email: "bina@delta-e2e.test", team: "Falcons", closingsMonth: 4, closingsToday: 1, revenueMonth: 30000, callsToday: 25, connectedToday: 11, talkSecondsToday: 2000 },
+      // Asha: leads this month. Bina: no lead this month, but closes. Cara: nothing at all. Dev: a lead this month
+      // and nothing else yet. Eli: a lead last month only. Cara and Eli are not working this month: hidden.
+      { id: String(DELTA_ID.asha), name: "Asha", email: "asha@delta-e2e.test", team: "Falcons", closingsMonth: 9, closingsToday: 1, revenueMonth: 50000, callsToday: 40, connectedToday: 22, talkSecondsToday: 5400 },
+      { id: String(DELTA_ID.bina), name: "Bina", email: "bina@delta-e2e.test", team: "Falcons", closingsMonth: 4, closingsToday: 1, revenueMonth: 30000, callsToday: 25, connectedToday: 11, talkSecondsToday: 2000 },
+      { id: String(DELTA_ID.dev), name: "Dev", email: "dev@delta-e2e.test", team: "Falcons", closingsMonth: 0, closingsToday: 0, revenueMonth: 0, callsToday: 3, connectedToday: 1, talkSecondsToday: 60 },
+      { id: String(DELTA_ID.cara), name: "Cara", email: "cara@delta-e2e.test", team: "Falcons", closingsMonth: 0, closingsToday: 0, revenueMonth: 0, callsToday: 0, connectedToday: 0, talkSecondsToday: 0 },
+      { id: String(DELTA_ID.eli), name: "Eli", email: "eli@delta-e2e.test", team: "Falcons", closingsMonth: 0, closingsToday: 0, revenueMonth: 0, callsToday: 0, connectedToday: 0, talkSecondsToday: 0 },
     ]
-    : [{ id: "u-wasim", name: "Wasim", email: "wasim@draw-e2e.test", team: "Tigers", closingsMonth: 3, closingsToday: 1, revenueMonth: 9000, callsToday: 30, connectedToday: 15, talkSecondsToday: 3600 }];
-  return { ...base, month: "2026-10", people };
+    : [
+      { id: "u-wasim", name: "Wasim", email: "wasim@draw-e2e.test", team: "Tigers", closingsMonth: 3, closingsToday: 1, revenueMonth: 9000, callsToday: 30, connectedToday: 15, talkSecondsToday: 3600 },
+      { id: "u-yan", name: "Yan", email: "yan@draw-e2e.test", team: "Tigers", closingsMonth: 0, closingsToday: 0, revenueMonth: 0, callsToday: 0, connectedToday: 0, talkSecondsToday: 0 },
+    ];
+  return { ...base, month: MONTH_NOW, people };
 }
 
 const stand = createServer((req, res) => {
@@ -124,6 +144,21 @@ async function main() {
   if (mongoose.connection.host !== "127.0.0.1") throw new Error("not a local database");
   await mongoose.connection.db!.dropDatabase();
 
+  step("Setting up: Delta's leads");
+  const deltaDb = mongoose.createConnection(deltaUri);
+  await deltaDb.asPromise();
+  if (deltaDb.host !== "127.0.0.1") throw new Error("Delta's database is not local");
+  await deltaDb.db!.dropDatabase();
+  const monthStart = (() => { const [y, m] = MONTH_NOW.split("-").map(Number) as [number, number]; return new Date(Date.UTC(y, m - 1, 1) - 4 * 3_600_000); })();
+  await deltaDb.collection("leads").insertMany([
+    { name: "L1", phone: "1", status: "assigned", assignedTo: DELTA_ID.asha, createdAt: new Date() },
+    { name: "L2", phone: "2", status: "assigned", assignedTo: DELTA_ID.asha, createdAt: new Date(monthStart.getTime() + 60_000) },
+    { name: "L3", phone: "3", status: "assigned", assignedTo: DELTA_ID.dev, createdAt: new Date() },
+    { name: "L4", phone: "4", status: "assigned", assignedTo: DELTA_ID.eli, createdAt: new Date(monthStart.getTime() - 60_000) }, // last month, a minute before
+    { name: "L5", phone: "5", status: "new", assignedTo: null, createdAt: new Date() },
+  ]);
+  await deltaDb.close();
+
   step("Setting up: the registry and two admins");
   const { AdminUser } = await import("../models/AdminUser.js");
   const { Organization } = await import("../models/Organization.js");
@@ -145,9 +180,11 @@ async function main() {
   check("200 with serverTime", r.status === 200 && typeof d.serverTime === "string", show(r.body));
   same("three CRMs in order, with names from the registry", (d.crms ?? []).map((c: Json) => [c.code, c.name]), [["delta", "Dubai Sales"], ["draw", "Draw CRM"], ["remote", "Remote CRM"]]);
   const crmOf = (data: Json, code: string) => (data.crms ?? []).find((c: Json) => c.code === code) ?? {};
-  same("Delta's people, as the CRM sent them", crmOf(d, "delta").people?.map((p: Json) => [p.name, p.team, p.closingsMonth, p.closingsToday, p.callsToday, p.connectedToday, p.talkSecondsToday]),
-    [["Asha", "Falcons", 9, 1, 40, 22, 5400], ["Bina", "Falcons", 4, 1, 25, 11, 2000]]);
-  check("Delta and Draw ok, with this month", crmOf(d, "delta").status === "ok" && crmOf(d, "draw").status === "ok" && crmOf(d, "delta").month === "2026-10", show(d.crms));
+  same("Delta's people working this month, as the CRM sent them (Cara: nothing; Eli: last month's lead only — hidden)",
+    crmOf(d, "delta").people?.map((p: Json) => [p.name, p.team, p.closingsMonth, p.closingsToday, p.callsToday, p.connectedToday, p.talkSecondsToday]),
+    [["Asha", "Falcons", 9, 1, 40, 22, 5400], ["Bina", "Falcons", 4, 1, 25, 11, 2000], ["Dev", "Falcons", 0, 0, 3, 1, 60]]);
+  same("Draw's leads can't be read here: everybody shown, nobody hidden", crmOf(d, "draw").people?.map((p: Json) => p.name), ["Wasim", "Yan"]);
+  check("Delta and Draw ok, with this month", crmOf(d, "delta").status === "ok" && crmOf(d, "draw").status === "ok" && crmOf(d, "delta").month === MONTH_NOW, show(d.crms));
   check("the signed-in answer keeps emails", crmOf(d, "delta").people?.[0]?.email === "asha@delta-e2e.test");
   same("closes of both CRMs, newest first, older than 2 h left out", (d.closes ?? []).map((c: Json) => c.key), ["delta:d2", "draw:w1", "delta:d1"]);
   const w1 = (d.closes ?? []).find((c: Json) => c.key === "draw:w1");
@@ -157,9 +194,9 @@ async function main() {
     [["Bina", "delta", "Dubai Sales", "Falcons", "lunch"], ["Zed", "draw", "Draw CRM", "Tigers", null]]);
   same("photos from HRMS: Bina's link, Zed has none (initials)", (d.onBreak ?? []).map((b: Json) => b.photoUrl), ["https://hrms-e2e.test/photos/bina.jpg?sig=abc", null]);
   check("HRMS asked once, signed, for the people on a break and in the tables (each once)", hrmsHits.length === 1 && hrmsHits[0].signed
-    && hrmsHits[0].emails.sort().join() === "asha@delta-e2e.test,bina@delta-e2e.test,wasim@draw-e2e.test,zed@draw-e2e.test", show(hrmsHits));
+    && hrmsHits[0].emails.sort().join() === "asha@delta-e2e.test,bina@delta-e2e.test,dev@delta-e2e.test,wasim@draw-e2e.test,yan@draw-e2e.test,zed@draw-e2e.test", show(hrmsHits));
   same("the tables' people carry their photo too (the podium): Bina's link, Asha none", crmOf(d, "delta").people?.map((p: Json) => p.photoUrl),
-    [null, "https://hrms-e2e.test/photos/bina.jpg?sig=abc"]);
+    [null, "https://hrms-e2e.test/photos/bina.jpg?sig=abc", null]);
   check("each CRM asked once, the full answer (no parts=live, no after yet)", hitsOf("delta").length === 1 && hitsOf("draw").length === 1 && hitsOf("delta")[0].query === "", show(hits));
 
   step("Case 3 — errors: Remote's old server");
@@ -196,6 +233,7 @@ async function main() {
   check("open: 200 without a session, noindex", r.status === 200 && /noindex/.test(r.headers.get("x-robots-tag") ?? ""), String(r.status));
   check("no email anywhere in it", !/@/.test(r.text.replace(/https:\/\/[^"]*/g, "")) && !/email/i.test(r.text), r.text.slice(0, 300));
   const pd = r.body?.data ?? {};
+  check("open: the people not working this month are hidden there too", !/Cara|Eli/.test(r.text) && /Dev/.test(r.text), show(crmOf(pd0(r), "delta").people));
   check("…but names, teams, counts, photo links and close amounts", crmOf(pd, "delta").people?.[0]?.name === "Asha" && crmOf(pd, "delta").people?.[0]?.team === "Falcons"
     && crmOf(pd, "delta").people?.[0]?.closingsMonth === 9 && crmOf(pd, "delta").people?.[1]?.photoUrl?.startsWith("https://") && pd.onBreak?.[0]?.photoUrl?.startsWith("https://") && pd.closes?.[0]?.amount > 0, show(pd));
   check("…and this month's revenue (the user, 2026-10-20: shown on the TV)", crmOf(pd, "delta").people?.[0]?.revenueMonth === 50000, show(crmOf(pd, "delta").people?.[0]));
@@ -205,7 +243,7 @@ async function main() {
   await sleep(5300);
   r = await call("/sales-tv", root);
   let draw = crmOf(r.body?.data ?? {}, "draw");
-  check("signed in: Draw in error with the CRM's reason; its last table kept", draw.status === "error" && /Draw CRM would not share its Sales TV/.test(draw.error ?? "") && draw.people?.length === 1, show(draw));
+  check("signed in: Draw in error with the CRM's reason; its last table kept", draw.status === "error" && /Draw CRM would not share its Sales TV/.test(draw.error ?? "") && draw.people?.length === 2, show(draw));
   check("…Delta carries on", crmOf(r.body?.data ?? {}, "delta").status === "ok");
   r = await call("/public/sales-tv");
   draw = crmOf(r.body?.data ?? {}, "draw");
