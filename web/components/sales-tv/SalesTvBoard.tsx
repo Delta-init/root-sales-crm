@@ -32,7 +32,8 @@ import { boardFont } from "./font";
  *
  * The Manager TV (the user, 2026-10-23: "same as the Sales TV, only a new card for the CS, exactly like the CS
  * leaderboard") is this board with `withCs`: a fourth card, the CS team ranked by the course payments they
- * collected this month, and each approved CS payment announced like a sale.
+ * collected this month, and each approved CS payment announced like a sale — without the On break and Latest
+ * closes cards (`panels={false}`, 2026-10-23), the four cards across the whole screen; the pop-ups stay.
  */
 
 const POLL_MS = 5000;
@@ -87,11 +88,13 @@ export interface SalesTvBoardProps {
   variant: "tv" | "embedded";
   /** The Manager TV: the CS team as a fourth card (the answer's `cs`). */
   withCs?: boolean;
+  /** The On break and Latest closes cards (the Manager TV has none). */
+  panels?: boolean;
   title?: string;
   subtitle?: string;
 }
 
-export function SalesTvBoard({ fetcher, variant, withCs = false, title = "Sales TV", subtitle = "Dubai Sales · Draw · Remote" }: SalesTvBoardProps) {
+export function SalesTvBoard({ fetcher, variant, withCs = false, panels = true, title = "Sales TV", subtitle = "Dubai Sales · Draw · Remote" }: SalesTvBoardProps) {
   const tv = variant === "tv";
   const [crms, setCrms] = useState<SalesTvCrm[] | null>(null);
   const [cs, setCs] = useState<SalesTvCs | null>(null);
@@ -164,7 +167,9 @@ export function SalesTvBoard({ fetcher, variant, withCs = false, title = "Sales 
           "mt-[clamp(0.5rem,0.7vw,1.1rem)] grid", gap,
           tv
             ? cn("min-h-0 flex-1 grid-cols-1 auto-rows-max overflow-y-auto lg:auto-rows-[minmax(0,1fr)] lg:overflow-hidden",
-              withCs ? "lg:grid-cols-[repeat(4,minmax(0,1fr))_minmax(14rem,0.5fr)]" : "lg:grid-cols-[repeat(3,minmax(0,1fr))_minmax(15rem,0.62fr)]")
+              withCs
+                ? panels ? "lg:grid-cols-[repeat(4,minmax(0,1fr))_minmax(14rem,0.5fr)]" : "lg:grid-cols-4"
+                : panels ? "lg:grid-cols-[repeat(3,minmax(0,1fr))_minmax(15rem,0.62fr)]" : "lg:grid-cols-3")
             : withCs ? "grid-cols-1 lg:grid-cols-2 2xl:grid-cols-4" : "grid-cols-1 lg:grid-cols-3",
         )}
       >
@@ -172,10 +177,12 @@ export function SalesTvBoard({ fetcher, variant, withCs = false, title = "Sales 
           <CrmColumn key={crm.code} crm={crm} tv={tv} />
         ))}
         {withCs && <CsColumn cs={cs ?? CS_PLACEHOLDER} tv={tv} />}
-        <aside className={cn("flex min-h-0 flex-col", gap, !tv && (withCs ? "lg:col-span-2 2xl:col-span-4 lg:grid lg:grid-cols-2" : "lg:col-span-3 lg:grid lg:grid-cols-2"))}>
-          <BreakPanel people={onBreak} serverNow={serverNow} tv={tv} />
-          <RecentCloses closes={closes} tv={tv} />
-        </aside>
+        {panels && (
+          <aside className={cn("flex min-h-0 flex-col", gap, !tv && (withCs ? "lg:col-span-2 2xl:col-span-4 lg:grid lg:grid-cols-2" : "lg:col-span-3 lg:grid lg:grid-cols-2"))}>
+            <BreakPanel people={onBreak} serverNow={serverNow} tv={tv} />
+            <RecentCloses closes={closes} tv={tv} />
+          </aside>
+        )}
       </div>
 
       <SoundPrompt tv={tv} />

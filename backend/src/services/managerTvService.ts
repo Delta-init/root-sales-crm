@@ -3,7 +3,8 @@ import { salesTv, type SalesTvOptions } from "./salesTvService.js";
 
 /*
  * Manager TV (the user, 2026-10-23): "same as the Sales TV, only a new card for the CS, exactly like the CS
- * leaderboard" — Dubai Sales, Draw and Remote as the Sales TV has them (salesTvService.ts, its own cache), and a
+ * leaderboard" — Dubai Sales, Draw and Remote as the Sales TV has them (salesTvService.ts, its own cache), with the
+ * team leaders, Sales Managers and Super Admins the Sales TV hides (and no On break / Latest closes cards), and a
  * fourth card: the CS team, as Tetra Commission's own CS leaderboard / CS TV ranks it — each CS by the course
  * payments they collected this month (approved, AED), with today's and how many, their HRMS photos and teams.
  *
@@ -104,7 +105,9 @@ function csCloses(since: number | null) {
 
 /** The whole Manager TV: the Sales TV's answer, the CS card, and the CS payments among the closes. */
 export async function managerTv(opts: SalesTvOptions = {}) {
-  const [sales] = await Promise.all([salesTv(opts), within(refreshCs(Date.now()), WAIT_MS)]);
+  // Everybody in the CRMs' tables — dilshad, the Sales Managers and the team leaders too (2026-10-23); the Sales TV
+  // hides them.
+  const [sales] = await Promise.all([salesTv({ ...opts, withBosses: true }), within(refreshCs(Date.now()), WAIT_MS)]);
   const since = validIso(opts.since) ? Date.parse(opts.since) : null;
   const closes = [...sales.closes, ...csCloses(since)].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   // Stamped after both: a payment Root first saw while the Sales TV was answering is in this answer, so the

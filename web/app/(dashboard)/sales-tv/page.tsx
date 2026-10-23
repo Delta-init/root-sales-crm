@@ -42,7 +42,7 @@ export default function SalesTvPage() {
             <Tv className="h-6 w-6 text-primary" /> Sales TV
           </h2>
           <p className="mt-1 text-muted-foreground">
-            Dubai Sales, Draw and Remote live: closings, revenue, calls, who is on a break, and every close announced. Open the public link on an office TV — no sign-in, no emails.
+            Dubai Sales, Draw and Remote live — the salespeople (team leaders, Sales Managers and Super Admins are on the Manager TV): closings, revenue, calls, who is on a break, and every close announced. Open the public link on an office TV — no sign-in, no emails.
           </p>
         </div>
         <div className="flex gap-2">

@@ -18,5 +18,5 @@ const fetchPublic: SalesTvFetcher = async (since) => {
 };
 
 export default function PublicManagerTvPage() {
-  return <SalesTvBoard fetcher={fetchPublic} variant="tv" withCs title="Manager TV" subtitle="Dubai Sales · Draw · Remote · CS team" />;
+  return <SalesTvBoard fetcher={fetchPublic} variant="tv" withCs panels={false} title="Manager TV" subtitle="Dubai Sales · Draw · Remote · CS team" />;
 }

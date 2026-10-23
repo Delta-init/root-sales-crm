@@ -71,6 +71,9 @@ interface CrmState {
   month: string | null;
   /** Leads each person was given this month, by CRM user id — null while unknown (then nobody is hidden). */
   leadsMonth: Map<string, number> | null;
+  /** Its team leaders, Sales Manager and Super Admins, by CRM user id — hidden on the Sales TV, shown on the
+      Manager TV (the user, 2026-10-23). Null while unknown: then nobody is hidden. */
+  bosses: Set<string> | null;
   onBreak: CrmBreak[];
   /** When each part was last asked for (success or not) — what the windows are measured from. */
   fullAskedAt: number;
@@ -88,7 +91,7 @@ interface CrmState {
 
 const state = new Map<CrmCode, CrmState>(
   SALES_TV_CRMS.map((code) => [code, {
-    code, people: null, month: null, leadsMonth: null, onBreak: [], fullAskedAt: 0, liveAskedAt: 0, peopleAt: 0, liveAt: 0,
+    code, people: null, month: null, leadsMonth: null, bosses: null, onBreak: [], fullAskedAt: 0, liveAskedAt: 0, peopleAt: 0, liveAt: 0,
     error: null, outdated: false, newestClose: null, inflight: null,
   }]),
 );
@@ -176,11 +179,45 @@ async function leadsThisMonth(code: CrmCode, month: string | null): Promise<Map<
   }
 }
 
-/** Who the TV shows: given a lead this month or credited with a close; everybody while the leads are unknown. */
-function shownPeople(s: CrmState): CrmPerson[] {
-  const people = s.people ?? [];
+/**
+ * The people who aren't salespeople on the TV (the user, 2026-10-23: "in the normal TV hide dilshad, the sales
+ * manager and the team leaders"): the leaders of the CRM's active teams, its Sales Manager (commission settings)
+ * and its Super Admins — from the CRM's database; null when it can't be read.
+ */
+async function bossesOf(code: CrmCode): Promise<Set<string> | null> {
+  try {
+    const { sources } = await getSources();
+    const src = sources.find((x) => x.org.code === code);
+    if (!src) return null;
+    const db = src.conn;
+    const opts = { maxTimeMS: LEADS_QUERY_MS };
+    const [teams, settings, roles] = await Promise.all([
+      db.collection("teams").find({ status: { $ne: "inactive" } }, { projection: { leaders: 1 }, ...opts }).toArray(),
+      db.collection("commissionsettings").find({}, { projection: { salesManager: 1 }, ...opts }).toArray(),
+      db.collection("roles").find({ isSystemRole: true, roleName: "Super Admin" }, { projection: { _id: 1 }, ...opts }).toArray(),
+    ]);
+    const admins = roles.length
+      ? await db.collection("users").find({ role: { $in: roles.map((r) => r._id) } }, { projection: { _id: 1 }, ...opts }).toArray()
+      : [];
+    const ids = new Set<string>();
+    for (const t of teams) for (const l of (t.leaders as unknown[] | undefined) ?? []) ids.add(String(l));
+    for (const c of settings) if (c.salesManager) ids.add(String(c.salesManager));
+    for (const a of admins) ids.add(String(a._id));
+    return ids;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Who the TV shows: given a lead this month or credited with a close (everybody while the leads are unknown) — and
+ * on the Sales TV, not the team leaders, the Sales Manager or the Super Admins (`withBosses`: the Manager TV).
+ */
+function shownPeople(s: CrmState, withBosses = true): CrmPerson[] {
   const leads = s.leadsMonth;
-  return leads ? people.filter((p) => (leads.get(p.id) ?? 0) > 0 || p.closingsMonth > 0) : people;
+  const bosses = withBosses ? null : s.bosses;
+  return (s.people ?? []).filter((p) =>
+    (!leads || (leads.get(p.id) ?? 0) > 0 || p.closingsMonth > 0) && !(bosses && bosses.has(p.id)));
 }
 
 /** One CRM, brought up to date if its window has passed. Concurrent screens share one call. */
@@ -214,6 +251,7 @@ function refreshCrm(code: CrmCode, now: number): Promise<void> {
         s.peopleAt = at;
         // Unreadable this time: the last counts stand (none yet → nobody hidden).
         s.leadsMonth = (await leadsThisMonth(code, s.month)) ?? s.leadsMonth;
+        s.bosses = (await bossesOf(code)) ?? s.bosses;
       }
       s.error = null;
       s.outdated = false;
@@ -270,7 +308,12 @@ function refreshPhotos(now: number): Promise<void> {
 
 const within = (p: Promise<unknown>, ms: number) => Promise.race([p, new Promise((ok) => setTimeout(ok, ms))]);
 
-export interface SalesTvOptions { since?: unknown; publicView?: boolean }
+export interface SalesTvOptions {
+  since?: unknown;
+  publicView?: boolean;
+  /** The Manager TV: team leaders, the Sales Manager and Super Admins in the tables too (the Sales TV hides them). */
+  withBosses?: boolean;
+}
 
 /**
  * The whole screen: the three CRMs' tables, who is on a break, and the closes
@@ -293,7 +336,7 @@ export async function salesTv(opts: SalesTvOptions = {}) {
     const s = state.get(code)!;
     const status = s.error ? (s.outdated ? "outdated" : "error") : s.people ? "ok" : "loading";
     const error = !s.error ? null : s.outdated ? s.error : pub ? `${nameOf(code)} can't be reached right now.` : s.error;
-    const people = shownPeople(s).map((p) => {
+    const people = shownPeople(s, opts.withBosses === true).map((p) => {
       const photoUrl = (p.email && photos.get(p.email)?.url) || null;
       return pub ? {
         id: p.id, name: p.name, team: p.team, closingsMonth: p.closingsMonth, closingsToday: p.closingsToday,
