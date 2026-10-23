@@ -1,6 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import rateLimit from "express-rate-limit";
 import { salesTv } from "../services/salesTvService.js";
+import { managerTv } from "../services/managerTvService.js";
 import { sendSuccess } from "../utils/response.js";
 
 /*
@@ -30,6 +31,18 @@ router.get("/sales-tv", tvLimiter, async (req: Request, res: Response, next: Nex
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
     res.setHeader("Cache-Control", "no-store");
     sendSuccess(res, "Sales TV", await salesTv({ since, publicView: true }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// The Manager TV (2026-10-23): the same, with the CS team as a fourth card — one shared cache for it too.
+router.get("/manager-tv", tvLimiter, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const since = typeof req.query.since === "string" ? req.query.since.slice(0, 40) : undefined;
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
+    res.setHeader("Cache-Control", "no-store");
+    sendSuccess(res, "Manager TV", await managerTv({ since, publicView: true }));
   } catch (error) {
     next(error);
   }

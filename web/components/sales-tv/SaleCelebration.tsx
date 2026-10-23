@@ -157,7 +157,7 @@ function Celebration({ sale, onClose }: { sale: SaleClosed; onClose: () => void 
           <Trophy className="h-8 w-8" />
         </span>
 
-        <p className="mt-4 text-sm font-semibold uppercase tracking-[0.3em] text-[color:var(--accent)]">Sale closed</p>
+        <p className="mt-4 text-sm font-semibold uppercase tracking-[0.3em] text-[color:var(--accent)]">{sale.kind === "cs_payment" ? "CS payment" : "Sale closed"}</p>
         {sale.crmName && (
           <p className="mt-2 inline-flex items-center gap-2 rounded-full border border-[color:var(--line)] px-3 py-0.5 text-sm font-medium text-[color:var(--ink2)]">
             <span className="h-2 w-2 rounded-full" style={{ background: tone }} /> {sale.crmName}

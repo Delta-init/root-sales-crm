@@ -18,6 +18,7 @@ import cseRoutes from "./cseRoutes.js";
 import commissionPlanRoutes from "./commissionPlanRoutes.js";
 import backupRoutes from "./backupRoutes.js";
 import salesTvRoutes from "./salesTvRoutes.js";
+import managerTvRoutes from "./managerTvRoutes.js";
 import publicRoutes from "./publicRoutes.js";
 
 const router = Router();
@@ -46,6 +47,7 @@ router.use("/backups", backupRoutes);
 // Sales TV: Dubai Sales, Draw and Remote on one screen (2026-10-20) — root admins here,
 // and the open copy for the office TVs under /public (no sign-in, no emails).
 router.use("/sales-tv", salesTvRoutes);
+router.use("/manager-tv", managerTvRoutes);
 router.use("/public", publicRoutes);
 
 router.get("/health", (_req, res) => {

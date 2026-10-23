@@ -12,6 +12,11 @@
  *                        the open answer says so without the CRM's own words
  *   Case 4  permission   /sales-tv: no session 401, not a root admin 403; /public/sales-tv open, with no email
  *                        anywhere in it
+ *   Case 5  Manager TV   (services/managerTvService.ts, 2026-10-23) the same three CRMs and the CS team as a fourth
+ *                        card from Tetra Commission's open CS board, ranked as it ranks them; its approved payments
+ *                        among the closes ("CS payment"), only the new ones with ?since=; asked at most every 20 s;
+ *                        Tetra Commission down: the CS card says so (plainly on the open link), the CRMs carry on;
+ *                        /manager-tv root admins only, /public/manager-tv open
  *
  * Run through scripts/sales-tv-check.sh. Scratch database on 127.0.0.1 only; the CRMs and HRMS are a stand-in.
  */
@@ -102,10 +107,34 @@ function crmAnswer(crm: string, url: URL) {
   return { ...base, month: MONTH_NOW, people };
 }
 
+// Tetra Commission's open CS board, as its /api/public/cs-tv answers (functions/csTv.ts there).
+const csHits: string[] = [];
+let csDown = false;
+const csRecent: Json[] = [
+  { id: "p1", cs: "Noor", team: "Falcons", aed: 3670, product: "DQMP", at: ago(15) },
+];
+const csBoard = () => ({
+  location: "dubai", month: MONTH_NOW, generated_at: new Date().toISOString(),
+  cs: [
+    { id: "c1", name: "Noor", team_id: "t1", team: "Falcons", month_aed: 12000, today_aed: 3670, payments: 4, today_payments: 1, photo: "https://hrms-e2e.test/photos/noor.jpg", rank: 1 },
+    { id: "c2", name: "Omar", team_id: "t2", team: "Hawks", month_aed: 9000, today_aed: 0, payments: 3, today_payments: 0, photo: null, rank: 2 },
+    { id: "c3", name: "Priya", team_id: "t1", team: "Falcons", month_aed: 0, today_aed: 0, payments: 0, today_payments: 0, photo: null, rank: 3 },
+  ],
+  teams: [{ id: "t1", team: "Falcons", month_aed: 12000, today_aed: 3670, payments: 4, cs_count: 2 }, { id: "t2", team: "Hawks", month_aed: 9000, today_aed: 0, payments: 3, cs_count: 1 }],
+  totals: { month_aed: 21000, today_aed: 3670, payments: 7 },
+  recent: csRecent,
+});
+
 const stand = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://x");
   const send = (status: number, body: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
   const crm = url.pathname.split("/")[1] ?? "";
+  if (crm === "commission") {
+    if (url.pathname !== "/commission/api/public/cs-tv") return send(404, { error: "Not found" });
+    csHits.push(url.search);
+    if (csDown) return send(500, { error: "CS board exploded at 10.0.0.9" });
+    return send(200, csBoard()); // no envelope, as Tetra Commission's json() answers
+  }
   if (crm === "hrms") {
     let raw = "";
     req.on("data", (c) => { raw += c; });
@@ -259,6 +288,43 @@ async function main() {
   check("Remote asked again after 30 s, once", hitsOf("remote").length === 2, show(hitsOf("remote")));
   check("Draw back: ok again", crmOf(r.body?.data ?? {}, "draw").status === "ok", show(crmOf(r.body?.data ?? {}, "draw")));
   check("no CRM asked more often than once per 5 s overall", ["delta", "draw", "remote"].every((c) => hitsOf(c).length <= 10), show(hits.map((h) => h.crm)));
+
+  step("Case 5 — Manager TV: the three CRMs and the CS team");
+  await Organization.create({ code: "commission", kind: "commission", name: "Tetra Commission", timezone: "Asia/Dubai", currency: "USD", fxToBase: 1, isActive: true, sortOrder: 5, accent: "#0d9488" });
+  check("no session: 401", (await call("/manager-tv")).status === 401);
+  check("not a root admin: 403", (await call("/manager-tv", member)).status === 403);
+  let m = await call("/manager-tv", root);
+  let md = m.body?.data ?? {};
+  check("200: the Sales TV's three CRMs, in order", m.status === 200 && (md.crms ?? []).map((c: Json) => c.code).join() === "delta,draw,remote", show(md.crms?.map((c: Json) => c.code)));
+  check("…and the CS team card, as Tetra Commission ranks it", md.cs?.status === "ok" && md.cs?.name === "CS team" && (md.cs?.people ?? []).map((p: Json) => p.name).join() === "Noor,Omar,Priya", show(md.cs));
+  same("…Noor's month, today, payments and HRMS photo", (({ monthAed, todayAed, payments, todayPayments, photoUrl, team }) => ({ monthAed, todayAed, payments, todayPayments, photoUrl, team }))(md.cs?.people?.[0] ?? {}),
+    { monthAed: 12000, todayAed: 3670, payments: 4, todayPayments: 1, photoUrl: "https://hrms-e2e.test/photos/noor.jpg", team: "Falcons" });
+  same("…the totals", md.cs?.totals, { monthAed: 21000, todayAed: 3670, payments: 7 });
+  check("asked for Dubai's board", csHits[0] === "?location=dubai", show(csHits));
+  const csClose = (md.closes ?? []).find((c: Json) => c.key === "cs:p1");
+  check("the CS payment among the closes, as a CS payment", csClose?.crm === "cs" && csClose?.kind === "cs_payment" && csClose?.closer === "Noor" && csClose?.amount === 3670 && csClose?.courses?.join() === "DQMP", show(csClose));
+  check("…with the sales' closes still there", (md.closes ?? []).some((c: Json) => c.crm === "delta"), show(md.closes));
+  const mSince = md.serverTime;
+  await call("/manager-tv", root);
+  await call("/public/manager-tv");
+  check("Tetra Commission asked once for three screens inside 20 s", csHits.length === 1, show(csHits));
+  m = await call(`/manager-tv?since=${encodeURIComponent(mSince)}`, root);
+  check("?since=: no CS payment it already had", !(m.body?.data?.closes ?? []).some((c: Json) => c.crm === "cs"), show(m.body?.data?.closes));
+  const pub = await call("/public/manager-tv");
+  check("the open link: the CS card too, no email anywhere", pub.status === 200 && pub.body?.data?.cs?.people?.length === 3 && !/@/.test(JSON.stringify(pub.body?.data ?? {}).replace(/https?:\/\/[^"]*/g, "")), pub.text.slice(0, 300));
+  csRecent.unshift({ id: "p2", cs: "Omar", team: "Hawks", aed: 1835, product: "Forex Mastery", at: new Date().toISOString() });
+  csDown = false;
+  await sleep(21_000);
+  m = await call(`/manager-tv?since=${encodeURIComponent(mSince)}`, root);
+  const fresh = (m.body?.data?.closes ?? []).filter((c: Json) => c.crm === "cs").map((c: Json) => c.key);
+  check("after 20 s: asked again, and only the new payment comes with ?since=", csHits.length === 2 && fresh.join() === "cs:p2", `${show(csHits)} ${show(fresh)}`);
+  csDown = true;
+  await sleep(21_000);
+  m = await call("/manager-tv", root);
+  md = m.body?.data ?? {};
+  check("Tetra Commission down: the CS card says why, the CRMs carry on", md.cs?.status === "error" && /exploded/.test(md.cs?.error ?? "") && (md.crms ?? []).length === 3, show(md.cs));
+  const pubDown = await call("/public/manager-tv");
+  check("…the open link in a plain sentence, without its words", pubDown.body?.data?.cs?.error === "The CS figures can't be reached right now." && !pubDown.text.includes("10.0.0.9"), show(pubDown.body?.data?.cs));
 
   step("Case 4 — root admins only for the signed-in page");
   check("no session: 401", (await call("/sales-tv")).status === 401);

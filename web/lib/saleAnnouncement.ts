@@ -28,6 +28,8 @@ export interface SaleClosed {
   crm?: string;
   at: string;
   test?: boolean;
+  /** A CS course payment (the Manager TV, 2026-10-23) rather than a sale. */
+  kind?: "sale" | "cs_payment";
 }
 
 // ── What it says ──────────────────────────────────────────────────────────────
@@ -55,7 +57,8 @@ export function spokenLine(sale: SaleClosed): string {
   const money = saleMoney(sale);
   const courses = listed(sale.courses);
   const where = sale.crmName ? `, in ${sale.crmName}` : "";
-  let line = sale.closer ? `Sale closed by ${sale.closer}${where}! ` : `Sale closed${where}! `;
+  const what = sale.kind === "cs_payment" ? "Course payment collected" : "Sale closed";
+  let line = sale.closer ? `${what} by ${sale.closer}${where}! ` : `${what}${where}! `;
   line += courses ? `${courses}` : "A new enrolment";
   if (money) line += `, for ${money.spoken}`;
   return `${line}. Congratulations!`;

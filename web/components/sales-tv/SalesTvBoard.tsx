@@ -5,7 +5,7 @@ import { AlertTriangle, Maximize, Minimize, Trophy, Volume2, VolumeX } from "luc
 import { cn } from "@/lib/utils";
 import {
   breakLabel, crmTag, crmTone, fmtClock, fmtInt, fmtMoney, fmtRevenue, fmtTalk, initials, monthLabel,
-  type SalesTvBreak, type SalesTvClose, type SalesTvCrm, type SalesTvFetcher, type SalesTvPerson,
+  type SalesTvBreak, type SalesTvClose, type SalesTvCrm, type SalesTvCs, type SalesTvCsPerson, type SalesTvFetcher, type SalesTvPerson,
 } from "@/lib/salesTv";
 import { setSoundPref, soundUnlocked, unlockSound, useSoundPref, useSoundUnlocked, type SaleClosed } from "@/lib/saleAnnouncement";
 import { SaleCelebration, celebrate } from "./SaleCelebration";
@@ -29,6 +29,10 @@ import { boardFont } from "./font";
  * Root's cache decides how often the CRMs are actually asked. Each close is
  * announced once per screen, and only closes that arrive after the screen
  * opened — opening it never replays the afternoon.
+ *
+ * The Manager TV (the user, 2026-10-23: "same as the Sales TV, only a new card for the CS, exactly like the CS
+ * leaderboard") is this board with `withCs`: a fourth card, the CS team ranked by the course payments they
+ * collected this month, and each approved CS payment announced like a sale.
  */
 
 const POLL_MS = 5000;
@@ -66,7 +70,7 @@ function ago(ms: number): string {
 }
 
 const toSale = (c: SalesTvClose): SaleClosed => ({
-  id: c.key, closer: c.closer, courses: c.courses, amount: c.amount, currency: c.currency, crmName: c.crmName, crm: c.crm, at: c.at,
+  id: c.key, closer: c.closer, courses: c.courses, amount: c.amount, currency: c.currency, crmName: c.crmName, crm: c.crm, at: c.at, kind: c.kind,
 });
 
 /** Type sizes that grow with the screen: a laptop and a 65-inch TV both read well. */
@@ -81,11 +85,16 @@ export interface SalesTvBoardProps {
   fetcher: SalesTvFetcher;
   /** "tv": the whole screen, rows scroll themselves; "embedded": inside the signed-in page. */
   variant: "tv" | "embedded";
+  /** The Manager TV: the CS team as a fourth card (the answer's `cs`). */
+  withCs?: boolean;
+  title?: string;
+  subtitle?: string;
 }
 
-export function SalesTvBoard({ fetcher, variant }: SalesTvBoardProps) {
+export function SalesTvBoard({ fetcher, variant, withCs = false, title = "Sales TV", subtitle = "Dubai Sales · Draw · Remote" }: SalesTvBoardProps) {
   const tv = variant === "tv";
   const [crms, setCrms] = useState<SalesTvCrm[] | null>(null);
+  const [cs, setCs] = useState<SalesTvCs | null>(null);
   const [onBreak, setOnBreak] = useState<SalesTvBreak[]>([]);
   const [closes, setCloses] = useState<SalesTvClose[]>([]);
   const [lastOk, setLastOk] = useState<number | null>(null);
@@ -126,6 +135,7 @@ export function SalesTvBoard({ fetcher, variant }: SalesTvBoardProps) {
         });
         since.current = d.serverTime;
         setCrms(d.crms);
+        if (d.cs) setCs(d.cs);
         setOnBreak(d.onBreak);
         setLastOk(Date.now());
         setFetchError(null);
@@ -147,18 +157,22 @@ export function SalesTvBoard({ fetcher, variant }: SalesTvBoardProps) {
   return (
     <div ref={root} className={cn("stv relative", boardFont.className, tv ? "stv-tv flex h-[100dvh] flex-col overflow-hidden p-[clamp(0.5rem,0.7vw,1.1rem)]" : "rounded-2xl p-3 sm:p-4")}>
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
-      <Header tv={tv} serverNow={serverNow} lastOk={lastOk} now={now} fetchError={fetchError} rootRef={root} />
+      <Header tv={tv} serverNow={serverNow} lastOk={lastOk} now={now} fetchError={fetchError} rootRef={root} title={title} subtitle={subtitle} />
 
       <div
         className={cn(
           "mt-[clamp(0.5rem,0.7vw,1.1rem)] grid", gap,
-          tv ? "min-h-0 flex-1 grid-cols-1 auto-rows-max overflow-y-auto lg:auto-rows-[minmax(0,1fr)] lg:grid-cols-[repeat(3,minmax(0,1fr))_minmax(15rem,0.62fr)] lg:overflow-hidden" : "grid-cols-1 lg:grid-cols-3",
+          tv
+            ? cn("min-h-0 flex-1 grid-cols-1 auto-rows-max overflow-y-auto lg:auto-rows-[minmax(0,1fr)] lg:overflow-hidden",
+              withCs ? "lg:grid-cols-[repeat(4,minmax(0,1fr))_minmax(14rem,0.5fr)]" : "lg:grid-cols-[repeat(3,minmax(0,1fr))_minmax(15rem,0.62fr)]")
+            : withCs ? "grid-cols-1 lg:grid-cols-2 2xl:grid-cols-4" : "grid-cols-1 lg:grid-cols-3",
         )}
       >
         {(crms ?? PLACEHOLDER).map((crm) => (
           <CrmColumn key={crm.code} crm={crm} tv={tv} />
         ))}
-        <aside className={cn("flex min-h-0 flex-col", gap, !tv && "lg:col-span-3 lg:grid lg:grid-cols-2")}>
+        {withCs && <CsColumn cs={cs ?? CS_PLACEHOLDER} tv={tv} />}
+        <aside className={cn("flex min-h-0 flex-col", gap, !tv && (withCs ? "lg:col-span-2 2xl:col-span-4 lg:grid lg:grid-cols-2" : "lg:col-span-3 lg:grid lg:grid-cols-2"))}>
           <BreakPanel people={onBreak} serverNow={serverNow} tv={tv} />
           <RecentCloses closes={closes} tv={tv} />
         </aside>
@@ -176,10 +190,15 @@ const PLACEHOLDER: SalesTvCrm[] = [
   { code: "remote", name: "Remote", status: "loading", error: null, month: null, peopleUpdatedAt: null, liveUpdatedAt: null, people: [] },
 ];
 
+const CS_PLACEHOLDER: SalesTvCs = {
+  code: "cs", name: "CS team", status: "loading", error: null, month: null, updatedAt: null, people: [], teams: [], totals: { monthAed: 0, todayAed: 0, payments: 0 },
+};
+
 // ── Header ─────────────────────────────────────────────────────────────────────
 
-function Header({ tv, serverNow, lastOk, now, fetchError, rootRef }: {
+function Header({ tv, serverNow, lastOk, now, fetchError, rootRef, title, subtitle }: {
   tv: boolean; serverNow: number; lastOk: number | null; now: number; fetchError: string | null; rootRef: RefObject<HTMLDivElement>;
+  title: string; subtitle: string;
 }) {
   const pref = useSoundPref();
   const soundOn = pref !== "off";
@@ -200,8 +219,8 @@ function Header({ tv, serverNow, lastOk, now, fetchError, rootRef }: {
           <Trophy className="h-[55%] w-[55%]" />
         </span>
         <div className="leading-tight">
-          <h1 className={cn("font-bold tracking-tight", T.title)}>Sales TV</h1>
-          <p className={cn("text-[color:var(--mute)]", T.small)}>Dubai Sales · Draw · Remote</p>
+          <h1 className={cn("font-bold tracking-tight", T.title)}>{title}</h1>
+          <p className={cn("text-[color:var(--mute)]", T.small)}>{subtitle}</p>
         </div>
       </div>
 
@@ -221,7 +240,7 @@ function Header({ tv, serverNow, lastOk, now, fetchError, rootRef }: {
         <span className={cn("num hidden min-w-[5.5ch] font-semibold sm:inline", T.title)} suppressHydrationWarning>{dubaiTime(serverNow)}</span>
         <button
           type="button"
-          onClick={() => celebrate({ id: `test-${Date.now()}`, closer: "Test", courses: ["Sample course"], amount: 5500, currency: "AED", crmName: "Sales TV", at: new Date().toISOString(), test: true })}
+          onClick={() => celebrate({ id: `test-${Date.now()}`, closer: "Test", courses: ["Sample course"], amount: 5500, currency: "AED", crmName: title, at: new Date().toISOString(), test: true })}
           className={btn}
           title="Show a test celebration on this screen"
         >
@@ -345,6 +364,138 @@ function CrmColumn({ crm, tv }: { crm: SalesTvCrm; tv: boolean }) {
         </>
       )}
     </section>
+  );
+}
+
+// ── The CS team: the Manager TV's fourth card ─────────────────────────────────
+
+/*
+ * As Tetra Commission's CS leaderboard ranks them: the course payments each CS collected this month (approved by
+ * finance, AED), today's, and how many. #, CS, month, today, payments.
+ */
+const CS_COLS = "grid grid-cols-[clamp(1.7rem,1.9vw,2.9rem)_minmax(0,1fr)_minmax(0,clamp(3.6rem,4.2vw,6.2rem))_minmax(0,clamp(3rem,3.4vw,5rem))_minmax(0,clamp(1.9rem,2.1vw,3.1rem))] items-center whitespace-nowrap gap-x-[clamp(0.15rem,0.25vw,0.45rem)]";
+
+function CsColumn({ cs, tv }: { cs: SalesTvCs; tv: boolean }) {
+  const body = useRef<HTMLDivElement>(null);
+  const rest = cs.people.slice(3);
+  useAutoScroll(body, tv, rest.length);
+  const head = cn("text-right font-medium text-[color:var(--ink2)]", T.tiny);
+  const zero = "text-[color:var(--mute)]";
+  return (
+    <section
+      className={cn("flex min-h-0 flex-col overflow-hidden rounded-[clamp(1rem,1.2vw,1.6rem)] border border-[color:var(--line)] bg-[color:var(--panel)]", !tv && "max-h-[85vh]")}
+      data-testid="crm-cs"
+    >
+      <div className="flex items-center gap-2.5 px-[clamp(0.8rem,1vw,1.4rem)] pt-[clamp(0.6rem,0.8vw,1.1rem)]">
+        <span className="h-[0.7em] w-[0.7em] shrink-0 rounded-full" style={{ background: crmTone("cs") }} />
+        <h2 className={cn("truncate font-semibold", T.title)}>{cs.name}</h2>
+        <span className={cn("ml-auto shrink-0 rounded-full border border-[color:var(--line)] px-3 py-0.5 text-[color:var(--mute)]", T.small)}>
+          {monthLabel(cs.month)}
+        </span>
+      </div>
+
+      {cs.error && (
+        <p className={cn("mx-[clamp(0.8rem,1vw,1.4rem)] mt-2 flex items-start gap-1.5 rounded-lg border border-[color:var(--warn)] px-2.5 py-1.5 text-[color:var(--warn)]", T.small)} data-testid="crm-error-cs">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {cs.error}
+        </p>
+      )}
+
+      {cs.people.length === 0 ? (
+        <p className={cn("px-3 py-10 text-center text-[color:var(--mute)]", T.small)}>
+          {cs.status === "loading" ? "Loading…" : cs.error ? "No figures to show." : "No CSs yet."}
+        </p>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 items-end gap-[clamp(0.25rem,0.35vw,0.6rem)] px-[clamp(0.6rem,0.8vw,1.2rem)] pb-[clamp(0.5rem,0.7vw,1rem)] pt-[clamp(0.4rem,0.6vw,0.9rem)]" data-testid="podium-cs">
+            {[1, 0, 2].map((i) => {
+              const p = cs.people[i];
+              return p ? <CsStep key={p.id || p.name} p={p} rank={i + 1} /> : <span key={`empty-${i}`} />;
+            })}
+          </div>
+
+          <div className={cn(CS_COLS, "mx-[clamp(0.4rem,0.5vw,0.8rem)] rounded-full bg-[color:var(--head)] px-[clamp(0.6rem,0.7vw,1rem)] py-[clamp(0.35rem,0.45vw,0.65rem)]")}>
+            <span className={cn(head, "text-left")}>#</span>
+            <span className={cn(head, "text-left")}>CS</span>
+            <span className={head} title="Course payments collected this month (AED, approved)">Month</span>
+            <span className={head} title="Collected today (AED)">Today</span>
+            <span className={head} title="Payments this month">Pays</span>
+          </div>
+
+          <div ref={body} className="stv-scroll min-h-0 flex-1 overflow-y-auto px-[clamp(0.4rem,0.5vw,0.8rem)]">
+            {rest.length === 0 ? (
+              <p className={cn("px-2 py-4 text-center text-[color:var(--mute)]", T.small)}>Everybody is on the podium.</p>
+            ) : (
+              <ol>
+                {rest.map((p, i) => (
+                  <li key={p.id || `${p.name}-${i}`} className={cn(CS_COLS, "num border-b border-[color:var(--line)] px-[clamp(0.6rem,0.7vw,1rem)] py-[clamp(0.3rem,0.4vw,0.6rem)] last:border-b-0", T.body)}>
+                    <span className={cn("font-medium text-[color:var(--mute)]", T.tiny)}>#{String(i + 4).padStart(2, "0")}</span>
+                    <span className="flex min-w-0 items-center gap-[clamp(0.4rem,0.5vw,0.75rem)]">
+                      <Photo name={p.name} url={p.photoUrl} className="hidden h-[clamp(1.7rem,1.9vw,2.7rem)] w-[clamp(1.7rem,1.9vw,2.7rem)] rounded-full min-[1500px]:grid" />
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium leading-tight">{p.name}</span>
+                        <span className={cn("block truncate leading-tight text-[color:var(--mute)]", T.tiny)}>{p.team || "—"}</span>
+                      </span>
+                    </span>
+                    <Num className={p.monthAed ? "font-semibold text-[color:var(--money)]" : zero} title={fmtRevenue(p.monthAed)}>{fmtInt(p.monthAed)}</Num>
+                    <Num className={p.todayAed ? "font-semibold text-[color:var(--good)]" : zero} title={fmtRevenue(p.todayAed)}>{fmtInt(p.todayAed)}</Num>
+                    <Num className={p.payments ? undefined : zero}>{fmtInt(p.payments)}</Num>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+
+          <div className={cn(CS_COLS, "num border-t border-[color:var(--line)] px-[clamp(1rem,1.2vw,1.8rem)] py-[clamp(0.4rem,0.55vw,0.8rem)] font-semibold whitespace-nowrap", T.body)} data-testid="totals-cs">
+            <span className={cn("col-span-2 truncate font-medium text-[color:var(--mute)]", T.small)}>Total · {cs.people.length} CSs</span>
+            <Num className="text-[color:var(--money)]" title={fmtRevenue(cs.totals.monthAed)}>{fmtInt(cs.totals.monthAed)}</Num>
+            <Num title={fmtRevenue(cs.totals.todayAed)}>{fmtInt(cs.totals.todayAed)}</Num>
+            <Num>{fmtInt(cs.totals.payments)}</Num>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function CsStep({ p, rank }: { p: SalesTvCsPerson; rank: number }) {
+  const first = rank === 1;
+  // A coloured trophy only with something collected.
+  const place: Place | undefined = p.monthAed > 0 ? PLACES[rank - 1] : undefined;
+  return (
+    <div className="flex min-w-0 flex-col items-center">
+      <Photo
+        name={p.name}
+        url={p.photoUrl}
+        className={cn(first ? "h-[clamp(3.4rem,3.9vw,5.6rem)] w-[clamp(3.4rem,3.9vw,5.6rem)]" : "h-[clamp(2.8rem,3.1vw,4.5rem)] w-[clamp(2.8rem,3.1vw,4.5rem)]", "rounded-[24%]")}
+        ring={place ? `var(--${place})` : "var(--step-edge)"}
+      />
+      <p className={cn("mt-1.5 w-full truncate text-center font-semibold leading-tight", first ? T.title : T.body)} title={p.name}>{p.name}</p>
+      <p className={cn("w-full truncate text-center text-[color:var(--mute)]", T.tiny)}>{p.team || "—"}</p>
+      <div className="mt-[clamp(0.3rem,0.45vw,0.7rem)] w-full">
+        <div className="h-[clamp(0.7rem,0.85vw,1.2rem)] w-full bg-[color:var(--step-top)]" style={{ clipPath: "polygon(9% 0, 91% 0, 100% 100%, 0 100%)" }} />
+        <div
+          className={cn("flex w-full flex-col items-center border-t border-[color:var(--step-edge)] bg-[color:var(--step-front)] px-1",
+            first ? "pb-[clamp(0.9rem,1.3vw,1.9rem)] pt-[clamp(0.45rem,0.6vw,0.9rem)]" : "pb-[clamp(0.4rem,0.55vw,0.8rem)] pt-[clamp(0.35rem,0.5vw,0.75rem)]")}
+        >
+          <span
+            className="grid h-[clamp(1.6rem,1.8vw,2.6rem)] w-[clamp(1.6rem,1.8vw,2.6rem)] place-items-center rounded-[28%]"
+            style={place ? { background: `var(--${place})`, color: `var(--${place}-on)` } : { background: "var(--step-top)", color: "var(--mute)" }}
+            title={`${rank}${rank === 1 ? "st" : rank === 2 ? "nd" : "rd"}`}
+          >
+            <Trophy className="h-[55%] w-[55%]" />
+          </span>
+          <p className={cn("num mt-1 whitespace-nowrap font-bold leading-none text-[color:var(--money)]", first ? "text-[clamp(1.15rem,1.45vw,2.1rem)]" : "text-[clamp(0.95rem,1.15vw,1.7rem)]")} title="Collected this month">
+            {fmtRevenue(p.monthAed)}
+          </p>
+          <p className={cn("text-[color:var(--mute)]", T.tiny)}>collected</p>
+          <div className="my-[clamp(0.25rem,0.35vw,0.5rem)] h-px w-4/5 bg-[color:var(--line)]" />
+          <p className={cn("num whitespace-nowrap text-[color:var(--ink2)]", T.tiny)}>
+            <span className={p.todayAed > 0 ? "font-semibold text-[color:var(--good)]" : undefined}>{fmtInt(p.todayAed)} today</span>
+            {" · "}{fmtInt(p.payments)} {p.payments === 1 ? "payment" : "payments"}
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
 

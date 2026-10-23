@@ -57,6 +57,33 @@ export interface SalesTvClose {
   currency: "AED" | "INR";
   at: string;
   seenAt: string;
+  /** The Manager TV's CS payments come in among the closes (crm "cs"), announced as a CS payment. */
+  kind?: "sale" | "cs_payment";
+}
+
+/* The Manager TV's fourth card (2026-10-23): the CS team as Tetra Commission's CS leaderboard ranks it — each CS
+   by the course payments they collected this month (approved, AED). */
+export interface SalesTvCsPerson {
+  id: string;
+  name: string;
+  team: string;
+  monthAed: number;
+  todayAed: number;
+  payments: number;
+  todayPayments: number;
+  photoUrl: string | null;
+}
+
+export interface SalesTvCs {
+  code: "cs";
+  name: string;
+  status: SalesTvCrmStatus;
+  error: string | null;
+  month: string | null;
+  updatedAt: string | null;
+  people: SalesTvCsPerson[];
+  teams: Array<{ team: string; monthAed: number; todayAed: number; payments: number; csCount: number }>;
+  totals: { monthAed: number; todayAed: number; payments: number };
 }
 
 export interface SalesTvData {
@@ -64,6 +91,8 @@ export interface SalesTvData {
   crms: SalesTvCrm[];
   onBreak: SalesTvBreak[];
   closes: SalesTvClose[];
+  /** Only on the Manager TV. */
+  cs?: SalesTvCs;
 }
 
 /** Asks for the screen; `since` is the previous answer's serverTime, so only new closes come back. */
@@ -104,11 +133,11 @@ export function monthLabel(m: string | null): string {
 }
 
 /** Each CRM's colour on the board: the stripe on its table and its tag on breaks and closes. */
-const CRM_TONE: Record<string, string> = { delta: "#2f6bff", draw: "#9b5cff", remote: "#00b3a4" };
+const CRM_TONE: Record<string, string> = { delta: "#2f6bff", draw: "#9b5cff", remote: "#00b3a4", cs: "#e85d9a" };
 export const crmTone = (crm: string | undefined) => (crm && CRM_TONE[crm]) || "#6b7280";
 
 /** The short tag a CRM goes by on the board: "SALES", "DRAW", "REMOTE". */
-const CRM_TAG: Record<string, string> = { delta: "Sales", draw: "Draw", remote: "Remote" };
+const CRM_TAG: Record<string, string> = { delta: "Sales", draw: "Draw", remote: "Remote", cs: "CS" };
 export const crmTag = (crm: string, name: string) => CRM_TAG[crm] ?? name;
 
 /** A team's colour stripe, like a team's livery on a timing tower — the same team, the same colour, every time. */

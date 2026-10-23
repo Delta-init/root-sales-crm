@@ -8,7 +8,7 @@
  */
 import type { LucideIcon } from "lucide-react";
 import {
-  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, DatabaseBackup, FileBarChart, Headset, Inbox, LayoutGrid, Phone, Shuffle, Tv, Users2,
+  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, DatabaseBackup, FileBarChart, Headset, Inbox, LayoutGrid, Phone, MonitorPlay, Shuffle, Tv, Users2,
 } from "lucide-react";
 
 export interface NavLink {
@@ -54,6 +54,8 @@ export const NAV: NavItem[] = [
       { href: "/reports", label: "Group report", icon: BarChart3, rootOnly: true },
       // Dubai Sales, Draw and Remote live on one screen, with an open link for the office TVs (2026-10-20).
       { href: "/sales-tv", label: "Sales TV", icon: Tv, rootOnly: true },
+      // The Sales TV with the CS team as a fourth card, and its own open link (2026-10-23).
+      { href: "/manager-tv", label: "Manager TV", icon: MonitorPlay, rootOnly: true },
       // Everyone in the sales CRMs, each with their own page (2026-10-11).
       { href: "/salespeople", label: "Salespeople", icon: Users2, rootOnly: true },
       // Tetra Commission's CSEs: students, deposits, commission and what waits on each (2026-10-11) — in Sales since 2026-10-17.
