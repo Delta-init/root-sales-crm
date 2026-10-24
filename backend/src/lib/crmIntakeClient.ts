@@ -36,6 +36,12 @@ export interface IntakeResult {
   status: "created" | "duplicate" | "invalid";
   leadId?: string;
   reason?: string;
+  /**
+   * For a duplicate, since 2026-10-23: the CRM held the lead that came in again for its team leader to verify
+   * (`repeat: true`); `heldBy` when a CRM names who has it.
+   */
+  repeat?: string | boolean;
+  heldBy?: string | null;
 }
 
 export const sheetsKeyVar = (code: string) => `${envKeyFor(code)}_SHEETS_API_KEY`;

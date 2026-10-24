@@ -47,6 +47,9 @@ const trafficLeadSchema = new Schema<ITrafficLead>(
       required: true,
     },
     crmLeadId: { type: String, default: "" },
+    // A known number passed on to the CRM that holds it, which gives the lead back to its holder (2026-10-23).
+    cameAgainAt: { type: Date, default: null },
+    cameAgainTo: { type: String, default: "" },
     note: { type: String, default: "" },
     attempts: { type: Number, default: 0 },
     nextAttemptAt: { type: Date, default: null },

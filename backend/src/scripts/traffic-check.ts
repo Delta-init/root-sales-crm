@@ -180,8 +180,11 @@ async function main() {
         } else if (r.full_name === "BADROW") {
           results.push({ index: i, status: "invalid", reason: "Note cannot exceed 2000 characters" });
         } else {
-          const exists = await crmDb[org].collection("leads").findOne({ phone: r.phone_number });
-          if (exists) results.push({ index: i, status: "duplicate", leadId: String(exists._id), phone: r.phone_number });
+          // As the CRMs match since 2026-10-23: the last 9 digits, and a known one is held for its team leader (repeat: true).
+          const tail = String(r.phone_number).replace(/\D/g, "").slice(-9);
+          const exists = (await crmDb[org].collection("leads").find({}).toArray())
+            .find((l) => String(l.phone ?? "").replace(/\D/g, "").slice(-9) === tail);
+          if (exists) results.push({ index: i, status: "duplicate", leadId: String(exists._id), phone: r.phone_number, repeat: true });
           else {
             const ins = await crmDb[org].collection("leads").insertOne({
               name: r.full_name, phone: r.phone_number, source: r.source, assignedTo: r.assigned_to ?? null,
@@ -356,12 +359,14 @@ async function main() {
   // ── Case 2 ─────────────────────────────────────────────────────────────────
   step("Case 2 — people already somewhere, a CRM down, a lost answer, pausing, a new split");
   const k1 = await abhin([row(UAE, "+971502222222")]);
-  check("somebody Draw already has (typed 050…) goes back to Draw as a duplicate", k1.body?.data?.results?.[0]?.label === "⚠️ Duplicate · Draw", show(k1.body));
+  check("somebody Draw already has (typed 050…) goes back to Draw, to its holder there — still a duplicate here", k1.body?.data?.results?.[0]?.label === "🔁 Came in again · Draw", show(k1.body));
   const k2 = await abhin([row(UAE, "0501111111")]);
-  check("somebody Delta already has (typed +971…) goes back to Delta", k2.body?.data?.results?.[0]?.label === "⚠️ Duplicate · Delta", show(k2.body));
+  check("somebody Delta already has (typed +971…) goes back to Delta", k2.body?.data?.results?.[0]?.label === "🔁 Came in again · Delta", show(k2.body));
   const k3 = await abhin([row(UK, "07700900002")]);
-  check("somebody sent from here before goes where they went, however typed", k3.body?.data?.results?.[0]?.label === "⚠️ Duplicate · Draw", show(k3.body));
-  check("none of the three was sent", crm.delta.calls + crm.draw.calls === callsBefore);
+  check("somebody sent from here before goes where they went, however typed", k3.body?.data?.results?.[0]?.label === "🔁 Came in again · Draw", show(k3.body));
+  // Since 2026-10-23 each is passed on to the CRM that holds it (which gives it back to its holder) — never created.
+  check("each of the three passed on to the CRM holding it, once — none created there", crm.delta.calls + crm.draw.calls === callsBefore + 3
+    && [k1, k2, k3].every((k) => k.body?.data?.results?.[0]?.status === "duplicate"), show([crm.delta.calls, crm.draw.calls, callsBefore]));
   const twice = await abhin([row(UAE, "+971500000099"), row(UAE, "+971 50 000 0099")]);
   const tw = (twice.body?.data?.results ?? []).map((r: Json) => r.status);
   check("the same person twice in one batch: sent once, then a duplicate", show(tw) === show(["sent", "duplicate"]), show(twice.body));
@@ -595,9 +600,9 @@ async function main() {
     && shList?.items?.some((i: Json) => i.team === "Dilshad team" && i.assignTo === "Nusra"), show(shList?.items?.[0]));
 
   const crossA = await shoaib([srow("+447700900001")]);
-  check("somebody Abhin's sheet already sent goes back to the same CRM", crossA.body?.data?.results?.[0]?.label === "⚠️ Duplicate · Delta", show(crossA.body));
+  check("somebody Abhin's sheet already sent goes back to the same CRM", crossA.body?.data?.results?.[0]?.label === "🔁 Came in again · Delta", show(crossA.body));
   const crossB = await abhin([row(UAE, "+966530000010")]);
-  check("and the other way round", crossB.body?.data?.results?.[0]?.label === "⚠️ Duplicate · Draw", show(crossB.body));
+  check("and the other way round", crossB.body?.data?.results?.[0]?.label === "🔁 Came in again · Draw", show(crossB.body));
 
   const shoaibTeams = (draw = 61.54, extra: Json[] = [], delta = 15.38) => [
     { key: "delta", name: "Delta sales team", org: "delta", percent: delta, assignToId: null },
@@ -679,7 +684,7 @@ async function main() {
   check("the sheet is told: 3 × Remote → Nusra", r13b.filter((r) => r.label === "✅ Remote → Nusra").length === 3, show(r13b.map((r) => r.label)));
 
   const kr = await shoaib([srow("+971509999001")]);
-  check("somebody the remote CRM already has goes back there, as a duplicate", kr.body?.data?.results?.[0]?.label === "⚠️ Duplicate · Remote", show(kr.body));
+  check("somebody the remote CRM already has goes back there, as a duplicate", kr.body?.data?.results?.[0]?.label === "🔁 Came in again · Remote", show(kr.body));
   const sum6 = (await call("GET", "/traffic/summary?sheet=shoaib", undefined, root)).body?.data;
   const dil = seg(sum6, "all")?.shares?.find((x: Json) => x.key === "dilshad");
   check("the page shows the Dilshad team in the Remote CRM, going to Nusra",
@@ -742,8 +747,9 @@ async function main() {
     { ...dsHand, full_name: "Known to Delta", phone_number: "0501111111" },
   ]);
   check("somebody the Draw CRM already has stays Draw's — not sent to the Sales CRM, as for the other sheets",
-    dsKnown.body?.data?.results?.[0]?.label === "⚠️ Duplicate · Draw" && dsKnown.body?.data?.results?.[1]?.label === "⚠️ Duplicate · Delta"
-    && crm.delta.rows.length === deltaAtDs + 3 && crm.draw.rows.length === drawAtDs, show(dsKnown.body));
+    dsKnown.body?.data?.results?.[0]?.label === "🔁 Came in again · Draw" && dsKnown.body?.data?.results?.[1]?.label === "🔁 Came in again · Delta"
+    // Each known one passed on only to the CRM holding it (2026-10-23): Draw's to Draw, Delta's to Delta.
+    && crm.delta.rows.length === deltaAtDs + 4 && crm.draw.rows.length === drawAtDs + 1, show(dsKnown.body));
   const dsBad = await dsPost([{ ...dsHand, full_name: "No Phone", phone_number: "12" }]);
   check("a row without a usable phone is turned away with its reason", dsBad.body?.data?.results?.[0]?.label === "❌ Invalid: No usable phone number", show(dsBad.body));
   const dsSum = (await call("GET", "/traffic/summary?sheet=trading-leads-nitro", undefined, root)).body?.data;
@@ -868,6 +874,24 @@ async function main() {
     const bad = await call("GET", `/traffic/summary?${days}&fromTime=9am&toTime=14:00`, undefined, root);
     check("a time that is not HH:MM is refused", bad.status === 400 && /HH:MM/.test(String(bad.body?.message)), `${bad.status} ${show(bad.body)}`);
     check("…and so is one time without the other", (await call("GET", `/traffic/leads?${days}&fromTime=09:00`, undefined, root)).status === 400);
+  }
+
+  step("Case 7 — a number that came in again, after its lead moved to another CRM (2026-10-23)");
+  {
+    // In Delta, comes in once (passed on to Delta), then the lead moves to Draw: the next time it goes to Draw, where it
+    // is now — and isn't made again in Delta.
+    await crmDb.delta.collection("leads").insertOne({ name: "Mover", phone: "+971500000077", createdAt: new Date() });
+    const first = await abhin([row(UAE, "+971500000077")]);
+    check("first: in Delta, passed on to Delta", first.body?.data?.results?.[0]?.label === "🔁 Came in again · Delta", show(first.body));
+    const moved = await crmDb.delta.collection("leads").findOneAndDelete({ phone: "+971500000077" });
+    await crmDb.draw.collection("leads").insertOne({ name: moved?.name ?? "Mover", phone: "0500000077", createdAt: new Date() });
+    const deltaCalls = crm.delta.calls;
+    const again = await abhin([row(UAE, "971500000077")]);
+    const res = again.body?.data?.results?.[0];
+    check("moved to Draw since: passed on to Draw, where it is now, to its holder", res?.status === "duplicate" && res?.destination === "draw"
+      && res?.label === "🔁 Came in again · Draw", show(again.body));
+    check("…and not made again in Delta, where it first was", crm.delta.calls === deltaCalls
+      && !(await crmDb.delta.collection("leads").findOne({ phone: { $regex: "500000077$" } })), show([crm.delta.calls, deltaCalls]));
   }
 
   console.log(`\n${checks - failures}/${checks} checks passed`);

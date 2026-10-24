@@ -342,6 +342,9 @@ export interface ITrafficLead extends Document {
   assignTo: { id: string; name: string } | null;
   status: TrafficStatus;
   crmLeadId: string;
+  /** A known number told to the CRM holding it, so the lead goes back to its holder (2026-10-23): when, and to whom. */
+  cameAgainAt?: Date | null;
+  cameAgainTo?: string;
   note: string;
   attempts: number;
   nextAttemptAt: Date | null;

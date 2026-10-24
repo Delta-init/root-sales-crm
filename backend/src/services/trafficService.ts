@@ -398,7 +398,7 @@ export interface RowResult {
   reason?: string;
 }
 
-export function sheetLabel(doc: Pick<ITrafficLead, "status" | "destination" | "assignTo" | "note" | "lastError">): string {
+export function sheetLabel(doc: Pick<ITrafficLead, "status" | "destination" | "assignTo" | "note" | "lastError" | "cameAgainAt" | "cameAgainTo">): string {
   const crm = doc.destination ? SHORT[doc.destination] : "";
   // Where the split handed it to one person, the sheet says who.
   const to = doc.assignTo?.name ? `${crm} → ${doc.assignTo.name}` : crm;
@@ -406,6 +406,8 @@ export function sheetLabel(doc: Pick<ITrafficLead, "status" | "destination" | "a
     case "sent":
       return `✅ ${to}`;
     case "duplicate":
+      // Passed on to the CRM that has them, which gave the lead back to whoever holds it.
+      if (doc.cameAgainAt) return `🔁 Came in again · ${crm}${doc.cameAgainTo ? ` → ${doc.cameAgainTo}` : ""}`;
       return `⚠️ Duplicate · ${crm}`;
     case "invalid":
       return `❌ Invalid: ${doc.note || doc.lastError || "rejected"}`.slice(0, 150);
@@ -523,6 +525,8 @@ export async function intake(
 ): Promise<{ results: RowResult[]; summary: Record<string, number> }> {
   const results: RowResult[] = [];
   const toSend: { index: number; doc: ITrafficLead }[] = [];
+  // Numbers a CRM already holds: passed on to it, so it can give the lead back to its holder (2026-10-23).
+  const toRepeat: { index: number; doc: ITrafficLead; org: TrafficOrg }[] = [];
 
   await serial(async () => {
     // The unique key on Meta's lead id is what makes a resend harmless, and
@@ -616,6 +620,9 @@ export async function intake(
         { upsert: true, new: true, setDefaultsOnInsert: true },
       );
       if (doc.status === "sending") toSend.push({ index: i, doc });
+      // Where the lead is now (read from the CRMs above), not where it was sent once: it may have moved since.
+      const holderCrm = doc.status === "duplicate" ? known.get(row.phone9)?.org : undefined;
+      if (holderCrm) toRepeat.push({ index: i, doc, org: holderCrm });
       results.push(resultFor(i, doc));
     }
   });
@@ -631,9 +638,66 @@ export async function intake(
     }
   }
 
+  if (toRepeat.length) {
+    const told = await tellCameAgain(toRepeat);
+    for (const t of toRepeat) {
+      const fresh = told.get(String(t.doc._id));
+      if (fresh) results[results.findIndex((r) => r.index === t.index)] = resultFor(t.index, fresh);
+    }
+  }
+
   const summary: Record<string, number> = {};
   for (const r of results) summary[r.status] = (summary[r.status] ?? 0) + 1;
   return { results, summary };
+}
+
+/**
+ * A number a CRM already holds came in again (the user, 2026-10-23). It used to stop here, so the CRMs' Repeat leads
+ * (their team leaders verify a lead that came in again) never heard of the Meta sheets' repeats. Now it is posted to
+ * the CRM that holds it, whose sheet intake keeps it on that lead for its team leader (or splits it when nobody has
+ * it), answering "duplicate" — so here it stays a duplicate that took no place in the split. Once, best effort: a CRM
+ * that can't be reached just isn't told this time; the next time the number comes in, it is.
+ */
+async function tellCameAgain(items: { doc: ITrafficLead; org: TrafficOrg }[]): Promise<Map<string, ITrafficLead>> {
+  const rules = await getRules();
+  const out = new Map<string, ITrafficLead>();
+  for (const org of ORGS) {
+    const mine = items.filter((t) => t.org === org);
+    for (let at = 0; at < mine.length; at += 100) {
+      const chunk = mine.slice(at, at + 100);
+      let results: Awaited<ReturnType<typeof postIntakeBatch>> | null = null;
+      let error = "";
+      try {
+        results = await postIntakeBatch(org, chunk.map((t) => {
+          const reporter = rules.get(isSheet(t.doc.sheet) ? t.doc.sheet : "abhin")?.reporters?.[org] ?? "";
+          // Never with the split's assignee: the CRM decides who has them.
+          const { assigned_to: _drop, ...row } = toIntakeRow(t.doc, reporter);
+          return row;
+        }));
+      } catch (e) {
+        error = (e as Error).message;
+      }
+      for (let i = 0; i < chunk.length; i++) {
+        const { doc } = chunk[i];
+        const r = results?.find((x) => x.index === i);
+        let set: Partial<ITrafficLead>;
+        if (r?.status === "duplicate") {
+          // Where it is now, which the summary's "already there" counts follow.
+          set = { cameAgainAt: new Date(), cameAgainTo: String(r.heldBy ?? ""), destination: org, crmLeadId: r.leadId ?? doc.crmLeadId,
+            note: `Came in again — ${SHORT[org]} ${r.heldBy ? `gave it back to ${r.heldBy}` : r.repeat ? "sent it to its team leader to verify" : "has it"}${r.reason ? ` (${String(r.reason).slice(0, 200)})` : ""}` };
+        } else if (r?.status === "created") {
+          // It wasn't there after all (removed a moment ago): the CRM took it as a new lead.
+          set = { status: "sent", destination: org, crmLeadId: r.leadId ?? "", sentAt: new Date(), counted: false,
+            note: `Not in ${SHORT[org]} after all — added there as a new lead` };
+        } else {
+          set = { note: `${doc.note || `Already in ${SHORT[org]}`} — couldn't tell ${SHORT[org]} it came in again${error ? ` (${error.slice(0, 200)})` : ""}` };
+        }
+        const updated = await TrafficLead.findByIdAndUpdate(doc._id, { $set: set }, { new: true });
+        if (updated) out.set(String(doc._id), updated);
+      }
+    }
+  }
+  return out;
 }
 
 // ── Posting into the CRMs ────────────────────────────────────────────────────
