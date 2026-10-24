@@ -1,6 +1,6 @@
 import { Router, type Response, type NextFunction } from "express";
 import { authenticate, requireRole } from "../middleware/auth.js";
-import { csReport, csStudentWorkflow, csStudentWorkflowStudents } from "../services/cseService.js";
+import { csReport, csStudentWorkflow, csStudentWorkflowStudents, mentorReport, mentorReviews } from "../services/cseService.js";
 import { salesLeadWorkflow, salesLeadWorkflowLeads, salesReport } from "../services/salesReportService.js";
 import { financeReport } from "../services/financeReportService.js";
 import { hrmsReport } from "../services/hrmsReportService.js";
@@ -73,6 +73,27 @@ router.get("/sales/:code/workflow", async (req: AuthenticatedRequest, res: Respo
 router.get("/sales/:code/workflow/leads", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     sendSuccess(res, "Workflow leads", await salesLeadWorkflowLeads(String(req.params.code), req.query as Record<string, unknown>));
+  } catch (error) {
+    const status = (error as { statusCode?: number }).statusCode;
+    if (status) return sendError(res, (error as Error).message, status);
+    next(error);
+  }
+});
+
+/* Mentors: every mentor's classes, bookings, meetings, reviews and commission, day by day — Tetra Commission's own
+   Mentor Report (2026-10-24) — and one mentor's reviews. */
+router.get("/mentors", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    sendSuccess(res, "Mentors report", await mentorReport(req.query as Record<string, unknown>));
+  } catch (error) {
+    const status = (error as { statusCode?: number }).statusCode;
+    if (status) return sendError(res, (error as Error).message, status);
+    next(error);
+  }
+});
+router.get("/mentors/reviews", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    sendSuccess(res, "Mentor reviews", await mentorReviews(req.query as Record<string, unknown>));
   } catch (error) {
     const status = (error as { statusCode?: number }).statusCode;
     if (status) return sendError(res, (error as Error).message, status);

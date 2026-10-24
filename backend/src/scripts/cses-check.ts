@@ -86,6 +86,14 @@ const stand = createServer((req, res) => {
     return send(200, { success: true, data: { total: 1, students: [{ id: "s1", name: "Asha", code: "STU-1", came_at: "2026-10-02T06:00:00.000Z", source: "lms", location: "dubai",
       cs: { id: CS, name: "Cee One", team: "Falcons" }, onboarded_at: null, stage: "New", late: true, contacted: false, deposited: false, enrolled: true, moved: false }] } });
   }
+  if (url.pathname === "/commission/api/v1/service/mentor-report") {
+    return send(200, { success: true, data: { from: url.searchParams.get("from"), to: url.searchParams.get("to"), everyone: true, lms: { available: true },
+      mentors: [{ id: "u1", name: "Chief Ann", email: "ann@tetra.test", role: "chief_mentor", in_lms: true, lms_id: "a".repeat(24),
+        total: { classes: 3, held: 2, bookings: 9, reviews: 2, avgRating: 4.5, commission_usd: 52.5 }, days: [{ day: "2026-10-21", held: 1, commission_usd: 52.5 }] }] } });
+  }
+  if (url.pathname === "/commission/api/v1/service/mentor-reviews") {
+    return send(200, { success: true, data: { reviews: [{ _id: "r1", rating: 5, comment: "Great" }], total: 1, page: Number(url.searchParams.get("page")), perPage: 50 } });
+  }
   if (url.pathname === "/commission/api/v1/service/cs-pending") {
     return send(200, { success: true, data: { today: "2026-10-17", totals: { onboarding: 2, onboarding_late: 1, bonus: 1, total: 3 },
       people: [{ id: CS, name: "Cee One", email: "cs1@tetra.test", role: "cs", active: true, location: "dubai", counts: { onboarding: 2, onboarding_late: 1, bonus: 1 }, total: 3 }],
@@ -216,6 +224,30 @@ async function main() {
   check("an id that is not one: 404, without asking", (await call("GET", "/cses/not-an-id", root)).status === 404);
   r = await call("GET", "/cses/6ac0000000000000000000ff", root);
   check("a CSE Tetra Commission does not know: 404", r.status === 404 && /No such CSE/.test(r.body?.message ?? ""), show(r.body));
+
+  step("Reports → Mentors (2026-10-24): Tetra Commission's Mentor Report");
+  r = await call("GET", "/portal-reports/mentors?from=2026-10-20&to=2026-10-22", root);
+  check("every mentor, as Tetra Commission says", r.status === 200 && r.body?.data?.mentors?.[0]?.name === "Chief Ann" && r.body.data.mentors[0].total.commission_usd === 52.5
+    && r.body.data.everyone === true, show(r.body));
+  check("…asked of its /service/mentor-report with the portal secret and the days", seen.at(-1)?.path === "/commission/api/v1/service/mentor-report"
+    && seen.at(-1)?.secret === "cses-e2e-commission-secret" && seen.at(-1)?.search === "?from=2026-10-20&to=2026-10-22", show(seen.at(-1)));
+  const asks = seen.length;
+  check("bad dates: 400 without asking — missing, not days, upside down, over three months",
+    (await call("GET", "/portal-reports/mentors?from=2026-10-20", root)).status === 400 && (await call("GET", "/portal-reports/mentors?from=20-10-2026&to=2026-10-22", root)).status === 400
+    && (await call("GET", "/portal-reports/mentors?from=2026-10-22&to=2026-10-20", root)).status === 400 && (await call("GET", "/portal-reports/mentors?from=2026-01-01&to=2026-10-22", root)).status === 400
+    && seen.length === asks);
+  r = await call("GET", `/portal-reports/mentors/reviews?instructorId=${"a".repeat(24)}&from=2026-10-20&to=2026-10-22&page=2`, root);
+  const rv = new URLSearchParams(seen.at(-1)?.search ?? "");
+  check("a mentor's reviews, with the instructor, page and dates passed on", r.status === 200 && r.body?.data?.reviews?.[0]?.comment === "Great"
+    && seen.at(-1)?.path === "/commission/api/v1/service/mentor-reviews" && rv.get("instructorId") === "a".repeat(24) && rv.get("page") === "2" && rv.get("from") === "2026-10-20", show(seen.at(-1)));
+  check("…no instructor id: 400", (await call("GET", "/portal-reports/mentors/reviews?instructorId=x", root)).status === 400);
+  oldServer = true;
+  r = await call("GET", "/portal-reports/mentors?from=2026-10-20&to=2026-10-22", root);
+  check("Tetra Commission's server from before: 409, it needs updating", r.status === 409 && /needs updating — it has no mentors' report yet/.test(r.body?.message ?? ""), show(r.body));
+  oldServer = false;
+  check("root admins only: 401 with no session, 403 for a non-root admin", (await call("GET", "/portal-reports/mentors?from=2026-10-20&to=2026-10-22")).status === 401
+    && (await call("GET", "/portal-reports/mentors?from=2026-10-20&to=2026-10-22", member)).status === 403
+    && (await call("GET", `/portal-reports/mentors/reviews?instructorId=${"a".repeat(24)}`, member)).status === 403);
 
   step("Case 4 — root admins only");
   check("no session: 401", (await call("GET", "/cses")).status === 401 && (await call("GET", `/cses/${CS}`)).status === 401);

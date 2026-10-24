@@ -148,3 +148,26 @@ export const csStudentWorkflowStudents = async (q: Record<string, unknown>) => {
   }
   return { ...(await ask<Record<string, unknown>>(`/student-workflow/students?${params}`, "it can't list a workflow box's students yet")), studentLink: studentLink() };
 };
+
+/*
+ * Reports → Mentors (the user, 2026-10-24: "the mentors report, same as the commission portal's"): every mentor, day
+ * by day — classes held and cancelled, students' bookings and cancellations, attended, missed, 1:1 meetings and the
+ * reviews students left, from the LMS, with the commission Tetra Commission credited them — as its own Mentor Report
+ * shows a Super Admin (GET /service/mentor-report). Gulf days, at most three months. Read-only.
+ */
+export const mentorReport = async (q: Record<string, unknown>) => {
+  const from = String(q.from ?? ""), to = String(q.to ?? "");
+  if (!DAY.test(from) || !DAY.test(to)) throw bad("from and to are days (YYYY-MM-DD)");
+  if (to < from) throw bad("from is after to");
+  if (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`) > 92 * 86_400_000) throw bad("At most three months at a time");
+  return ask<Record<string, unknown>>(`/mentor-report?${new URLSearchParams({ from, to })}`, "it has no mentors' report yet");
+};
+
+/** One mentor's reviews in the dates, 50 a page (GET /service/mentor-reviews) — the LMS instructor's id. */
+export const mentorReviews = async (q: Record<string, unknown>) => {
+  const instructorId = String(q.instructorId ?? "");
+  if (!/^[0-9a-f]{24}$/i.test(instructorId)) throw bad("instructorId is required");
+  const params = new URLSearchParams({ instructorId, page: String(Math.max(1, Math.min(200, Number(q.page) || 1))) });
+  for (const k of ["from", "to"] as const) if (typeof q[k] === "string" && DAY.test(q[k] as string)) params.set(k, q[k] as string);
+  return ask<Record<string, unknown>>(`/mentor-reviews?${params}`, "it has no mentors' reviews yet");
+};
