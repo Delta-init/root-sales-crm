@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { CseStatCard } from "@/components/cses/CseStatCard";
 import { BreakdownDialog, Bars, type BarRow, type BreakdownTab } from "@/components/common/Breakdown";
 import { api } from "@/lib/axios";
+import { PersonLink } from "@/components/pending/access";
 import { cn } from "@/lib/utils";
 import type { BonusStage, CsLocation, CsPending, CsPendingCounts, CsPendingWho } from "@/lib/types";
 
@@ -106,7 +107,7 @@ export function CsPendingView() {
   const showNoCs = !!data?.noCs && data.noCs.total > 0 && loc !== "bangalore" && !needle;
 
   if (q.error instanceof AxiosError && q.error.response?.status === 403) {
-    return <Card><CardContent className="pt-6 text-sm text-muted-foreground">Pending is for root admins.</CardContent></Card>;
+    return <Card><CardContent className="pt-6 text-sm text-muted-foreground">You haven&apos;t been given this Pending tab — a root admin gives it on Users.</CardContent></Card>;
   }
   if (q.isLoading) {
     return (
@@ -238,7 +239,7 @@ export function CsPendingView() {
                     <motion.tr key={p.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i, 15) * 0.02 }}
                       className="border-b border-border/20 last:border-0">
                       <td className="py-2.5 pr-3">
-                        <Link href={`/cses/${p.id}`} className={cn("font-medium hover:underline", !p.active && "text-muted-foreground")}>{p.name}</Link>
+                        <PersonLink href={`/cses/${p.id}`} className={cn("font-medium hover:underline", !p.active && "text-muted-foreground")}>{p.name}</PersonLink>
                         {!p.active && <span className="ml-1.5 text-xs text-muted-foreground">(switched off)</span>}
                         <div className="text-xs text-muted-foreground">
                           {[p.team, p.location === "bangalore" ? "Bangalore" : "Dubai", p.role === "cs" ? "" : p.role.replace(/_/g, " ")].filter(Boolean).join(" · ")}

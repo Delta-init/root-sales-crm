@@ -32,7 +32,7 @@ export const authenticate = async (
     // Hit the DB on every request rather than trusting the token alone. This
     // endpoint set can open three production CRMs, so revoking an admin has to
     // take effect immediately, not whenever their token happens to expire.
-    const admin = await AdminUser.findById(decoded.adminId).select("status role email trafficAccess");
+    const admin = await AdminUser.findById(decoded.adminId).select("status role email trafficAccess pendingAccess");
     if (!admin) {
       sendError(res, "Admin no longer exists", 401);
       return;
@@ -59,6 +59,7 @@ export const authenticate = async (
       email: admin.email,
       role: admin.role,
       trafficAccess: admin.trafficAccess ?? "none",
+      pendingAccess: admin.pendingAccess ?? [],
       ...(decoded.impersonatedBy ? { impersonatedBy: decoded.impersonatedBy } : {}),
     };
 
@@ -111,3 +112,30 @@ export const requireTrafficAccess =
     }
     next();
   };
+
+/**
+ * Gate for one Pending tab: root admins, and whoever was given that tab (2026-10-24). The tab can depend on the
+ * request — a sales CRM's is `sales:<code>`. Read from the record on every request, so taking it away takes effect at
+ * once.
+ */
+export const requirePendingTab =
+  (tab: string | ((req: AuthenticatedRequest) => string)) =>
+  (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+    const a = req.admin;
+    const want = typeof tab === "string" ? tab : tab(req);
+    if (!a || (a.role !== "root_admin" && !(a.pendingAccess ?? []).includes(want as never))) {
+      sendError(res, "You do not have access to this Pending tab", 403);
+      return;
+    }
+    next();
+  };
+
+/** Somebody who may open any sales CRM's Pending tab — the list of them is then cut to theirs. */
+export const requireAnySalesPending = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+  const a = req.admin;
+  if (!a || (a.role !== "root_admin" && !(a.pendingAccess ?? []).some((t) => t.startsWith("sales:")))) {
+    sendError(res, "You do not have access to this Pending tab", 403);
+    return;
+  }
+  next();
+};

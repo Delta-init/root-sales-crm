@@ -6,7 +6,7 @@ import {
   grant, provision, revoke, setRole,
   targetRoles, describePerson, setRoleInTarget, grantMany,
   setStatus, deletePerson, setStatusMany, deleteMany,
-  peoplePresence, impersonate, setTrafficAccess,
+  peoplePresence, impersonate, setTrafficAccess, setPendingAccess,
 } from "../controllers/accessController.js";
 
 const router = Router();
@@ -61,6 +61,7 @@ router.patch("/:userId/status", setStatus);
 router.delete("/:userId/:target", revoke);
 router.patch("/:userId/role", setRole);
 router.patch("/:userId/traffic", setTrafficAccess);
+router.patch("/:userId/pending", setPendingAccess);
 router.patch("/:userId/:target/role", setRoleInTarget);
 
 export default router;

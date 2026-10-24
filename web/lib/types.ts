@@ -44,6 +44,8 @@ export interface Admin {
   status: "active" | "inactive";
   /** Lead traffic: nothing, look, or also change the split. Root admins have it all. */
   trafficAccess?: TrafficAccess;
+  /** The Pending tabs they were given. Root admins see every one. */
+  pendingAccess?: PendingTab[];
   lastLoginAt: string | null;
 }
 
@@ -244,6 +246,8 @@ export type PortalRole = "root_admin" | "member" | "viewer";
 
 /** Somebody's reach on the Lead traffic page when they are not a root admin. */
 export type TrafficAccess = "none" | "view" | "manage";
+/** A Pending tab given to somebody who is not a root admin (2026-10-24); a sales CRM is `sales:<code>`. */
+export type PendingTab = "cs" | "sales:delta" | "sales:draw" | "sales:remote" | "sales:banglore" | "finance" | "hrms" | "media" | "enrolments";
 
 export interface PersonAccess {
   target: TargetCode;
@@ -315,6 +319,7 @@ export interface PersonDetail {
     role: PortalRole;
     status: "active" | "inactive";
     trafficAccess?: TrafficAccess;
+    pendingAccess?: PendingTab[];
   };
   targets: TargetView[];
 }

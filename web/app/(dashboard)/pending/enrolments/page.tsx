@@ -19,7 +19,7 @@ export default function PendingEnrolmentsPage() {
     refetchInterval: 3 * 60_000,
   });
   if (flow.error instanceof AxiosError && flow.error.response?.status === 403) {
-    return <Card><CardContent className="pt-6 text-sm text-muted-foreground">Pending is for root admins.</CardContent></Card>;
+    return <Card><CardContent className="pt-6 text-sm text-muted-foreground">You haven&apos;t been given this Pending tab — a root admin gives it on Users.</CardContent></Card>;
   }
   return (
     <div className="space-y-4">

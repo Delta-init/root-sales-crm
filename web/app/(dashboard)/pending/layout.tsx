@@ -1,11 +1,14 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Inbox } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BackupStatusCard } from "@/components/backups/BackupStatusCard";
+import { mayOpenPending } from "@/components/pending/access";
+import { useAuth } from "@/providers/AuthProvider";
 
 /*
  * Pending, a page per tab (the user, 2026-10-17: "add separate tab view for
@@ -25,6 +28,14 @@ const TABS = [
 
 export default function PendingLayout({ children }: { children: React.ReactNode }) {
   const path = usePathname();
+  const router = useRouter();
+  const { admin } = useAuth();
+  const root = admin?.role === "root_admin";
+  // Somebody given some tabs (2026-10-24) sees those; a tab they weren't given sends them to their first.
+  const tabs = TABS.filter((t) => mayOpenPending(admin, t.href));
+  const allowed = path === "/pending" || mayOpenPending(admin, path);
+  const home = tabs[0]?.href;
+  useEffect(() => { if (!allowed && home) router.replace(home); }, [allowed, home, router]);
   return (
     <div className="space-y-6">
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
@@ -35,12 +46,12 @@ export default function PendingLayout({ children }: { children: React.ReactNode 
           What is waiting in each portal, and for whom — the counts each portal&apos;s own sidebar shows.
         </p>
       </motion.div>
-      {/* Every portal backed up or not, on every Pending tab (2026-10-17). */}
-      <BackupStatusCard />
+      {/* Every portal backed up or not, on every Pending tab (2026-10-17) — root admins only, like Backups. */}
+      {root && <BackupStatusCard />}
       {/* Scrolls sideways on a phone rather than wrapping into a block of buttons. */}
       <nav className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0" aria-label="Pending tabs">
         <div className="flex w-max gap-1 border-b border-border/60">
-          {TABS.map((t) => {
+          {tabs.map((t) => {
             const on = path === t.href || path.startsWith(`${t.href}/`);
             return (
               <Link
@@ -58,7 +69,9 @@ export default function PendingLayout({ children }: { children: React.ReactNode 
           })}
         </div>
       </nav>
-      {children}
+      {tabs.length === 0
+        ? <p className="text-sm text-muted-foreground">You haven&apos;t been given any Pending tab. A root admin gives them on Users.</p>
+        : allowed ? children : null}
     </div>
   );
 }

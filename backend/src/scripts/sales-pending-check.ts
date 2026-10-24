@@ -8,6 +8,7 @@
  *                        a CRM with no API set (Draw) still gives its database's figures; finance's old server
  *   Case 3  errors       a CRM that can't be read, an unknown one, bad dates
  *   Case 4  permission   no session, an admin who is not a root admin
+ *   Case 5  access       Pending tabs given per person (2026-10-24): each sees only theirs, root admins all
  *
  * And the HRMS and Media ERP tabs (2026-10-17): /pending/hrms and /pending/media,
  * as each portal's hrms-watch / media-watch says, and their old servers. And
@@ -325,6 +326,60 @@ async function main() {
     && (await call("/portal-reports/sales/delta/workflow/leads?box=came", member)).status === 403);
   check("HRMS report: no session 401, not a root admin 403", (await call("/portal-reports/hrms")).status === 401 && (await call("/portal-reports/hrms", member)).status === 403);
   check("finance report, no session: 401", (await call("/portal-reports/finance")).status === 401);
+
+  // ── Case 5: a Pending tab given to somebody who is not a root admin (2026-10-24) ──
+  step("Case 5 — Pending access: Doney the CS portal, Abrar the Sales CRM, Maneesh Draw, dilshad Remote");
+  const send = async (method: string, path: string, body: unknown, headers: Record<string, string>) => {
+    const r = await fetch(`${ROOT}${path}`, { method, headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+    return { status: r.status, body: await r.json().catch(() => ({})) as Json };
+  };
+  const people: Record<string, { id: string; auth: Record<string, string> }> = {};
+  for (const who of ["doney", "abrar", "maneesh", "dilshad"]) {
+    const u = await AdminUser.create({ name: who, email: `${who}@sales-pending-e2e.test`, password: PASSWORD, role: "member", status: "active" });
+    people[who] = { id: String(u._id), auth: { authorization: `Bearer ${await login(`${who}@sales-pending-e2e.test`)}` } };
+  }
+  const rootRow = await AdminUser.findOne({ email: "root@sales-pending-e2e.test" }).lean();
+  check("before any grant: Abrar can't open the Sales tab", (await call("/pending/sales", people.abrar!.auth)).status === 403);
+  let g = await send("PATCH", `/access/${people.abrar!.id}/pending`, { tabs: ["sales:delta"] }, member);
+  check("only a root admin gives it", g.status === 403, show(g));
+  g = await send("PATCH", `/access/${people.abrar!.id}/pending`, { tabs: ["sales:delta", "all"] }, root);
+  check("a tab that isn't one is refused", g.status === 400, show(g));
+  g = await send("PATCH", `/access/${String(rootRow!._id)}/pending`, { tabs: ["cs"] }, root);
+  check("a root admin has every tab already", g.status === 409, show(g));
+  for (const [who, tabs] of [["doney", ["cs"]], ["abrar", ["sales:delta"]], ["maneesh", ["sales:draw"]], ["dilshad", ["sales:remote"]]] as [string, string[]][]) {
+    g = await send("PATCH", `/access/${people[who]!.id}/pending`, { tabs }, root);
+    same(`${who} given ${tabs.join()}`, g.body?.data?.pendingAccess, tabs);
+  }
+  same("their session says so", (await call("/auth/me", people.abrar!.auth)).body?.data?.pendingAccess, ["sales:delta"]);
+  same("…and the person's page", (await call(`/access/person/${people.maneesh!.id}`, root)).body?.data?.person?.pendingAccess, ["sales:draw"]);
+  check("each grant in the audit log", (await mongoose.connection.db!.collection("auditlogs").countDocuments({ action: "pending_access_changed" })) === 4);
+
+  const codes = async (who: string) => ((await call("/pending/sales", people[who]!.auth)).body?.data ?? []).map((x: Json) => x.code);
+  same("Abrar's Sales tab lists the Sales CRM only", await codes("abrar"), ["delta"]);
+  same("Maneesh's: Draw only", await codes("maneesh"), ["draw"]);
+  same("dilshad's: Remote only", await codes("dilshad"), ["remote"]);
+  r = await call(`/pending/sales/delta?from=${dayOf(-7)}&to=${today}`, people.abrar!.auth);
+  check("Abrar sees the Sales CRM's pending, the same as a root admin", r.status === 200 && (r.body?.data?.people ?? []).some((p: Json) => p.id === String(asha)), show(r.body));
+  check("…but not Draw, Remote or Banglore", (await call("/pending/sales/draw", people.abrar!.auth)).status === 403
+    && (await call("/pending/sales/remote", people.abrar!.auth)).status === 403 && (await call("/pending/sales/banglore", people.abrar!.auth)).status === 403);
+  check("Maneesh sees Draw's, not the Sales CRM's", (await call(`/pending/sales/draw?from=${dayOf(-7)}&to=${today}`, people.maneesh!.auth)).status === 200
+    && (await call("/pending/sales/delta", people.maneesh!.auth)).status === 403);
+  check("dilshad gets Remote's answer (not a refusal), not the Sales CRM's", (await call("/pending/sales/remote", people.dilshad!.auth)).status !== 403
+    && (await call("/pending/sales/delta", people.dilshad!.auth)).status === 403);
+  check("Doney gets the CS portal tab (not a refusal), and no Sales tab", (await call("/pending/cs", people.doney!.auth)).status !== 403
+    && (await call("/pending/sales", people.doney!.auth)).status === 403);
+  const shut = ["/pending", "/pending/calls", "/pending/finance", "/pending/hrms", "/pending/media", "/pending/enrolments", "/calls"];
+  const opened: string[] = [];
+  for (const who of Object.keys(people)) for (const path of shut) if ((await call(path, people[who]!.auth)).status !== 403) opened.push(`${who} ${path}`);
+  check("none of them opens All portals, calls by person, Finance, HRMS, Media, Enrolments or 3CX calls", opened.length === 0, opened.join(", "));
+  check("Abrar can't open the CS tab, Doney can't open a CRM's", (await call("/pending/cs", people.abrar!.auth)).status === 403 && (await call("/pending/sales/delta", people.doney!.auth)).status === 403);
+  check("a Sales CRM recording plays for Abrar (not refused), Draw's doesn't",
+    (await call("/calls/delta/c1/recording-link", people.abrar!.auth)).status !== 403 && (await call("/calls/draw/c1/recording-link", people.abrar!.auth)).status === 403);
+  check("…and none for Doney", (await call("/calls/delta/c1/recording-link", people.doney!.auth)).status === 403);
+  g = await send("PATCH", `/access/${people.abrar!.id}/pending`, { tabs: [] }, root);
+  check("taken away: Abrar is refused at once", g.status === 200 && (await call("/pending/sales/delta", people.abrar!.auth)).status === 403 && (await call("/pending/sales", people.abrar!.auth)).status === 403);
+  check("a root admin still opens every tab", (await call("/pending/sales/delta", root)).status === 200 && (await call("/pending/cs", root)).status !== 403
+    && ((await call("/pending/sales", root)).body?.data ?? []).length === 4);
 
   console.log(`\n${checks - failures}/${checks} checks passed`);
 }

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { overview, recording } from "../controllers/callsController.js";
-import { authenticate, requireRole } from "../middleware/auth.js";
+import { authenticate, requirePendingTab, requireRole } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -9,9 +9,10 @@ const router = Router();
  * only, like the Salespeople page: it is everybody's calls, in every portal.
  * Guarded here as well as hidden in the menu.
  */
-router.use(authenticate, requireRole("root_admin"));
+router.use(authenticate);
 
-router.get("/", overview);
-router.get("/:portal/:id/recording-link", recording);
+router.get("/", requireRole("root_admin"), overview);
+// A recording also plays for somebody given that sales CRM's Pending tab, where its calls are listed (2026-10-24).
+router.get("/:portal/:id/recording-link", requirePendingTab((req) => `sales:${String(req.params.portal)}`), recording);
 
 export default router;

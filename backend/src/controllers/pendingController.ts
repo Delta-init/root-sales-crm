@@ -48,7 +48,13 @@ const answer = (message: string, fn: (req: AuthenticatedRequest) => Promise<unkn
   };
 
 /** The sales CRMs, for the Sales tab's own tabs. */
-export const salesList = answer("Sales CRMs", () => salesPortals());
+export const salesList = answer("Sales CRMs", async (req) => {
+  const all = await salesPortals();
+  // Somebody given only some sales CRMs (2026-10-24) gets their tabs, not the rest.
+  if (req.admin?.role === "root_admin") return all;
+  const mine = new Set(req.admin?.pendingAccess ?? []);
+  return all.filter((p) => mine.has(`sales:${p.code}` as never));
+});
 /** One sales CRM: inactive leads, overdue reminders, not connected, lost (with reasons) and calls, per salesperson. */
 export const sales = answer("Sales pending", (req) => salesPending(String(req.params.code), req.query));
 /** Finance: approvals waiting (30 minutes = delayed) and entries typed with an old date. */

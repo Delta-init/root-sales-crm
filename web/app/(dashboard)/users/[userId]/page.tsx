@@ -13,7 +13,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/axios";
 import { useAuth } from "@/providers/AuthProvider";
-import type { PersonDetail, PortalRole, TargetRole, TargetView, TrafficAccess } from "@/lib/types";
+import type { PendingTab, PersonDetail, PortalRole, TargetRole, TargetView, TrafficAccess } from "@/lib/types";
+import { PENDING_TAB_OPTIONS } from "@/components/pending/access";
 
 /**
  * One person, as every system actually sees them.
@@ -77,6 +78,17 @@ export default function PersonAccessPage() {
   const setTrafficAccess = useMutation({
     mutationFn: async (access: TrafficAccess) =>
       api.patch(`/access/${userId}/traffic`, { access }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["person-access", userId] });
+    },
+  });
+
+  /*
+   * Which Pending tabs they may open (2026-10-24): the CS portal for the CS lead, one sales CRM for its Sales Manager.
+   * The whole list is sent each time, so unticking one takes it away. A root admin sees every tab anyway.
+   */
+  const setPendingAccess = useMutation({
+    mutationFn: async (tabs: PendingTab[]) => api.patch(`/access/${userId}/pending`, { tabs }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["person-access", userId] });
     },
@@ -214,6 +226,38 @@ export default function PersonAccessPage() {
           )}
         </div>
       </div>
+
+      {person.role !== "root_admin" && (
+        <Card>
+          <CardContent className="space-y-2 p-4">
+            <div>
+              <p className="text-sm font-medium">Pending access</p>
+              <p className="text-xs text-muted-foreground">
+                The Pending tabs they may open. Nothing ticked: no Pending at all. All portals stays with root admins.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-2">
+              {PENDING_TAB_OPTIONS.map((o) => {
+                const mine = person.pendingAccess ?? [];
+                const on = mine.includes(o.tab);
+                return (
+                  <label key={o.tab} className="flex items-center gap-1.5 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      disabled={setPendingAccess.isPending}
+                      onChange={() => setPendingAccess.mutate(on ? mine.filter((t) => t !== o.tab) : [...mine, o.tab])}
+                      className="h-4 w-4 accent-[hsl(var(--primary))] disabled:opacity-50"
+                    />
+                    {o.label}
+                  </label>
+                );
+              })}
+            </div>
+            {setPendingAccess.isError && <p className="text-xs text-destructive">Could not save — try again.</p>}
+          </CardContent>
+        </Card>
+      )}
 
       {/*
         The disagreements first, and only when there are any.

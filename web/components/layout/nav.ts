@@ -18,6 +18,8 @@ export interface NavLink {
   rootOnly?: boolean;
   /** Shown to root admins and to anybody given lead-traffic access. */
   traffic?: boolean;
+  /** Shown to root admins and to anybody given a Pending tab (2026-10-24). */
+  pending?: boolean;
 }
 
 export interface NavItem extends Partial<NavLink> {
@@ -31,8 +33,9 @@ export interface NavItem extends Partial<NavLink> {
 export const NAV: NavItem[] = [
   { href: "/dashboard", label: "Organisations", icon: LayoutGrid },
   // What is waiting in every portal, and for whom — each portal's sidebar
-  // counts on one page. Root admins only: it is everybody's queue at once.
-  { href: "/pending", label: "Pending", icon: Inbox, rootOnly: true },
+  // counts on one page. Root admins, and since 2026-10-24 anybody given one of
+  // its tabs (the CS lead the CS portal, a Sales Manager their CRM).
+  { href: "/pending", label: "Pending", icon: Inbox, pending: true },
   // What got done in a period, a tab per portal like Pending (2026-10-17). Root admins only.
   { href: "/portal-reports", label: "Reports", icon: FileBarChart, rootOnly: true },
   /*
@@ -105,10 +108,12 @@ export const NAV: NavItem[] = [
  * sees Sales with just Lead traffic in it, and somebody with nothing in a group
  * does not see an empty one.
  */
-export function navFor(admin: { role: string; trafficAccess?: string } | null): NavItem[] {
+export function navFor(admin: { role: string; trafficAccess?: string; pendingAccess?: string[] } | null): NavItem[] {
   const root = admin?.role === "root_admin";
   const traffic = root || (!!admin?.trafficAccess && admin.trafficAccess !== "none");
-  const canSee = (x: { rootOnly?: boolean; traffic?: boolean }) => (x.traffic ? traffic : !x.rootOnly || root);
+  const pending = root || (admin?.pendingAccess ?? []).length > 0;
+  const canSee = (x: { rootOnly?: boolean; traffic?: boolean; pending?: boolean }) =>
+    (x.traffic ? traffic : x.pending ? pending : !x.rootOnly || root);
   return NAV.flatMap((item) => {
     if (!item.children) return canSee(item) ? [item] : [];
     if (item.rootOnly && !root) return [];

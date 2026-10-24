@@ -89,7 +89,7 @@ export function FinanceWatchView() {
   const entries = useMemo(() => (data?.backdated.rows ?? []).filter((e) => org === "all" || e.orgId === org), [data, org]);
 
   if (q.error instanceof AxiosError && q.error.response?.status === 403) {
-    return <Card><CardContent className="pt-6 text-sm text-muted-foreground">Pending is for root admins.</CardContent></Card>;
+    return <Card><CardContent className="pt-6 text-sm text-muted-foreground">You haven&apos;t been given this Pending tab — a root admin gives it on Users.</CardContent></Card>;
   }
   if (q.isLoading) {
     return (

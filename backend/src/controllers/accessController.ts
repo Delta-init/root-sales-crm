@@ -8,6 +8,7 @@ import { accessService } from "../services/accessService.js";
 import { provisionService } from "../services/provisionService.js";
 import { directoryService } from "../services/directoryService.js";
 import { record } from "../services/auditService.js";
+import { PENDING_TABS, type PendingTab } from "../types/index.js";
 import { sendError, sendSuccess } from "../utils/response.js";
 import type { AuthenticatedRequest, TargetCode } from "../types/index.js";
 
@@ -433,6 +434,40 @@ export const setTrafficAccess = async (req: AuthenticatedRequest, res: Response,
     });
 
     sendSuccess(res, "Lead traffic access updated", { id: String(person._id), trafficAccess: person.trafficAccess });
+  } catch (err) { next(err); }
+};
+
+/**
+ * Which Pending tabs somebody who is not a root admin may open (2026-10-24) — the whole list each time, so unticking
+ * one takes it away.
+ */
+export const setPendingAccess = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = String(req.params["userId"] ?? "");
+    const tabs = (req.body as { tabs?: unknown })?.tabs;
+    if (!Array.isArray(tabs) || tabs.some((t) => !PENDING_TABS.includes(t as PendingTab))) {
+      sendError(res, `tabs must be a list of: ${PENDING_TABS.join(", ")}`, 400);
+      return;
+    }
+    const person = await AdminUser.findById(userId).select("email role pendingAccess");
+    if (!person) { sendError(res, "No such person", 404); return; }
+    if (person.role === "root_admin") {
+      sendError(res, "Root admins already see every Pending tab", 409);
+      return;
+    }
+
+    const before = [...(person.pendingAccess ?? [])];
+    person.pendingAccess = PENDING_TABS.filter((t) => tabs.includes(t));
+    await person.save();
+
+    await record(req, "pending_access_changed", {
+      adminId: req.admin!.adminId,
+      adminEmail: req.admin!.email,
+      org: null,
+      detail: `Pending for ${person.email}: ${before.join(", ") || "none"} → ${person.pendingAccess.join(", ") || "none"}`,
+    });
+
+    sendSuccess(res, "Pending access updated", { id: String(person._id), pendingAccess: person.pendingAccess });
   } catch (err) { next(err); }
 };
 

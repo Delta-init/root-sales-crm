@@ -14,6 +14,7 @@ import { CseStatCard } from "@/components/cses/CseStatCard";
 import { BreakdownDialog, Bars, type BarRow, type BreakdownTab } from "@/components/common/Breakdown";
 import { Recording } from "@/components/calls/Recording";
 import { api } from "@/lib/axios";
+import { PersonLink } from "@/components/pending/access";
 import { cn } from "@/lib/utils";
 import { CALL_PERIODS, callLength, periodDays, talkTime, type CallPeriod } from "@/lib/calls";
 import type { SalesPending, SalesPendingCounts } from "@/lib/types";
@@ -82,7 +83,7 @@ export function SalesPortalView({ code }: { code: string }) {
   const people = useMemo(() => (data?.people ?? []).filter((p) => !needle || p.name.toLowerCase().includes(needle) || p.email.includes(needle)), [data, needle]);
 
   if (q.error instanceof AxiosError && q.error.response?.status === 403) {
-    return <Card><CardContent className="pt-6 text-sm text-muted-foreground">Pending is for root admins.</CardContent></Card>;
+    return <Card><CardContent className="pt-6 text-sm text-muted-foreground">You haven&apos;t been given this Pending tab — a root admin gives it on Users.</CardContent></Card>;
   }
 
   const toolbar = (
@@ -206,7 +207,7 @@ export function SalesPortalView({ code }: { code: string }) {
                         <motion.tr key={p.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i, 15) * 0.02 }}
                           className="border-b border-border/20 last:border-0">
                           <td className="py-2.5 pr-3">
-                            <Link href={`/salespeople/${data.code}/${p.id}`} className={cn("font-medium hover:underline", !p.active && "text-muted-foreground")}>{p.name}</Link>
+                            <PersonLink href={`/salespeople/${data.code}/${p.id}`} className={cn("font-medium hover:underline", !p.active && "text-muted-foreground")}>{p.name}</PersonLink>
                             {!p.active && <span className="ml-1.5 text-xs text-muted-foreground">(left)</span>}
                           </td>
                           <td className="py-2.5 pr-3 text-right tabular-nums">{data.inactive.available ? cell("inactive") : <span className="text-muted-foreground/60">—</span>}</td>

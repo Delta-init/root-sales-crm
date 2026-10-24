@@ -31,6 +31,14 @@ export type AdminRole = "root_admin" | "member" | "viewer";
  */
 export type TrafficAccess = "none" | "view" | "manage";
 
+/**
+ * The Pending tabs somebody who is not a root admin may open (the user, 2026-10-24: Doney the CS portal, Abrar the
+ * Sales CRM (Dubai), Maneesh Draw, dilshad Remote). A sales CRM is `sales:<its code>`. "All portals" and the calls by
+ * person stay with root admins.
+ */
+export const PENDING_TABS = ["cs", "sales:delta", "sales:draw", "sales:remote", "sales:banglore", "finance", "hrms", "media", "enrolments"] as const;
+export type PendingTab = (typeof PENDING_TABS)[number];
+
 export interface IAdminUser extends Document {
   _id: Types.ObjectId;
   name: string;
@@ -39,6 +47,7 @@ export interface IAdminUser extends Document {
   role: AdminRole;
   status: "active" | "inactive";
   trafficAccess: TrafficAccess;
+  pendingAccess: PendingTab[];
   lastLoginAt: Date | null;
   comparePassword(candidate: string): Promise<boolean>;
 }
@@ -189,6 +198,7 @@ export type AuditAction =
   | "traffic_rules_changed"
   | "traffic_lead_retried"
   | "traffic_access_changed"
+  | "pending_access_changed"
   // A backup started by hand, and an archive taken home — each is a whole portal's data.
   | "backup_run"
   | "backup_downloaded"
@@ -375,6 +385,8 @@ export interface JwtPayload {
   impersonatedBy?: { id: string; email: string };
   /** Read from the record on every request, like the role — never from the token. */
   trafficAccess?: TrafficAccess;
+  /** The Pending tabs they were given (2026-10-24); read from the record like the rest. */
+  pendingAccess?: PendingTab[];
 }
 
 /** A sales rep's session. Distinct from an admin's — `kind` is what stops an

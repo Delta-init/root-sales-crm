@@ -1,6 +1,6 @@
 import mongoose, { Schema } from "mongoose";
 import bcrypt from "bcryptjs";
-import type { IAdminUser } from "../types/index.js";
+import { PENDING_TABS, type IAdminUser } from "../types/index.js";
 
 const adminUserSchema = new Schema<IAdminUser>(
   {
@@ -55,6 +55,14 @@ const adminUserSchema = new Schema<IAdminUser>(
       type: String,
       enum: ["none", "view", "manage"],
       default: "none",
+    },
+    /*
+     * Pending tabs, for somebody who is not a root admin (2026-10-24) — the CS portal for the CS lead, one sales
+     * CRM for its Sales Manager. A grant per tab like Lead traffic's, none by default.
+     */
+    pendingAccess: {
+      type: [{ type: String, enum: PENDING_TABS }],
+      default: [],
     },
     lastLoginAt: { type: Date, default: null },
   },
