@@ -25,7 +25,11 @@ interface Figures {
 }
 interface Mentor { id: string; name: string; email: string; role: string; in_lms: boolean; lms_id?: string; total: Figures; days: (Figures & { day: string })[] }
 interface Report { from: string; to: string; everyone: boolean; mentors: Mentor[]; lms: { available: boolean; message?: string } }
-interface Review { _id?: string; id?: string; rating: number; comment?: string; createdAt?: string; studentId?: { name?: string }; liveClassId?: { title?: string } }
+interface Review {
+  _id?: string; id?: string; rating: number; comment?: string; createdAt?: string; studentId?: { name?: string }; liveClassId?: { title?: string };
+  /** A mentor rating or the feedback left after the class (2026-10-25); a rating may carry the same student's class comment. */
+  kind?: "mentor_rating" | "class_feedback"; classComment?: string;
+}
 
 const dubaiToday = () => new Date(Date.now() + 4 * 3_600_000).toISOString().slice(0, 10);
 const shift = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
@@ -127,9 +131,17 @@ function MentorReviews({ m, from, to }: { m: Mentor; from: string; to: string })
                     </span>
                     <span className="font-medium">{v.studentId?.name || "A student"}</span>
                     {v.liveClassId?.title && <span className="text-xs text-muted-foreground">· {v.liveClassId.title}</span>}
+                    {/* Which kind (2026-10-25): a mentor rating, or the feedback left after the class. */}
+                    {v.kind && (
+                      <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", v.kind === "class_feedback" ? "bg-sky-500/10 text-sky-500" : "bg-muted text-muted-foreground")}>
+                        {v.kind === "class_feedback" ? "Class feedback" : "Mentor rating"}
+                      </span>
+                    )}
                     <span className="ml-auto text-xs text-muted-foreground">{when(v.createdAt)}</span>
                   </div>
-                  {v.comment ? <p className="mt-1 text-sm">{v.comment}</p> : <p className="mt-1 text-xs italic text-muted-foreground">No comment</p>}
+                  {v.comment && <p className="mt-1 text-sm">{v.comment}</p>}
+                  {v.classComment && <p className="mt-1 text-sm"><span className="text-xs font-medium text-sky-500">After the class: </span>{v.classComment}</p>}
+                  {!v.comment && !v.classComment && <p className="mt-1 text-xs italic text-muted-foreground">No comment</p>}
                 </div>
               ))}
               {(q.data?.total ?? 0) > reviews.length && (
