@@ -102,10 +102,11 @@ function crmAnswer(crm: string, url: URL) {
       { id: String(DELTA_ID.dev), name: "Dev", email: "dev@delta-e2e.test", team: "Falcons", closingsMonth: 0, closingsToday: 0, revenueMonth: 0, callsToday: 3, connectedToday: 1, talkSecondsToday: 60 },
       { id: String(DELTA_ID.cara), name: "Cara", email: "cara@delta-e2e.test", team: "Falcons", closingsMonth: 0, closingsToday: 0, revenueMonth: 0, callsToday: 0, connectedToday: 0, talkSecondsToday: 0 },
       // The bosses, all working this month: Tom leads Falcons, Sam is the Sales Manager, Ada a Super Admin.
-      { id: String(DELTA_ID.tom), name: "Tom", email: "tom@delta-e2e.test", team: "Falcons", closingsMonth: 2, closingsToday: 0, revenueMonth: 9000, callsToday: 5, connectedToday: 2, talkSecondsToday: 300 },
-      // Sent the wrong way round (2026-10-26): tied on closings, Ada has less revenue — Root must put Sam first.
-      { id: String(DELTA_ID.ada), name: "Ada", email: "ada@delta-e2e.test", team: "Falcons", closingsMonth: 1, closingsToday: 0, revenueMonth: 3000, callsToday: 0, connectedToday: 0, talkSecondsToday: 0 },
+      { id: String(DELTA_ID.tom), name: "Tom", email: "tom@delta-e2e.test", team: "Falcons", closingsMonth: 2, closingsToday: 0, revenueMonth: 3500, callsToday: 5, connectedToday: 2, talkSecondsToday: 300 },
+      // In an order Root must fix (2026-10-26): revenue first — Tom's 2 closings (AED 3,500) come after Sam's and Ada's
+      // 1 (AED 4,000 each) — and on the same revenue and closings, more calls today first: Ada, then Sam.
       { id: String(DELTA_ID.sam), name: "Sam", email: "sam@delta-e2e.test", team: "Falcons", closingsMonth: 1, closingsToday: 0, revenueMonth: 4000, callsToday: 0, connectedToday: 0, talkSecondsToday: 0 },
+      { id: String(DELTA_ID.ada), name: "Ada", email: "ada@delta-e2e.test", team: "Falcons", closingsMonth: 1, closingsToday: 0, revenueMonth: 4000, callsToday: 3, connectedToday: 1, talkSecondsToday: 0 },
       { id: String(DELTA_ID.eli), name: "Eli", email: "eli@delta-e2e.test", team: "Falcons", closingsMonth: 0, closingsToday: 0, revenueMonth: 0, callsToday: 0, connectedToday: 0, talkSecondsToday: 0 },
     ]
     : [
@@ -325,10 +326,14 @@ async function main() {
   check("…on the open link too", ["Tom", "Sam", "Ada"].every((n) => (crmOf(pubManager.body?.data ?? {}, "delta").people ?? []).some((p: Json) => p.name === n)));
   // The order (2026-10-26): closings, then revenue — whatever order the CRM sent.
   const order = (crmOf(md, "delta").people ?? []).map((p: Json) => p.name) as string[];
-  check("ranked by closings, then revenue: Asha, Bina, Tom, Sam (1, AED 4,000), Ada (1, AED 3,000)",
-    order.indexOf("Asha") === 0 && order.indexOf("Bina") === 1 && order.indexOf("Tom") === 2 && order.indexOf("Sam") === 3 && order.indexOf("Ada") === 4, show(order));
-  const salesOrder = (crmOf(d, "delta").people ?? []).map((p: Json) => [p.name, p.closingsMonth, p.revenueMonth]);
-  check("…the Sales TV in the same order", salesOrder.every((r: Json, i: number) => i === 0 || salesOrder[i - 1][1] > r[1] || (salesOrder[i - 1][1] === r[1] && salesOrder[i - 1][2] >= r[2])), show(salesOrder));
+  check("ranked by revenue, then closings, then calls: Asha, Bina, Ada (AED 4,000, 3 calls), Sam (AED 4,000, none), Tom (2 closings but AED 3,500)",
+    order.indexOf("Asha") === 0 && order.indexOf("Bina") === 1 && order.indexOf("Ada") === 2 && order.indexOf("Sam") === 3 && order.indexOf("Tom") === 4, show(order));
+  const salesOrder = (crmOf(d, "delta").people ?? []).map((p: Json) => [p.name, p.revenueMonth, p.closingsMonth, p.callsToday]);
+  check("…the Sales TV in the same order", salesOrder.every((r: Json, i: number) => {
+    if (i === 0) return true;
+    const [, rev, clo, calls] = salesOrder[i - 1];
+    return rev > r[1] || (rev === r[1] && (clo > r[2] || (clo === r[2] && calls >= r[3])));
+  }), show(salesOrder));
   check("…and the CS team card, as Tetra Commission ranks it", md.cs?.status === "ok" && md.cs?.name === "CS team" && (md.cs?.people ?? []).map((p: Json) => p.name).join() === "Noor,Omar,Priya", show(md.cs));
   same("…Noor's month, today, payments and HRMS photo", (({ monthAed, todayAed, payments, todayPayments, photoUrl, team }) => ({ monthAed, todayAed, payments, todayPayments, photoUrl, team }))(md.cs?.people?.[0] ?? {}),
     { monthAed: 12000, todayAed: 3670, payments: 4, todayPayments: 1, photoUrl: "https://hrms-e2e.test/photos/noor.jpg", team: "Falcons" });

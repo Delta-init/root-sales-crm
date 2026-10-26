@@ -221,12 +221,13 @@ function shownPeople(s: CrmState, withBosses = true): CrmPerson[] {
 }
 
 /**
- * The order of the podium and the standings, the same for every CRM (2026-10-26: Draw had Anagha, AED 4,500, on the
- * podium above Jerin, AED 11,000, both on 2 closings — each CRM broke the tie its own way): the month's closings, then
- * the month's revenue, then today's closings, then the name.
+ * The order of the podium and the standings, the same for every CRM (2026-10-26: each CRM broke ties its own way, and
+ * Draw had Anagha, AED 4,500, on the podium above Jerin, AED 11,000). The user: "whoever has more revenue is on top —
+ * revenue first, then the closings, then the calls": the month's revenue, then the month's closings, then today's
+ * calls, then the name.
  */
 function byStanding(a: CrmPerson, b: CrmPerson): number {
-  return b.closingsMonth - a.closingsMonth || b.revenueMonth - a.revenueMonth || b.closingsToday - a.closingsToday
+  return b.revenueMonth - a.revenueMonth || b.closingsMonth - a.closingsMonth || b.callsToday - a.callsToday
     || a.name.localeCompare(b.name);
 }
 
