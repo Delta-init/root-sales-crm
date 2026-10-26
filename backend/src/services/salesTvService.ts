@@ -217,7 +217,17 @@ function shownPeople(s: CrmState, withBosses = true): CrmPerson[] {
   const leads = s.leadsMonth;
   const bosses = withBosses ? null : s.bosses;
   return (s.people ?? []).filter((p) =>
-    (!leads || (leads.get(p.id) ?? 0) > 0 || p.closingsMonth > 0) && !(bosses && bosses.has(p.id)));
+    (!leads || (leads.get(p.id) ?? 0) > 0 || p.closingsMonth > 0) && !(bosses && bosses.has(p.id))).sort(byStanding);
+}
+
+/**
+ * The order of the podium and the standings, the same for every CRM (2026-10-26: Draw had Anagha, AED 4,500, on the
+ * podium above Jerin, AED 11,000, both on 2 closings — each CRM broke the tie its own way): the month's closings, then
+ * the month's revenue, then today's closings, then the name.
+ */
+function byStanding(a: CrmPerson, b: CrmPerson): number {
+  return b.closingsMonth - a.closingsMonth || b.revenueMonth - a.revenueMonth || b.closingsToday - a.closingsToday
+    || a.name.localeCompare(b.name);
 }
 
 /** One CRM, brought up to date if its window has passed. Concurrent screens share one call. */
