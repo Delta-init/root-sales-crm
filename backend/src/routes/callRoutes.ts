@@ -1,6 +1,7 @@
-import { Router } from "express";
+import { Router, type Response, type NextFunction } from "express";
 import { overview, recording } from "../controllers/callsController.js";
 import { authenticate, requirePendingTab, requireRole } from "../middleware/auth.js";
+import type { AuthenticatedRequest } from "../types/index.js";
 
 const router = Router();
 
@@ -12,7 +13,14 @@ const router = Router();
 router.use(authenticate);
 
 router.get("/", requireRole("root_admin"), overview);
-// A recording also plays for somebody given that sales CRM's Pending tab, where its calls are listed (2026-10-24).
-router.get("/:portal/:id/recording-link", requirePendingTab((req) => `sales:${String(req.params.portal)}`), recording);
+// A recording also plays for somebody given that sales CRM's Pending tab, where its calls are listed (2026-10-24) — or
+// its Reports tab, and Tetra Commission's for the CS portal's report (2026-10-27).
+const mayPlay = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+  const portal = String(req.params.portal);
+  const report = req.admin?.reportAccess ?? [];
+  if (report.includes(`sales:${portal}` as never) || (portal === "commission" && report.includes("cs"))) return next();
+  requirePendingTab(`sales:${portal}`)(req, res, next);
+};
+router.get("/:portal/:id/recording-link", mayPlay, recording);
 
 export default router;

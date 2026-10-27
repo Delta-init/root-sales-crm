@@ -53,6 +53,7 @@ const auditLogSchema = new Schema<IAuditLog>(
         "traffic_lead_retried",
         "traffic_access_changed",
         "pending_access_changed",
+        "report_access_changed",
         // A backup started by hand, and an archive taken home — each is a whole portal's data.
         "backup_run",
         "backup_downloaded",

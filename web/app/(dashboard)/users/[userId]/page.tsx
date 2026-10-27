@@ -13,8 +13,9 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/axios";
 import { useAuth } from "@/providers/AuthProvider";
-import type { PendingTab, PersonDetail, PortalRole, TargetRole, TargetView, TrafficAccess } from "@/lib/types";
+import type { PendingTab, ReportTab, PersonDetail, PortalRole, TargetRole, TargetView, TrafficAccess } from "@/lib/types";
 import { PENDING_TAB_OPTIONS } from "@/components/pending/access";
+import { REPORT_TAB_OPTIONS } from "@/components/portal-reports/access";
 
 /**
  * One person, as every system actually sees them.
@@ -89,6 +90,14 @@ export default function PersonAccessPage() {
    */
   const setPendingAccess = useMutation({
     mutationFn: async (tabs: PendingTab[]) => api.patch(`/access/${userId}/pending`, { tabs }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["person-access", userId] });
+    },
+  });
+
+  /* Which Reports tabs they may open (2026-10-27) — as Pending's, given apart from them. */
+  const setReportAccess = useMutation({
+    mutationFn: async (tabs: ReportTab[]) => api.patch(`/access/${userId}/reports`, { tabs }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["person-access", userId] });
     },
@@ -255,6 +264,38 @@ export default function PersonAccessPage() {
               })}
             </div>
             {setPendingAccess.isError && <p className="text-xs text-destructive">Could not save — try again.</p>}
+          </CardContent>
+        </Card>
+      )}
+
+      {person.role !== "root_admin" && (
+        <Card>
+          <CardContent className="space-y-2 p-4">
+            <div>
+              <p className="text-sm font-medium">Reports access</p>
+              <p className="text-xs text-muted-foreground">
+                The Reports tabs they may open. Nothing ticked: no Reports at all. Given apart from Pending.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-2">
+              {REPORT_TAB_OPTIONS.map((o) => {
+                const mine = person.reportAccess ?? [];
+                const on = mine.includes(o.tab);
+                return (
+                  <label key={o.tab} className="flex items-center gap-1.5 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      disabled={setReportAccess.isPending}
+                      onChange={() => setReportAccess.mutate(on ? mine.filter((t) => t !== o.tab) : [...mine, o.tab])}
+                      className="h-4 w-4 accent-[hsl(var(--primary))] disabled:opacity-50"
+                    />
+                    {o.label}
+                  </label>
+                );
+              })}
+            </div>
+            {setReportAccess.isError && <p className="text-xs text-destructive">Could not save — try again.</p>}
           </CardContent>
         </Card>
       )}

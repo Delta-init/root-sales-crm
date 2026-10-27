@@ -46,6 +46,8 @@ export interface Admin {
   trafficAccess?: TrafficAccess;
   /** The Pending tabs they were given. Root admins see every one. */
   pendingAccess?: PendingTab[];
+  /** The Reports tabs they were given (2026-10-27). Root admins see every one. */
+  reportAccess?: ReportTab[];
   lastLoginAt: string | null;
 }
 
@@ -248,6 +250,7 @@ export type PortalRole = "root_admin" | "member" | "viewer";
 export type TrafficAccess = "none" | "view" | "manage";
 /** A Pending tab given to somebody who is not a root admin (2026-10-24); a sales CRM is `sales:<code>`. */
 export type PendingTab = "cs" | "sales:delta" | "sales:draw" | "sales:remote" | "sales:banglore" | "finance" | "hrms" | "media" | "enrolments";
+export type ReportTab = "cs" | "sales:delta" | "sales:draw" | "sales:remote" | "sales:banglore" | "finance" | "hrms" | "mentors";
 
 export interface PersonAccess {
   target: TargetCode;
@@ -320,6 +323,7 @@ export interface PersonDetail {
     status: "active" | "inactive";
     trafficAccess?: TrafficAccess;
     pendingAccess?: PendingTab[];
+    reportAccess?: ReportTab[];
   };
   targets: TargetView[];
 }

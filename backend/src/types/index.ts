@@ -38,6 +38,9 @@ export type TrafficAccess = "none" | "view" | "manage";
  */
 export const PENDING_TABS = ["cs", "sales:delta", "sales:draw", "sales:remote", "sales:banglore", "finance", "hrms", "media", "enrolments"] as const;
 export type PendingTab = (typeof PENDING_TABS)[number];
+/** Reports tabs that can be given to somebody who is not a root admin (2026-10-27), as Pending's are. */
+export const REPORT_TABS = ["cs", "sales:delta", "sales:draw", "sales:remote", "sales:banglore", "finance", "hrms", "mentors"] as const;
+export type ReportTab = (typeof REPORT_TABS)[number];
 
 export interface IAdminUser extends Document {
   _id: Types.ObjectId;
@@ -48,6 +51,7 @@ export interface IAdminUser extends Document {
   status: "active" | "inactive";
   trafficAccess: TrafficAccess;
   pendingAccess: PendingTab[];
+  reportAccess: ReportTab[];
   lastLoginAt: Date | null;
   comparePassword(candidate: string): Promise<boolean>;
 }
@@ -199,6 +203,7 @@ export type AuditAction =
   | "traffic_lead_retried"
   | "traffic_access_changed"
   | "pending_access_changed"
+  | "report_access_changed"
   // A backup started by hand, and an archive taken home — each is a whole portal's data.
   | "backup_run"
   | "backup_downloaded"
@@ -387,6 +392,8 @@ export interface JwtPayload {
   trafficAccess?: TrafficAccess;
   /** The Pending tabs they were given (2026-10-24); read from the record like the rest. */
   pendingAccess?: PendingTab[];
+  /** The Reports tabs they were given (2026-10-27); read from the record like the rest. */
+  reportAccess?: ReportTab[];
 }
 
 /** A sales rep's session. Distinct from an admin's — `kind` is what stops an

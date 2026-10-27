@@ -1,10 +1,13 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { FileBarChart } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/providers/AuthProvider";
+import { mayOpenReport } from "@/components/portal-reports/access";
 
 /*
  * Reports, a page per tab like Pending (the user, 2026-10-17: "same as the
@@ -24,6 +27,14 @@ const TABS = [
 
 export default function PortalReportsLayout({ children }: { children: React.ReactNode }) {
   const path = usePathname();
+  const router = useRouter();
+  const { admin } = useAuth();
+  // Somebody given some tabs (2026-10-27) sees those; a tab they weren't given sends them to their first.
+  const root = admin?.role === "root_admin";
+  const tabs = TABS.filter((t) => (t.soon ? root : mayOpenReport(admin, t.href)));
+  const allowed = path === "/portal-reports" || mayOpenReport(admin, path);
+  const home = tabs[0]?.href;
+  useEffect(() => { if (!allowed && home) router.replace(home); }, [allowed, home, router]);
   return (
     <div className="space-y-6">
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
@@ -34,7 +45,7 @@ export default function PortalReportsLayout({ children }: { children: React.Reac
       </motion.div>
       <nav className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0" aria-label="Report tabs">
         <div className="flex w-max gap-1 border-b border-border/60">
-          {TABS.map((t) => {
+          {tabs.map((t) => {
             const on = path === t.href || path.startsWith(`${t.href}/`);
             return (
               <Link key={t.href} href={t.href} aria-current={on ? "page" : undefined}
@@ -47,7 +58,7 @@ export default function PortalReportsLayout({ children }: { children: React.Reac
           })}
         </div>
       </nav>
-      {children}
+      {allowed ? children : null}
     </div>
   );
 }

@@ -11,8 +11,9 @@ import type { SalesPortalInfo } from "@/lib/types";
 export default function SalesReportsLayout({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const crms = useQuery({
-    queryKey: ["pending-sales-crms"],
-    queryFn: async () => (await api.get("/pending/sales")).data.data as SalesPortalInfo[],
+    // Its own list (2026-10-27): the CRMs somebody was given on Reports, apart from Pending's.
+    queryKey: ["report-sales-crms"],
+    queryFn: async () => (await api.get("/portal-reports/sales")).data.data as SalesPortalInfo[],
     staleTime: 5 * 60_000,
   });
   return (

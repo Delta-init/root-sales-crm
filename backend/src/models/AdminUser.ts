@@ -1,6 +1,6 @@
 import mongoose, { Schema } from "mongoose";
 import bcrypt from "bcryptjs";
-import { PENDING_TABS, type IAdminUser } from "../types/index.js";
+import { PENDING_TABS, REPORT_TABS, type IAdminUser } from "../types/index.js";
 
 const adminUserSchema = new Schema<IAdminUser>(
   {
@@ -62,6 +62,11 @@ const adminUserSchema = new Schema<IAdminUser>(
      */
     pendingAccess: {
       type: [{ type: String, enum: PENDING_TABS }],
+      default: [],
+    },
+    /* Reports tabs, the same way (2026-10-27): given apart from Pending's — none by default. */
+    reportAccess: {
+      type: [{ type: String, enum: REPORT_TABS }],
       default: [],
     },
     lastLoginAt: { type: Date, default: null },

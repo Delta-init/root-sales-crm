@@ -8,7 +8,7 @@ import { accessService } from "../services/accessService.js";
 import { provisionService } from "../services/provisionService.js";
 import { directoryService } from "../services/directoryService.js";
 import { record } from "../services/auditService.js";
-import { PENDING_TABS, type PendingTab } from "../types/index.js";
+import { PENDING_TABS, REPORT_TABS, type PendingTab, type ReportTab } from "../types/index.js";
 import { sendError, sendSuccess } from "../utils/response.js";
 import type { AuthenticatedRequest, TargetCode } from "../types/index.js";
 
@@ -468,6 +468,40 @@ export const setPendingAccess = async (req: AuthenticatedRequest, res: Response,
     });
 
     sendSuccess(res, "Pending access updated", { id: String(person._id), pendingAccess: person.pendingAccess });
+  } catch (err) { next(err); }
+};
+
+/**
+ * Which Reports tabs somebody who is not a root admin may open (2026-10-27) — as Pending's: the whole list each time,
+ * so unticking one takes it away.
+ */
+export const setReportAccess = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = String(req.params["userId"] ?? "");
+    const tabs = (req.body as { tabs?: unknown })?.tabs;
+    if (!Array.isArray(tabs) || tabs.some((t) => !REPORT_TABS.includes(t as ReportTab))) {
+      sendError(res, `tabs must be a list of: ${REPORT_TABS.join(", ")}`, 400);
+      return;
+    }
+    const person = await AdminUser.findById(userId).select("email role reportAccess");
+    if (!person) { sendError(res, "No such person", 404); return; }
+    if (person.role === "root_admin") {
+      sendError(res, "Root admins already see every report", 409);
+      return;
+    }
+
+    const before = [...(person.reportAccess ?? [])];
+    person.reportAccess = REPORT_TABS.filter((t) => tabs.includes(t));
+    await person.save();
+
+    await record(req, "report_access_changed", {
+      adminId: req.admin!.adminId,
+      adminEmail: req.admin!.email,
+      org: null,
+      detail: `Reports for ${person.email}: ${before.join(", ") || "none"} → ${person.reportAccess.join(", ") || "none"}`,
+    });
+
+    sendSuccess(res, "Reports access updated", { id: String(person._id), reportAccess: person.reportAccess });
   } catch (err) { next(err); }
 };
 

@@ -32,7 +32,7 @@ export const authenticate = async (
     // Hit the DB on every request rather than trusting the token alone. This
     // endpoint set can open three production CRMs, so revoking an admin has to
     // take effect immediately, not whenever their token happens to expire.
-    const admin = await AdminUser.findById(decoded.adminId).select("status role email trafficAccess pendingAccess");
+    const admin = await AdminUser.findById(decoded.adminId).select("status role email trafficAccess pendingAccess reportAccess");
     if (!admin) {
       sendError(res, "Admin no longer exists", 401);
       return;
@@ -60,6 +60,7 @@ export const authenticate = async (
       role: admin.role,
       trafficAccess: admin.trafficAccess ?? "none",
       pendingAccess: admin.pendingAccess ?? [],
+      reportAccess: admin.reportAccess ?? [],
       ...(decoded.impersonatedBy ? { impersonatedBy: decoded.impersonatedBy } : {}),
     };
 
@@ -125,6 +126,19 @@ export const requirePendingTab =
     const want = typeof tab === "string" ? tab : tab(req);
     if (!a || (a.role !== "root_admin" && !(a.pendingAccess ?? []).includes(want as never))) {
       sendError(res, "You do not have access to this Pending tab", 403);
+      return;
+    }
+    next();
+  };
+
+/** A Reports tab, for a root admin or somebody given it (Users → their page → Reports access, 2026-10-27). */
+export const requireReportTab =
+  (tab: string | ((req: AuthenticatedRequest) => string)) =>
+  (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+    const a = req.admin;
+    const want = typeof tab === "string" ? tab : tab(req);
+    if (!a || (a.role !== "root_admin" && !(a.reportAccess ?? []).includes(want as never))) {
+      sendError(res, "You do not have access to this report", 403);
       return;
     }
     next();

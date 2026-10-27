@@ -381,6 +381,39 @@ async function main() {
   check("a root admin still opens every tab", (await call("/pending/sales/delta", root)).status === 200 && (await call("/pending/cs", root)).status !== 403
     && ((await call("/pending/sales", root)).body?.data ?? []).length === 4);
 
+  // ── Case 6: a Reports tab given to somebody who is not a root admin (2026-10-27), apart from Pending's ──
+  step("Case 6 — Reports access: given per person, apart from Pending");
+  check("before any grant: no Reports, whatever Pending they have", (await call("/portal-reports/sales", people.maneesh!.auth)).status === 403
+    && (await call("/portal-reports/sales/draw/workflow", people.maneesh!.auth)).status === 403 && (await call("/portal-reports/cs", people.doney!.auth)).status === 403);
+  g = await send("PATCH", `/access/${people.maneesh!.id}/reports`, { tabs: ["sales:draw"] }, member);
+  check("only a root admin gives it", g.status === 403, show(g));
+  g = await send("PATCH", `/access/${people.maneesh!.id}/reports`, { tabs: ["sales:draw", "media"] }, root);
+  check("a tab Reports doesn't give (Media ERP) is refused", g.status === 400, show(g));
+  g = await send("PATCH", `/access/${String(rootRow!._id)}/reports`, { tabs: ["cs"] }, root);
+  check("a root admin has every report already", g.status === 409, show(g));
+  g = await send("PATCH", `/access/${people.maneesh!.id}/reports`, { tabs: ["hrms", "sales:draw"] }, root);
+  same("Maneesh given Draw and HRMS (kept in the list's order)", g.body?.data?.reportAccess, ["sales:draw", "hrms"]);
+  same("their session says so", (await call("/auth/me", people.maneesh!.auth)).body?.data?.reportAccess, ["sales:draw", "hrms"]);
+  same("…and the person's page", (await call(`/access/person/${people.maneesh!.id}`, root)).body?.data?.person?.reportAccess, ["sales:draw", "hrms"]);
+  same("…with their Pending untouched", (await call(`/access/person/${people.maneesh!.id}`, root)).body?.data?.person?.pendingAccess, ["sales:draw"]);
+  check("in the audit log", (await mongoose.connection.db!.collection("auditlogs").countDocuments({ action: "report_access_changed" })) === 1);
+  same("Reports → Sales lists Draw only", ((await call("/portal-reports/sales", people.maneesh!.auth)).body?.data ?? []).map((x: Json) => x.code), ["draw"]);
+  check("Draw's report opens (not a refusal), HRMS's too", (await call("/portal-reports/sales/draw/workflow", people.maneesh!.auth)).status !== 403
+    && (await call("/portal-reports/hrms", people.maneesh!.auth)).status !== 403);
+  const closed = ["/portal-reports/sales/delta/workflow", "/portal-reports/sales/remote/workflow", "/portal-reports/cs", "/portal-reports/cs/workflow",
+    "/portal-reports/finance", "/portal-reports/mentors", "/portal-reports/mentors/reviews"];
+  const leaked: string[] = [];
+  for (const path of closed) if ((await call(path, people.maneesh!.auth)).status !== 403) leaked.push(path);
+  check("…nothing else", leaked.length === 0, leaked.join(", "));
+  g = await send("PATCH", `/access/${people.doney!.id}/reports`, { tabs: ["cs"] }, root);
+  check("Doney given the CS report: it opens, a Tetra Commission recording plays (not refused), Sales doesn't",
+    (await call("/portal-reports/cs", people.doney!.auth)).status !== 403 && (await call("/calls/commission/c1/recording-link", people.doney!.auth)).status !== 403
+    && (await call("/portal-reports/sales", people.doney!.auth)).status === 403);
+  check("Pending stays as given: Doney's Reports grant opens no Pending tab beyond the CS portal", (await call("/pending/hrms", people.doney!.auth)).status === 403);
+  g = await send("PATCH", `/access/${people.maneesh!.id}/reports`, { tabs: [] }, root);
+  check("taken away: refused at once", g.status === 200 && (await call("/portal-reports/sales/draw/workflow", people.maneesh!.auth)).status === 403);
+  check("a root admin still opens every report", ((await call("/portal-reports/sales", root)).body?.data ?? []).length === 4 && (await call("/portal-reports/mentors", root)).status !== 403);
+
   console.log(`\n${checks - failures}/${checks} checks passed`);
 }
 

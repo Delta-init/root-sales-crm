@@ -20,6 +20,8 @@ export interface NavLink {
   traffic?: boolean;
   /** Shown to root admins and to anybody given a Pending tab (2026-10-24). */
   pending?: boolean;
+  /** Shown to root admins and to anybody given a Reports tab (2026-10-27). */
+  reports?: boolean;
 }
 
 export interface NavItem extends Partial<NavLink> {
@@ -36,8 +38,9 @@ export const NAV: NavItem[] = [
   // counts on one page. Root admins, and since 2026-10-24 anybody given one of
   // its tabs (the CS lead the CS portal, a Sales Manager their CRM).
   { href: "/pending", label: "Pending", icon: Inbox, pending: true },
-  // What got done in a period, a tab per portal like Pending (2026-10-17). Root admins only.
-  { href: "/portal-reports", label: "Reports", icon: FileBarChart, rootOnly: true },
+  // What got done in a period, a tab per portal like Pending (2026-10-17). Root admins, and since 2026-10-27 anybody
+  // given one of its tabs.
+  { href: "/portal-reports", label: "Reports", icon: FileBarChart, reports: true },
   /*
    * Sales, root admins only.
    *
@@ -108,12 +111,13 @@ export const NAV: NavItem[] = [
  * sees Sales with just Lead traffic in it, and somebody with nothing in a group
  * does not see an empty one.
  */
-export function navFor(admin: { role: string; trafficAccess?: string; pendingAccess?: string[] } | null): NavItem[] {
+export function navFor(admin: { role: string; trafficAccess?: string; pendingAccess?: string[]; reportAccess?: string[] } | null): NavItem[] {
   const root = admin?.role === "root_admin";
   const traffic = root || (!!admin?.trafficAccess && admin.trafficAccess !== "none");
   const pending = root || (admin?.pendingAccess ?? []).length > 0;
-  const canSee = (x: { rootOnly?: boolean; traffic?: boolean; pending?: boolean }) =>
-    (x.traffic ? traffic : x.pending ? pending : !x.rootOnly || root);
+  const reports = root || (admin?.reportAccess ?? []).length > 0;
+  const canSee = (x: { rootOnly?: boolean; traffic?: boolean; pending?: boolean; reports?: boolean }) =>
+    (x.traffic ? traffic : x.pending ? pending : x.reports ? reports : !x.rootOnly || root);
   return NAV.flatMap((item) => {
     if (!item.children) return canSee(item) ? [item] : [];
     if (item.rootOnly && !root) return [];
