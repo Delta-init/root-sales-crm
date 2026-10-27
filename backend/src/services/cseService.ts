@@ -163,6 +163,29 @@ export const mentorReport = async (q: Record<string, unknown>) => {
   return ask<Record<string, unknown>>(`/mentor-report?${new URLSearchParams({ from, to })}`, "it has no mentors' report yet");
 };
 
+/**
+ * What is behind one number of it (2026-10-27, GET /service/mentor-report/details): the classes, cancelled classes,
+ * bookings (all / cancelled / attended / missed), students, meetings (all / cancelled), Programs or commission —
+ * every mentor's, one mentor's (portal or LMS id) or one Program's.
+ */
+const DETAIL_KINDS = ["classes", "cancelled_classes", "bookings", "cancelled_bookings", "attended", "missed", "students", "meetings", "cancelled_meetings", "programs", "commission"];
+export const mentorReportDetails = async (q: Record<string, unknown>) => {
+  const kind = String(q.kind ?? "");
+  if (!DETAIL_KINDS.includes(kind)) throw bad(`kind is one of ${DETAIL_KINDS.join(", ")}`);
+  const from = String(q.from ?? ""), to = String(q.to ?? "");
+  if (!DAY.test(from) || !DAY.test(to)) throw bad("from and to are days (YYYY-MM-DD)");
+  if (to < from) throw bad("from is after to");
+  if (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`) > 92 * 86_400_000) throw bad("At most three months at a time");
+  const params = new URLSearchParams({ kind, from, to });
+  for (const k of ["mentorId", "programId"] as const) {
+    const v = typeof q[k] === "string" ? (q[k] as string).trim() : "";
+    if (!v) continue;
+    if (!/^[0-9a-f]{24}$/i.test(v)) throw bad(`${k} is not an id`);
+    params.set(k, v);
+  }
+  return ask<Record<string, unknown>>(`/mentor-report/details?${params}`, "it can't break the mentors' report down yet");
+};
+
 /** One mentor's reviews in the dates, 50 a page (GET /service/mentor-reviews) — the LMS instructor's id. */
 export const mentorReviews = async (q: Record<string, unknown>) => {
   const instructorId = String(q.instructorId ?? "");

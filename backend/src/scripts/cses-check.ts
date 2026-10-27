@@ -91,6 +91,9 @@ const stand = createServer((req, res) => {
       mentors: [{ id: "u1", name: "Chief Ann", email: "ann@tetra.test", role: "chief_mentor", in_lms: true, lms_id: "a".repeat(24),
         total: { classes: 3, held: 2, bookings: 9, reviews: 2, avgRating: 4.5, commission_usd: 52.5 }, days: [{ day: "2026-10-21", held: 1, commission_usd: 52.5 }] }] } });
   }
+  if (url.pathname === "/commission/api/v1/service/mentor-report/details") {
+    return send(200, { success: true, data: { kind: url.searchParams.get("kind"), total: 1, rows: [{ id: "c1", title: "Gold", mentor: "Chief Ann", booked: 3 }] } });
+  }
   if (url.pathname === "/commission/api/v1/service/mentor-reviews") {
     return send(200, { success: true, data: { reviews: [{ _id: "r1", rating: 5, comment: "Great" }], total: 1, page: Number(url.searchParams.get("page")), perPage: 50 } });
   }
@@ -241,6 +244,19 @@ async function main() {
   check("a mentor's reviews, with the instructor, page and dates passed on", r.status === 200 && r.body?.data?.reviews?.[0]?.comment === "Great"
     && seen.at(-1)?.path === "/commission/api/v1/service/mentor-reviews" && rv.get("instructorId") === "a".repeat(24) && rv.get("page") === "2" && rv.get("from") === "2026-10-20", show(seen.at(-1)));
   check("…no instructor id: 400", (await call("GET", "/portal-reports/mentors/reviews?instructorId=x", root)).status === 400);
+  // What is behind each number (2026-10-27).
+  r = await call("GET", `/portal-reports/mentors/details?kind=missed&from=2026-10-20&to=2026-10-22&mentorId=${"a".repeat(24)}&programId=${"b".repeat(24)}`, root);
+  const dv = new URLSearchParams(seen.at(-1)?.search ?? "");
+  check("details: Tetra Commission's rows, the kind, dates, mentor and Program passed on", r.status === 200 && r.body?.data?.rows?.[0]?.title === "Gold"
+    && seen.at(-1)?.path === "/commission/api/v1/service/mentor-report/details" && dv.get("kind") === "missed" && dv.get("from") === "2026-10-20"
+    && dv.get("mentorId") === "a".repeat(24) && dv.get("programId") === "b".repeat(24), show(seen.at(-1)));
+  const before = seen.length;
+  check("details: a kind that isn't one, a bad mentor id, no dates — 400, Tetra Commission not asked",
+    (await call("GET", "/portal-reports/mentors/details?kind=all&from=2026-10-20&to=2026-10-22", root)).status === 400
+    && (await call("GET", "/portal-reports/mentors/details?kind=classes&from=2026-10-20&to=2026-10-22&mentorId=x", root)).status === 400
+    && (await call("GET", "/portal-reports/mentors/details?kind=classes", root)).status === 400 && seen.length === before);
+  check("details: 401 with no session, 403 for someone not given Mentors", (await call("GET", "/portal-reports/mentors/details?kind=classes&from=2026-10-20&to=2026-10-22")).status === 401
+    && (await call("GET", "/portal-reports/mentors/details?kind=classes&from=2026-10-20&to=2026-10-22", member)).status === 403);
   oldServer = true;
   r = await call("GET", "/portal-reports/mentors?from=2026-10-20&to=2026-10-22", root);
   check("Tetra Commission's server from before: 409, it needs updating", r.status === 409 && /needs updating — it has no mentors' report yet/.test(r.body?.message ?? ""), show(r.body));

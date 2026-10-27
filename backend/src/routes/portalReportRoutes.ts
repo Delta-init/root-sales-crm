@@ -1,7 +1,7 @@
 import { Router, type Response, type NextFunction } from "express";
 import { authenticate, requireReportTab } from "../middleware/auth.js";
 import { salesPortals } from "../services/salesPendingService.js";
-import { csReport, csStudentWorkflow, csStudentWorkflowStudents, mentorReport, mentorReviews } from "../services/cseService.js";
+import { csReport, csStudentWorkflow, csStudentWorkflowStudents, mentorReport, mentorReportDetails, mentorReviews } from "../services/cseService.js";
 import { salesLeadWorkflow, salesLeadWorkflowLeads, salesReport } from "../services/salesReportService.js";
 import { financeReport } from "../services/financeReportService.js";
 import { hrmsReport } from "../services/hrmsReportService.js";
@@ -98,6 +98,16 @@ router.get("/sales/:code/workflow/leads", requireReportTab(salesTab), async (req
 router.get("/mentors", requireReportTab("mentors"), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     sendSuccess(res, "Mentors report", await mentorReport(req.query as Record<string, unknown>));
+  } catch (error) {
+    const status = (error as { statusCode?: number }).statusCode;
+    if (status) return sendError(res, (error as Error).message, status);
+    next(error);
+  }
+});
+/* What is behind one number of it, and the Programs and Meetings tabs (2026-10-27). */
+router.get("/mentors/details", requireReportTab("mentors"), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    sendSuccess(res, "Mentor report details", await mentorReportDetails(req.query as Record<string, unknown>));
   } catch (error) {
     const status = (error as { statusCode?: number }).statusCode;
     if (status) return sendError(res, (error as Error).message, status);
