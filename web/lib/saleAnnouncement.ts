@@ -4,7 +4,8 @@ import { useSyncExternalStore } from "react";
  * A closed sale, celebrated on the Sales TV (the user, 2026-10-20) — ported
  * from the Sales CRM web's lib/saleAnnouncement.ts (2026-10-15), the free way:
  * a sparkle made here with WebAudio and the browser's own voice
- * (speechSynthesis), so there are no audio files and nothing is paid for.
+ * (speechSynthesis), so nothing is paid for. Between the two, the owner's own
+ * recorded line (public/sounds/sale-voice.m4a, the user, 2026-10-28).
  *
  * Differences from the CRM's: it says which CRM the close is from and the
  * amount in the close's own currency, and never a student's name — this is a
@@ -259,7 +260,9 @@ function loadVoices(): void {
 
 /** Ask for the voices early: Chrome lists them a moment after the page loads. */
 export function warmUpVoices(): void {
-  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+  if (typeof window === "undefined") return;
+  preloadClip();
+  if (!("speechSynthesis" in window)) return;
   loadVoices();
   window.speechSynthesis.addEventListener?.("voiceschanged", loadVoices);
 }
@@ -314,6 +317,12 @@ export function say(text: string): void {
 
 export function stopVoice(): void {
   try {
+    playing?.pause();
+  } catch {
+    /* nothing playing */
+  }
+  playing = null;
+  try {
     window.speechSynthesis?.cancel();
   } catch {
     /* no voice here */
@@ -321,11 +330,56 @@ export function stopVoice(): void {
 }
 
 export function voiceBusy(): boolean {
+  if (inTurn || (playing && !playing.paused && !playing.ended)) return true;
   try {
     return Boolean(window.speechSynthesis?.speaking);
   } catch {
     return false;
   }
+}
+
+// ── The owner's clip (the user, 2026-10-28) ──────────────────────────────────
+
+/** Played after the sparkle, before the voice, on every pop-up. */
+const SALE_CLIP = "/sounds/sale-voice.m4a";
+let playing: HTMLAudioElement | null = null;
+/** From the clip to the voice: the pop-up stays while the turn is on. */
+let inTurn = false;
+
+/** Fetched while the board loads, so the first close doesn't wait for it. */
+function preloadClip(): void {
+  if (typeof Audio === "undefined") return;
+  try {
+    const a = new Audio();
+    a.preload = "auto";
+    a.src = SALE_CLIP;
+  } catch {
+    /* no audio here */
+  }
+}
+
+/** The clip, played to its end; resolves when it ended, was stopped or couldn't play. */
+function playClip(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof Audio === "undefined") return resolve();
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      if (playing === a) playing = null;
+      resolve();
+    };
+    const a = new Audio(SALE_CLIP);
+    a.addEventListener("ended", finish, { once: true });
+    a.addEventListener("error", finish, { once: true });
+    a.addEventListener("pause", finish, { once: true });
+    window.setTimeout(() => {
+      a.pause();
+      finish();
+    }, 12_000);
+    playing = a;
+    a.play().catch(finish);
+  });
 }
 
 // ── One tab says it ───────────────────────────────────────────────────────────
@@ -361,7 +415,7 @@ function forgetOldClaims(): void {
   }
 }
 
-/** The sparkle, then the voice, for a sale on screen. Nothing when muted; a test always plays. Returns a stop. */
+/** The sparkle, the owner's clip, then the voice, for a sale on screen. Nothing when muted; a test always plays. Returns a stop. */
 export function announce(sale: SaleClosed): () => void {
   let stopped = false;
   let voiceTimer: number | undefined;
@@ -370,8 +424,15 @@ export function announce(sale: SaleClosed): () => void {
     if (!allowed()) return;
     if (!sale.test && !(await claimToSay(sale.id))) return;
     if (!allowed()) return;
-    voiceTimer = window.setTimeout(() => {
-      if (allowed()) say(spokenLine(sale));
+    voiceTimer = window.setTimeout(async () => {
+      if (!allowed()) return;
+      inTurn = true;
+      try {
+        await playClip();
+        if (allowed()) say(spokenLine(sale));
+      } finally {
+        inTurn = false;
+      }
     }, playSparkle());
   })();
   return () => {
