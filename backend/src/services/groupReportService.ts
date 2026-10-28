@@ -1,5 +1,6 @@
 import { env } from "../config/env.js";
 import { getSources, type CrmSource } from "./crmConnections.js";
+import { COUNTED_PAYMENT, bangaloreUnion } from "./bangaloreRevenue.js";
 import { STAGES, stageSwitchExpr, type Stage } from "./statusMap.js";
 
 export interface DateRange {
@@ -40,9 +41,12 @@ export const getOverview = async (range: DateRange) => {
         // Revenue is filtered on the PAYMENT date, not the lead's createdAt: a
         // lead created in June that pays in August is August's revenue. Using
         // createdAt here would quietly credit the wrong month.
+        // A balance payment once finance approved it, a Bangalore enrolment's rupees in AED (bangaloreRevenue.ts).
         leads(s)
           .aggregate([
+            ...(await bangaloreUnion(s)),
             { $unwind: "$payments" },
+            { $match: COUNTED_PAYMENT },
             { $match: rangeMatch("payments.paidAt", range) },
             { $group: { _id: null, total: { $sum: "$payments.amount" }, n: { $sum: 1 } } },
           ])

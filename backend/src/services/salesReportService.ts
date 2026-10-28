@@ -1,5 +1,6 @@
 import { Organization } from "../models/Organization.js";
 import { getSources } from "./crmConnections.js";
+import { COUNTED_PAYMENT, bangaloreUnion } from "./bangaloreRevenue.js";
 import { CALL_PORTALS, callsOverview } from "./callsService.js";
 import { markedOf } from "./salesPendingService.js";
 import { resolveTarget, callTarget } from "../lib/targetClient.js";
@@ -17,7 +18,9 @@ import { targetConfig } from "../config/targets.js";
  *   closings    enrolments credited to them in the period (dropped ones not),
  *               and the conversion against leads received
  *   revenue     payments dated in the period on the leads they hold, in the
- *               CRM's own currency
+ *               CRM's own currency — as the CRMs count them: a balance payment
+ *               once finance approved it, a Bangalore enrolment's rupees in AED
+ *               (bangaloreRevenue.ts, 2026-10-28)
  *   lost        leads marked lost — with the reason — or not connected in the
  *               period, against the lead's owner
  *   calls       their calls: connected, talk time, recordings (3CX)
@@ -109,8 +112,10 @@ export async function salesReport(code: string, q: { from?: unknown; to?: unknow
     src.conn.collection("students").find({ status: { $ne: "dropped" }, ...within("enrollmentDate") },
       { projection: { name: 1, course: 1, totalFee: 1, paidAmount: 1, enrollmentDate: 1, assignedTo: 1, status: 1 }, maxTimeMS: QUERY_MS }).toArray(),
     leads.aggregate([
+      ...(await bangaloreUnion(src)),
       { $match: { assignedTo: { $ne: null }, ...within("payments.paidAt") } },
       { $unwind: "$payments" },
+      { $match: COUNTED_PAYMENT },
       { $match: within("payments.paidAt") },
       { $project: { name: 1, assignedTo: 1, amount: "$payments.amount", at: "$payments.paidAt", note: "$payments.note" } },
     ], { maxTimeMS: QUERY_MS }).toArray(),

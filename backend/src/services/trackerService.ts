@@ -135,7 +135,8 @@ const autoMetricsFor = async (src: CrmSource, date: string) => {
   const payments = await leads
     .aggregate([
       { $unwind: "$payments" },
-      { $match: { "payments.paidAt": { $gte: start, $lt: end } } },
+      // Not a balance payment kept in rupees on a Bangalore enrolment's lead (2026-10-28) — the rest are AED
+      { $match: { "payments.paidAt": { $gte: start, $lt: end }, "payments.currency": { $ne: "INR" } } },
       { $group: { _id: "$payments.addedBy", total: { $sum: "$payments.amount" } } },
     ])
     .toArray();
@@ -568,7 +569,7 @@ export const userTracker = async (
   const payments = await leads
     .aggregate([
       { $unwind: "$payments" },
-      { $match: { "payments.addedBy": oid, "payments.paidAt": { $gte: start, $lt: end } } },
+      { $match: { "payments.addedBy": oid, "payments.paidAt": { $gte: start, $lt: end }, "payments.currency": { $ne: "INR" } } },
       {
         $group: {
           _id: { $dateToString: { format: "%Y-%m-%d", date: "$payments.paidAt", timezone: tz } },

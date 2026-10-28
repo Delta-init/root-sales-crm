@@ -1,5 +1,6 @@
 import { Types } from "mongoose";
 import { getSources, type CrmSource } from "./crmConnections.js";
+import { COUNTED_PAYMENT, bangaloreUnion } from "./bangaloreRevenue.js";
 
 /*
  * A salesperson, from Root (the user, 2026-10-11): everyone in the sales CRMs —
@@ -81,8 +82,10 @@ export async function listSalespeople(period: Period) {
         { $group: { _id: "$assignedTo", n: { $sum: 1 } } },
       ], { maxTimeMS: QUERY_MS }).toArray(),
       leads.aggregate<{ _id: unknown; n: number }>([
+        ...(await bangaloreUnion(src)),
         { $match: { assignedTo: { $ne: null }, ...within("payments.paidAt", period) } },
         { $unwind: "$payments" },
+        { $match: COUNTED_PAYMENT },
         { $match: within("payments.paidAt", period) },
         { $group: { _id: "$assignedTo", n: { $sum: "$payments.amount" } } },
       ], { maxTimeMS: QUERY_MS }).toArray(),
@@ -138,8 +141,10 @@ export async function getSalesperson(code: string, userId: string, period: Perio
       { projection: { name: 1, course: 1, courses: 1, totalFee: 1, paidAmount: 1, pendingAmount: 1, enrollmentDate: 1, status: 1 }, maxTimeMS: QUERY_MS })
       .sort({ enrollmentDate: -1 }).limit(LIST_LIMIT).toArray(),
     leads.aggregate<{ leadId: unknown; name?: string; amount: number; paidAt: Date; note?: string }>([
+      ...(await bangaloreUnion(src)),
       { $match: { assignedTo: uid, ...within("payments.paidAt", period) } },
       { $unwind: "$payments" },
+      { $match: COUNTED_PAYMENT },
       { $match: within("payments.paidAt", period) },
       { $project: { _id: 0, leadId: "$_id", name: 1, amount: "$payments.amount", paidAt: "$payments.paidAt", note: "$payments.note" } },
       { $sort: { paidAt: -1 } },
