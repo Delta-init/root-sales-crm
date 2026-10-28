@@ -64,7 +64,7 @@ export const NAV: NavItem[] = [
       { href: "/manager-tv", label: "Manager TV", icon: MonitorPlay, rootOnly: true },
       // Everyone in the sales CRMs, each with their own page (2026-10-11).
       { href: "/salespeople", label: "Salespeople", icon: Users2, rootOnly: true },
-      // Tetra Commission's CSEs: students, deposits, commission and what waits on each (2026-10-11) — in Sales since 2026-10-17.
+      // CS Portal's CSEs: students, deposits, commission and what waits on each (2026-10-11) — in Sales since 2026-10-17.
       { href: "/cses", label: "CSEs", icon: Headset, rootOnly: true },
       // Every portal's 3CX calls and their recordings (2026-10-14).
       { href: "/calls", label: "3CX calls", icon: Phone, rootOnly: true },

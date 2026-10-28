@@ -97,7 +97,7 @@ const envSchema = z.object({
    * twice a day — the lunch break and the night, Dubai time.
    *
    * Read from each portal's {CODE}_MONGODB_URI, the same variables the reports
-   * use; Tetra Commission's is COMMISSION_MONGODB_URI. A bucket of its own
+   * use; CS Portal's is COMMISSION_MONGODB_URI. A bucket of its own
    * (delta-backups), with a key that can write to nothing else, so one
    * portal's leaked key can never reach the copies of every other.
    *

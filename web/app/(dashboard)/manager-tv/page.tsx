@@ -11,7 +11,7 @@ import type { SalesTvData, SalesTvFetcher } from "@/lib/salesTv";
 
 /*
  * Manager TV, signed in (the user, 2026-10-23): the Sales TV — Dubai Sales, Draw and Remote — with the CS team as
- * a fourth card, ranked as Tetra Commission's CS leaderboard ranks them (course payments collected this month).
+ * a fourth card, ranked as CS Portal's CS leaderboard ranks them (course payments collected this month).
  * Root admins only. The office TVs use the open link, /public/manager-tv, the same without any email.
  */
 const fetchSignedIn: SalesTvFetcher = async (since) => {

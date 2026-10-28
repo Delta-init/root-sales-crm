@@ -61,7 +61,7 @@ export interface SalesTvClose {
   kind?: "sale" | "cs_payment";
 }
 
-/* The Manager TV's fourth card (2026-10-23): the CS team as Tetra Commission's CS leaderboard ranks it — each CS
+/* The Manager TV's fourth card (2026-10-23): the CS team as CS Portal's CS leaderboard ranks it — each CS
    by the course payments they collected this month (approved, AED). */
 export interface SalesTvCsPerson {
   id: string;

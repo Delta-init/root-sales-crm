@@ -661,11 +661,11 @@ export interface SalespersonLead {
   updatedAt: string | null;
 }
 
-// ── CSEs: Tetra Commission's customer success people (GET /cses) ─────────────
+// ── CSEs: CS Portal's customer success people (GET /cses) ─────────────
 
 export type MoneyByCurrency = Record<string, number>;
 
-/** Where a CSE works — their team's, as Tetra Commission shows money: Bangalore in INR, everyone else in AED. */
+/** Where a CSE works — their team's, as CS Portal shows money: Bangalore in INR, everyone else in AED. */
 export type CseLocation = "dubai" | "bangalore";
 
 export interface CseFigures {
@@ -681,9 +681,9 @@ export interface CseFigures {
   bonus: { clients: number; usd: number; needsCall: number; withFinance: number; waitingBroker: number };
   notOnboarded: number;
   notOnboardedLate: number;
-  /** Started in the period, and the AED finance approved on them in it. Missing from a Tetra Commission before 2026-10-11. */
+  /** Started in the period, and the AED finance approved on them in it. Missing from a CS Portal before 2026-10-11. */
   upgrades?: { count: number; paidAed: number; payments: number };
-  /** Funding requests waiting and where (2026-10-14). Missing from a Tetra Commission before then. */
+  /** Funding requests waiting and where (2026-10-14). Missing from a CS Portal before then. */
   funding?: CseFundingSummary;
 }
 
@@ -748,7 +748,7 @@ export interface CseList {
   today: string;
   upcomingDays: number;
   rows: (CsePerson & CseFigures)[];
-  /** The team's figures, each student once however many CSEs share them. Missing from a Tetra Commission before 2026-10-11. */
+  /** The team's figures, each student once however many CSEs share them. Missing from a CS Portal before 2026-10-11. */
   totals?: CseFigures;
   /** Each location's team figures apart — AED for Dubai, INR for Bangalore, never added together (2026-10-14). */
   totalsByLocation?: Record<CseLocation, CseFigures>;
@@ -756,7 +756,7 @@ export interface CseList {
   funding?: { rows: CseFundingRow[]; total: number };
   /** The period's course upgrades, newest first, with who started them. Since 2026-10-14. */
   recentUpgrades?: CseUpgradeRow[];
-  /** Prefix for a student's page in Tetra Commission; "" when its address is not set. */
+  /** Prefix for a student's page in CS Portal; "" when its address is not set. */
   studentLink: string;
 }
 
@@ -773,7 +773,7 @@ export interface CseDetail {
   notOnboarded: (CseStudentRef & { since: string; late: boolean })[];
   deposits: { studentId: string; student: string; usd: number; aed?: number; at: string }[];
   commission: (CseStudentRef & { usd: number; level: number | null; type: string; status: string; at: string })[];
-  /** Started or paid on in the period. Missing from a Tetra Commission before 2026-10-11. */
+  /** Started or paid on in the period. Missing from a CS Portal before 2026-10-11. */
   upgrades?: (CseStudentRef & { course: string; plan: string; status: string; dueAed: number; paidAed: number; at: string; startedBy: string })[];
   /** Their funding requests: the period's and every one still waiting. Since 2026-10-14. */
   funding?: { rows: CseFundingRow[]; total: number };
@@ -781,7 +781,7 @@ export interface CseDetail {
 }
 
 // ── 3CX calls, every portal (2026-10-14) ──────────────────────────────────────
-// The Sales CRM, Draw and Tetra Commission sync calls from 3CX; Banglore's come
+// The Sales CRM, Draw and CS Portal sync calls from 3CX; Banglore's come
 // from a phone call-recorder app (nobody's). One person's are put together by email.
 
 export interface CallTotals {
@@ -900,7 +900,7 @@ export interface EnrolmentFlow {
   open: FlowClose[];
 }
 
-/* Pending → CS portal (2026-10-17): Tetra Commission's GET /service/cs-pending, through Root's /pending/cs. */
+/* Pending → CS portal (2026-10-17): CS Portal's GET /service/cs-pending, through Root's /pending/cs. */
 export interface CsPendingCounts {
   onboarding: number; onboarding_late: number;
   bonus: number; bonus_usd: number; bonus_sent_back: number; bonus_needs_call: number; bonus_with_finance: number; bonus_waiting_broker: number;

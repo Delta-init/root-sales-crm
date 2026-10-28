@@ -7,21 +7,21 @@ import { cn } from "@/lib/utils";
 import type { CseFundingRow, CseFundingStage, CseUpgradeRow } from "@/lib/types";
 
 /*
- * The CSEs pages' money in Tetra Commission's way (the user, 2026-10-14):
+ * The CSEs pages' money in CS Portal's way (the user, 2026-10-14):
  * fully in AED — and a Bangalore CSE's in INR, apart, at the portal's fixed
  * rates — funding requests with where each is paused and the commission it
  * earned, and the recent course upgrades.
  */
 
 export const AED_PER_USD = 3.67;
-/** Tetra Commission's fixed rates: 1 USD = 3.67 AED, 1 INR = 0.010 USD — so AED 1 ≈ INR 27.25. */
+/** CS Portal's fixed rates: 1 USD = 3.67 AED, 1 INR = 0.010 USD — so AED 1 ≈ INR 27.25. */
 export const USD_PER_INR = 0.01;
 const INR_PER_AED = 1 / (AED_PER_USD * USD_PER_INR);
 /** 1,000 · 110.10 — cents only when there are any, and then both digits. */
 const num = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: Number.isInteger(Math.round(n * 100) / 100) ? 0 : 2, maximumFractionDigits: 2 });
 export const aedText = (n: number) => `AED ${num(n)}`;
 
-/** An AED amount in a CSE's currency: AED, or INR for Bangalore (as Tetra Commission shows it them). */
+/** An AED amount in a CSE's currency: AED, or INR for Bangalore (as CS Portal shows it them). */
 export const money = (aed: number, location?: string | null) =>
   location === "bangalore" ? `INR ${num(Math.round((Number(aed) || 0) * INR_PER_AED * 100) / 100)}` : aedText(Number(aed) || 0);
 /** A USD amount (commission, a bonus) the same way: AED at 3.67, or INR. */
@@ -47,7 +47,7 @@ export function FundingTable({ rows: given, total, showCs = true, studentHref, l
   rows: CseFundingRow[];
   total: number;
   showCs?: boolean;
-  /** One CSE's page: their location, for a request Tetra Commission has not located. */
+  /** One CSE's page: their location, for a request CS Portal has not located. */
   location?: CseFundingRow["location"];
   studentHref?: (studentId: string) => string | null;
 }) {

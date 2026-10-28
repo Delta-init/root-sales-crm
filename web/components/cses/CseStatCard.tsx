@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { BreakdownHint, cardButton } from "@/components/common/Breakdown";
 
 /*
- * A figure on the CSEs pages, in the look of Tetra Commission's own dashboard
+ * A figure on the CSEs pages, in the look of CS Portal's own dashboard
  * cards (the user, 2026-10-11): the label, a tinted icon, the figure large and
  * a line under it. Tinted with alpha so it reads in both themes.
  */

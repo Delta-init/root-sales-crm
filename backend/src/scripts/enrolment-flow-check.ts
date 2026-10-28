@@ -62,7 +62,7 @@ async function main() {
 
   const { AdminUser } = await import("../models/AdminUser.js");
   const { Organization } = await import("../models/Organization.js");
-  for (const [code, kind, name, sortOrder] of [["delta", "crm", "Sales CRM", 1], ["banglore", "crm", "Banglore CRM", 2], ["draw", "crm", "Draw CRM", 3], ["remote", "crm", "Remote CRM", 4], ["commission", "commission", "Tetra Commission", 5]] as [string, string, string, number][]) {
+  for (const [code, kind, name, sortOrder] of [["delta", "crm", "Sales CRM", 1], ["banglore", "crm", "Banglore CRM", 2], ["draw", "crm", "Draw CRM", 3], ["remote", "crm", "Remote CRM", 4], ["commission", "commission", "CS Portal", 5]] as [string, string, string, number][]) {
     await Organization.create({ code, kind, name, timezone: "Asia/Dubai", currency: "AED", fxToBase: 1, isActive: true, sortOrder, accent: "#2563eb" });
   }
   await AdminUser.create({ name: "Root E2E", email: "root@flow-e2e.test", password: PASSWORD, role: "root_admin", status: "active" });
@@ -78,7 +78,7 @@ async function main() {
   const r = await get(root);
   const d = r.body.data;
   const p = (code: string) => d.portals.find((x: Json) => x.code === code);
-  check("the four CRMs, not Tetra Commission", r.status === 200 && d.portals.map((x: Json) => x.code).join() === "delta,banglore,draw,remote", show(d?.portals?.map((x: Json) => x.code)));
+  check("the four CRMs, not CS Portal", r.status === 200 && d.portals.map((x: Json) => x.code).join() === "delta,banglore,draw,remote", show(d?.portals?.map((x: Json) => x.code)));
   check("Draw's and the Sales CRM's counts", p("delta").counts.total === 7 && p("delta").counts.finished === 2 && p("delta").counts.open === 5
     && p("draw").counts.open === 2 && p("delta").counts.atStep.finance.waiting === 1 && p("delta").counts.atStep.finance.failed === 1 && p("delta").counts.atStep.bonus.waiting === 2, show(p("delta").counts));
   check("all together: 10 closed, 3 finished, 7 unfinished; finance 1 waiting + 2 sent back; by role", d.all.total === 10 && d.all.finished === 3 && d.all.open === 7

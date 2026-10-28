@@ -65,7 +65,7 @@ export default function CsePage() {
     queryFn: async () => (await api.get("/pending/enrolments")).data.data as EnrolmentFlow,
     refetchInterval: 3 * 60_000,
   });
-  // Their money in their currency (2026-10-14): AED, or INR for a Bangalore team's CSE — as Tetra Commission shows it them.
+  // Their money in their currency (2026-10-14): AED, or INR for a Bangalore team's CSE — as CS Portal shows it them.
   const loc = d?.person.location ?? "dubai";
   const inLocal = (aedAmount: number) => money(aedAmount, loc);
   const inLocalUsd = (usdAmount: number) => moneyOfUsd(usdAmount, loc);
@@ -97,7 +97,7 @@ export default function CsePage() {
               </h2>
               <p className="mt-1 text-sm text-muted-foreground">{d.person.email}</p>
               <div className="mt-2 flex flex-wrap gap-1.5">
-                <Badge variant="secondary">Tetra Commission</Badge>
+                <Badge variant="secondary">CS Portal</Badge>
                 {d.person.team && <Badge variant="outline">{d.person.team}</Badge>}
                 {d.person.location === "bangalore" && <Badge variant="outline" className="border-amber-500/40 text-amber-500">Bangalore · money in INR</Badge>}
               </div>
@@ -112,7 +112,7 @@ export default function CsePage() {
             <CseStatCard icon={CircleDollarSign} accent="emerald" title="Total deposits" onClick={show("deposits")} value={inLocal(d.summary.deposits.aed ?? d.summary.deposits.usd * AED_PER_USD)} hint={`${d.summary.deposits.count} in the period`} delay={0.05} />
             <CseStatCard icon={Coins} accent="cyan" title="Commission earned" onClick={show("commission")} value={inLocalUsd(d.summary.commissionUsd)} hint="credited in the period" delay={0.1} />
             <CseStatCard icon={ArrowUpCircle} accent="violet" title="Course upgrades" onClick={show("upgrades")} value={d.summary.upgrades ? String(d.summary.upgrades.count) : "—"}
-              hint={d.summary.upgrades ? `started · ${inLocal(d.summary.upgrades.paidAed)} paid in the period` : "after Tetra Commission's update"} delay={0.15} />
+              hint={d.summary.upgrades ? `started · ${inLocal(d.summary.upgrades.paidAed)} paid in the period` : "after CS Portal's update"} delay={0.15} />
             <CseStatCard icon={GraduationCap} title="Students" value={String(d.summary.students)} hint="theirs now, Common CS too" delay={0.2} />
             <CseStatCard icon={PhoneCall} title="Follow-ups today" onClick={show("followups")} value={String(d.summary.followupsToday)}
               hint={d.summary.followupsOverdue ? `${d.summary.followupsOverdue} overdue` : "none overdue"} alert={!!d.summary.followupsOverdue} delay={0.25} />

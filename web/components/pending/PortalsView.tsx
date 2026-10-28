@@ -21,7 +21,7 @@ import { CALL_PERIODS, periodDays, talkTime, type CallPeriod } from "@/lib/calls
 /**
  * Pending (the user, 2026-10-06): what is waiting in every portal, and for
  * whom — each portal's own sidebar counts on one page, per person, and one
- * person's across all of them: the sales CRMs, then Tetra Commission, Finance,
+ * person's across all of them: the sales CRMs, then CS Portal, Finance,
  * HRMS, LMS and Media ERP (2026-10-11), each answering for itself. A count that
  * waits on anyone holding a permission is "shared": every holder is listed with
  * all of it. Root admins only.
@@ -33,8 +33,8 @@ import { CALL_PERIODS, periodDays, talkTime, type CallPeriod } from "@/lib/calls
  * And everybody's 3CX calls beside it (2026-10-14): calls, connected and talk
  * time per person — today by default, or 7 days / 30 days / this month — on
  * each portal's card and in By person, with those who called and have nothing
- * pending listed after the rest. Calls come from the Sales CRM, Draw and Tetra
- * Commission (3CX) and Banglore's call recorder; one person's are put together
+ * pending listed after the rest. Calls come from the Sales CRM, Draw and CS
+ * Portal (3CX) and Banglore's call recorder; one person's are put together
  * by email. The 3CX calls page (Sales) has every call and its recording.
  *
  * And the enrolment workflow (2026-10-14): every sales CRM's unfinished closes

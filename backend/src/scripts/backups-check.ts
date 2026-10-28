@@ -123,7 +123,7 @@ async function main() {
   const problem = (c: string) => before.portals.find((p: Json) => p.code === c)?.problem ?? "";
   check("Remote: not set up, naming the variable", /REMOTE_MONGODB_URI/.test(problem("remote")), problem("remote"));
   check("Media ERP: no database named", /MEDIA_ERP_MONGODB_DB/.test(problem("media-erp")), problem("media-erp"));
-  check("Tetra Commission: the database named apart is used", before.portals.find((p: Json) => p.code === "commission")?.database === "tc-bk-e2e" && !problem("commission"));
+  check("CS Portal: the database named apart is used", before.portals.find((p: Json) => p.code === "commission")?.database === "tc-bk-e2e" && !problem("commission"));
   check("no address or password on the page", !/mongodb:|secretpw/.test(JSON.stringify(before)));
 
   step("Back up now — every portal");

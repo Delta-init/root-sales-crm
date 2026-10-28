@@ -26,7 +26,7 @@ export const STEP_LABEL: Record<FlowStep, string> = {
 const STEP_OWNER: Record<FlowStep, string> = {
   finance: "accounts · sent back: the salesperson",
   lms: "the LMS",
-  cs: "Tetra Commission's CS managers",
+  cs: "CS Portal's CS managers",
   onboarded: "their CS — the welcome",
   bonus: "a broker admin · or their CS logs the MT5",
 };
@@ -37,7 +37,7 @@ export const ROLE_LABEL: Record<FlowRole, string> = {
   cs_manager: "CS managers — no CS given yet",
   cs: "CS",
   broker_admin: "Broker admins — the MT5 bonus",
-  tetra: "Tetra Commission — on its way, or no answer",
+  tetra: "CS Portal — on its way, or no answer",
 };
 const STEPS: FlowStep[] = ["finance", "lms", "cs", "onboarded", "bonus"];
 
@@ -134,7 +134,7 @@ export function EnrolmentFlowView({ flow }: { flow: Flow }) {
             <FlowBox title="Done" value={counts.finished} hint="every step finished" tone="done" icon />
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
-            Each box counts the closes stopped at that step now — pick one to list them. Banglore&apos;s go only as far as the LMS (no Tetra Commission).
+            Each box counts the closes stopped at that step now — pick one to list them. Banglore&apos;s go only as far as the LMS (no CS Portal).
           </p>
         </CardContent>
       </Card>
@@ -264,7 +264,7 @@ function StepDots({ steps }: { steps: FlowClose["steps"] }) {
 /**
  * The CSEs pages' share of the workflow (2026-10-14): the enrolments waiting on a CS — the welcome to send, the MT5
  * to log (or a bonus turned down) — and those waiting for a CS at all. A CS is matched by name, as the sales CRMs
- * know them from Tetra Commission. `only` narrows to one CSE.
+ * know them from CS Portal. `only` narrows to one CSE.
  */
 export function CseEnrolments({ flow, only }: { flow: Flow; only?: string }) {
   const name = (only ?? "").trim().toLowerCase();
@@ -287,7 +287,7 @@ export function CseEnrolments({ flow, only }: { flow: Flow; only?: string }) {
     <div className="space-y-3">
       {!only && (
         <p className="text-sm text-muted-foreground">
-          {noCs.length ? <><span className="font-semibold text-foreground">{noCs.length}</span> enrolment{noCs.length === 1 ? "" : "s"} in Tetra Commission with no CS given yet (CS managers). </> : null}
+          {noCs.length ? <><span className="font-semibold text-foreground">{noCs.length}</span> enrolment{noCs.length === 1 ? "" : "s"} in CS Portal with no CS given yet (CS managers). </> : null}
           The sales CRMs&apos; closes waiting on a CSE — and on a broker admin for their students&apos; MT5 bonus.
         </p>
       )}

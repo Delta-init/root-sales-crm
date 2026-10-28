@@ -12,8 +12,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * What is behind each number of Reports → Mentors (the user, 2026-10-27: "each count we can break down … do the root
- * mentors report also"), as Tetra Commission's Mentor Report shows it: one window for any number — every mentor's, one
- * mentor's, one day's or one Program's (GET /portal-reports/mentors/details → Tetra Commission → the LMS) — and the
+ * mentors report also"), as CS Portal's Mentor Report shows it: one window for any number — every mentor's, one
+ * mentor's, one day's or one Program's (GET /portal-reports/mentors/details → CS Portal → the LMS) — and the
  * Programs and Meetings tabs, each number of which opens it too.
  */
 
@@ -58,7 +58,7 @@ const MEETINGS: Col[] = [
   ["With", (r) => (r.attendees || []).join(", ") || "—", (r) => (r.attendees || []).join(" ")],
   ["Status", (r) => (r.cancelled ? <Pill tone={STATUS_TONE.cancelled}>cancelled {when(r.cancelledAt)}</Pill>
     : new Date(r.start) < new Date() ? <Pill tone={STATUS_TONE.attended}>held</Pill> : <Pill tone={STATUS_TONE.booked}>booked</Pill>)],
-  ["Booked by", (r) => <>{r.bookedBy || "—"}<Muted>{r.bookedVia === "portal" ? "from Tetra Commission" : r.bookedVia === "lms" ? "in the LMS" : ""}</Muted></>, (r) => r.bookedBy],
+  ["Booked by", (r) => <>{r.bookedBy || "—"}<Muted>{r.bookedVia === "portal" ? "from CS Portal" : r.bookedVia === "lms" ? "in the LMS" : ""}</Muted></>, (r) => r.bookedBy],
 ];
 const COLUMNS: Record<string, Col[]> = {
   classes: CLASSES, cancelled_classes: CLASSES,

@@ -112,11 +112,11 @@ const orgSeeds = (): OrgSeed[] => [
     sortOrder: 8,
   },
   {
-    // Tetra Capitals' commission portal. Reached with COMMISSION_APP_URL,
+    // Tetra Capitals' CS Portal. Reached with COMMISSION_APP_URL,
     // COMMISSION_API_URL, COMMISSION_SSO_SECRET and COMMISSION_SERVICE_EMAIL.
     code: "commission",
     kind: "commission",
-    name: "Tetra Commission",
+    name: "CS Portal",
     timezone: "Asia/Dubai",
     currency: "AED",
     fxToBase: 1,

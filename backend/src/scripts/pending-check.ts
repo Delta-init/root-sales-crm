@@ -102,7 +102,7 @@ async function main() {
     ["draw", "crm", "Draw CRM", 3],
     ["remote", "crm", "Remote CRM", 3.5],
     ["finance-hq", "finance", "Finance HQ", 4],
-    ["commission", "commission", "Tetra Commission", 5],
+    ["commission", "commission", "CS Portal", 5],
     ["hrms", "hrms", "Delta HRMS", 6],
     ["lms", "lms", "Delta LMS", 7],
     ["media-erp", "erp", "Media ERP", 8],
@@ -196,7 +196,7 @@ async function main() {
   r = await call("GET", "/pending", root);
   data = r.body?.data;
   check("Draw with nothing pending: 0, and nobody listed", portal("draw")?.available === true && portal("draw")?.total === 0 && portal("draw")?.people?.length === 0, show(portal("draw")));
-  check("…and Nusra is down to her one Delta lead (beside what Tetra Commission has for her)",
+  check("…and Nusra is down to her one Delta lead (beside what CS Portal has for her)",
     ((data?.people ?? []).find((p: Json) => p.email === "nusra@shared-e2e.test")?.items ?? [])
       .filter((i: Json) => ["delta", "draw", "banglore", "remote"].includes(i.portal)).reduce((n: number, i: Json) => n + i.count, 0) === 1);
 
@@ -209,7 +209,7 @@ async function main() {
   check("none left as coming", (data?.comingNext ?? []).length === 0, show(data?.comingNext));
 
   step("Case 5 — the other portals answer for themselves (a stand-in, with each one's secret)");
-  check("Tetra Commission: its badges, with overdue, and its CS", portal("commission")?.available === true && portal("commission")?.total === 9
+  check("CS Portal: its badges, with overdue, and its CS", portal("commission")?.available === true && portal("commission")?.total === 9
     && kind("commission", "followups")?.overdue === 2 && (portal("commission")?.people ?? []).find((p: Json) => p.email === "nusra@shared-e2e.test")?.counts?.followups_overdue === 2,
     show(portal("commission")));
   check("…asked with its own secret, at /api/v1/service/pending", standinSaw.some((x) => x.path === "/commission/api/v1/service/pending" && x.secret === "pending-e2e-commission-secret"), show(standinSaw));
@@ -222,7 +222,7 @@ async function main() {
   check("the LMS on its old server: says it needs updating", portal("lms")?.available === false && /needs updating/.test(portal("lms")?.error ?? ""), show(portal("lms")));
   check("Media ERP refusing the secret: says so", portal("media-erp")?.available === false && !!portal("media-erp")?.error && !/needs updating/.test(portal("media-erp")?.error ?? ""), show(portal("media-erp")));
   const nusraAll = (data?.people ?? []).find((p: Json) => p.email === "nusra@shared-e2e.test");
-  check("By person: one row across the CRMs and Tetra Commission, matched by email",
+  check("By person: one row across the CRMs and CS Portal, matched by email",
     (nusraAll?.items ?? []).some((i: Json) => i.portal === "commission" && i.key === "followups" && i.count === 5 && i.overdue === 2) && (nusraAll?.items ?? []).some((i: Json) => i.portal === "delta"),
     show(nusraAll));
   const acct = (data?.people ?? []).find((p: Json) => p.email === "accounts1@finance-e2e.test");

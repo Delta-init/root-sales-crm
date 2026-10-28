@@ -36,7 +36,7 @@ const cents = (n: number) => Math.round(n * 100) / 100;
 type Num = Record<string, number>;
 interface Who { id: string; name: string; team: string; active: boolean }
 
-/** Sums by person, team and month, as Tetra Commission's report grouper does. */
+/** Sums by person, team and month, as CS Portal's report grouper does. */
 function grouper(blank: () => Num) {
   const people = new Map<string, Who & Num>(), teams = new Map<string, { team: string } & Num>(), months = new Map<string, { month: string } & Num>();
   const total = blank();

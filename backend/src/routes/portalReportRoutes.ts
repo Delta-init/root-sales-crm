@@ -38,7 +38,7 @@ router.get("/cs", requireReportTab("cs"), async (req: AuthenticatedRequest, res:
   }
 });
 
-/* The CS portal's student workflow: where the period's students went, as Tetra Commission counts them (2026-10-20). */
+/* The CS portal's student workflow: where the period's students went, as CS Portal counts them (2026-10-20). */
 router.get("/cs/workflow", requireReportTab("cs"), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     sendSuccess(res, "Student workflow", await csStudentWorkflow(req.query as Record<string, unknown>));
@@ -93,7 +93,7 @@ router.get("/sales/:code/workflow/leads", requireReportTab(salesTab), async (req
   }
 });
 
-/* Mentors: every mentor's classes, bookings, meetings, reviews and commission, day by day — Tetra Commission's own
+/* Mentors: every mentor's classes, bookings, meetings, reviews and commission, day by day — CS Portal's own
    Mentor Report (2026-10-24) — and one mentor's reviews. */
 router.get("/mentors", requireReportTab("mentors"), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {

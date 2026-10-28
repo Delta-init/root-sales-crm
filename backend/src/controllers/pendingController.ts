@@ -24,7 +24,7 @@ export const enrolments = async (_req: AuthenticatedRequest, res: Response, next
   }
 };
 
-/** What waits on each Tetra Commission CS, and which students (Pending → CS portal). */
+/** What waits on each CS Portal CS, and which students (Pending → CS portal). */
 export const cs = async (_req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     sendSuccess(res, "CS pending", await csPending());

@@ -16,7 +16,7 @@ import { ReportBody, n0, usd, aed, pct, when, type Group, type Row, type Section
 import { StudentWorkflowSection } from "@/components/portal-reports/StudentWorkflow";
 
 /**
- * Reports → CS portal (the user, 2026-10-17): what Tetra Commission's CSs did
+ * Reports → CS portal (the user, 2026-10-17): what CS Portal's CSs did
  * in a period — revenue, follow-ups and contacted, calls, program scheduling,
  * onboarded clients, bonuses, commission, course upgrades — as its own Reports
  * section counts them (GET /service/cs-report): a row for whoever it counts
@@ -39,7 +39,7 @@ const STAGE: Record<string, { label: string; cls: string }> = {
 };
 const csCell = (r: Row) => <div key="cs"><div>{r.cs}</div><div className="text-xs text-muted-foreground">{r.team}{r.location === "bangalore" ? " · Bangalore" : ""}</div></div>;
 
-/* All in AED (the user, 2026-10-17) — and from a Tetra Commission before it sent AED, its USD at the portal's 3.67. */
+/* All in AED (the user, 2026-10-17) — and from a CS Portal before it sent AED, its USD at the portal's 3.67. */
 const AED_PER_USD = 3.67;
 const withdrawalAed = (t: Record<string, number>) => t.withdrawal_aed ?? (t.withdrawal_usd ?? 0) * AED_PER_USD;
 const netAed = (t: Record<string, number>) => t.net_aed ?? (t.deposit_aed ?? 0) - withdrawalAed(t);
@@ -220,7 +220,7 @@ export function CsReportView() {
         </Card>
       ) : (
         <ReportBody sections={SECTIONS} data={data} link={link} personLabel="CS" ownerKey="cs_id"
-          note={<>As Tetra Commission&apos;s Reports count it: a row for whoever it counts for (who raised or did it, else the student&apos;s CS), their team and its location. The list shows the latest 2,000.</>} />
+          note={<>As CS Portal&apos;s Reports count it: a row for whoever it counts for (who raised or did it, else the student&apos;s CS), their team and its location. The list shows the latest 2,000.</>} />
       )}
     </div>
   );

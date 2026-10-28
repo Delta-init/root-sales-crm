@@ -50,7 +50,7 @@ export const PORTALS: { code: string; label: string; optional?: boolean; uri?: (
   // Only when it is a database of its own; finance keeps its organizations in one.
   { code: "finance-banglore", label: "Finance (Bangalore)", optional: true },
   { code: "lms", label: "LMS" },
-  { code: "commission", label: "Tetra Commission" },
+  { code: "commission", label: "CS Portal" },
   { code: "hrms", label: "HRMS" },
   { code: "media-erp", label: "Media ERP" },
   { code: "root", label: "Root portal", uri: () => env.MONGODB_URI },

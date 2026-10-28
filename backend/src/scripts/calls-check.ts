@@ -2,7 +2,7 @@
  * Checks Root's 3CX calls (2026-10-14) — the "3CX calls" page (GET /calls), a
  * recording's link (GET /calls/:portal/:id/recording-link) and each person's
  * calls on Pending (GET /pending/calls) — against a scratch database, with the
- * portals that sync 3CX (Sales CRM, Draw, Tetra Commission) as a stand-in in
+ * portals that sync 3CX (Sales CRM, Draw, CS Portal) as a stand-in in
  * this check answering /api/v1/service/calls, and Banglore's call-recorder
  * calls in a scratch database:
  *
@@ -122,7 +122,7 @@ async function main() {
   const { Organization } = await import("../models/Organization.js");
   for (const [code, kind, name, sortOrder] of [
     ["delta", "crm", "Sales CRM", 1], ["banglore", "crm", "Banglore CRM", 2], ["draw", "crm", "Draw CRM", 3], ["remote", "crm", "Remote CRM", 4],
-    ["commission", "commission", "Tetra Commission", 5], ["finance-hq", "finance", "Finance HQ", 6],
+    ["commission", "commission", "CS Portal", 5], ["finance-hq", "finance", "Finance HQ", 6],
   ] as [string, string, string, number][]) {
     await Organization.create({ code, kind, name, timezone: "Asia/Dubai", currency: "AED", fxToBase: 1, isActive: true, sortOrder, accent: "#2563eb" });
   }

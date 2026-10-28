@@ -69,7 +69,7 @@ export DELTA_API_URL="$STANDIN/delta" DELTA_SSO_SECRET="sales-tv-e2e-delta"
 export DRAW_API_URL="$STANDIN/draw/api/v1" DRAW_SSO_SECRET="sales-tv-e2e-draw"
 export REMOTE_API_URL="$STANDIN/remote" REMOTE_SSO_SECRET="sales-tv-e2e-remote"
 export BANGLORE_API_URL="" BANGLORE_SSO_SECRET=""
-# Manager TV: Tetra Commission's open CS board (GET /api/public/cs-tv) — the stand-in again.
+# Manager TV: CS Portal's open CS board (GET /api/public/cs-tv) — the stand-in again.
 export COMMISSION_API_URL="$STANDIN/commission/api/v1" COMMISSION_SSO_SECRET="sales-tv-e2e-commission"
 # Delta's leads in a scratch database (who got leads this month); Draw has none configured, so Draw shows everybody.
 export DELTA_MONGODB_URI="$MONGO/delta-crm-sales-tv-e2e"

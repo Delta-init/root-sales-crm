@@ -290,7 +290,7 @@ export function FinanceWatchView() {
           {entryTable(shownEntries)}
           <p className="mt-3 text-xs text-muted-foreground">
             Days back is from the entry&apos;s own date to the day it was typed in (Gulf days); 7 or more in red. &ldquo;Recorded by an approval&rdquo; is a payment
-            or invoice that came in when an enrolment or balance payment was approved, dated as the CRM or Tetra Commission gave it.
+            or invoice that came in when an enrolment or balance payment was approved, dated as the CRM or CS Portal gave it.
           </p>
         </CardContent>
       </Card>

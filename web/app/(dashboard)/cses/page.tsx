@@ -20,18 +20,18 @@ import { CseEnrolments } from "@/components/pending/EnrolmentFlow";
 import { CseBreakdown, type CseCard } from "@/components/cses/CseBreakdown";
 
 /**
- * CSEs (the user, 2026-10-11): Tetra Commission's customer success people —
+ * CSEs (the user, 2026-10-11): CS Portal's customer success people —
  * their students, the period's deposits and commission (USD), and what waits
  * on each now: today's and overdue follow-ups, instalments due in the next
  * 7 days or past due, what their students owe, bonuses waiting, students not
  * onboarded. Each opens their own page. Gulf time. Root admins only.
  *
- * Above them, the team's totals in the look of Tetra Commission's dashboard —
- * deposits, commission and course upgrades among them (2026-10-11). Tetra
- * Commission counts those, each student once: rows added up would count a
+ * Above them, the team's totals in the look of CS Portal's dashboard —
+ * deposits, commission and course upgrades among them (2026-10-11). CS
+ * Portal counts those, each student once: rows added up would count a
  * student shared with a Common CS twice.
  *
- * Money fully in AED, as Tetra Commission's Funding Requests shows it — a
+ * Money fully in AED, as CS Portal's Funding Requests shows it — a
  * Bangalore team's CSEs in INR, and the team's Bangalore figures beside
  * Dubai's, never added together (the fixed rates: 1 USD = 3.67 AED, 1 INR =
  * 0.010 USD); the funding requests waiting — with finance, with a broker
@@ -48,12 +48,12 @@ const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 /** A deposit total's AED: as recorded (2026-10-14), else its USD at 3.67. */
 const depositAed = (f: CseFigures) => f.deposits.aed ?? f.deposits.usd * AED_PER_USD;
 
-/** The team's cards: Dubai in AED, Bangalore's INR beside it. Before Tetra Commission sends totals, only what rows add up to exactly. */
+/** The team's cards: Dubai in AED, Bangalore's INR beside it. Before CS Portal sends totals, only what rows add up to exactly. */
 function TeamTotals({ list, open }: { list: CseList; open: (c: CseCard) => void }) {
   const t: CseFigures | undefined = list.totals;
   const by = list.totalsByLocation;
-  const later = "after Tetra Commission's update";
-  /** One figure (in AED) for each location — or, before Tetra Commission splits them, all of it as Dubai's. */
+  const later = "after CS Portal's update";
+  /** One figure (in AED) for each location — or, before CS Portal splits them, all of it as Dubai's. */
   const split = (aedOf: (f: CseFigures) => number): Record<CseLocation, number> =>
     by ? { dubai: aedOf(by.dubai), bangalore: aedOf(by.bangalore) }
       : { dubai: t ? aedOf(t) : list.rows.reduce((n, r) => n + aedOf(r), 0), bangalore: 0 };
@@ -119,7 +119,7 @@ export default function CsesPage() {
         <div>
           <h2 className="flex items-center gap-2 text-2xl font-bold text-foreground"><Headset className="h-6 w-6 text-primary" /> CSEs</h2>
           <p className="mt-1 text-muted-foreground">
-            Tetra Commission&apos;s CSEs — students, deposits and commission for the period, and what waits on each now.
+            CS Portal&apos;s CSEs — students, deposits and commission for the period, and what waits on each now.
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">

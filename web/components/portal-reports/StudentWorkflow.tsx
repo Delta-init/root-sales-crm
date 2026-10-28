@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 
 /*
  * Reports → CS portal → Student workflow (the user, 2026-10-20): the period's
- * students in Tetra Commission and where each went — came in (finance, LMS,
+ * students in CS Portal and where each went — came in (finance, LMS,
  * a sheet, by hand) → a CS or the open pool → onboarded, waiting (within the
  * wait) or late → enrolled in the LMS, contacted, first deposit, moved by hand
  * — and their follow-up stage now, per team and CS (GET /portal-reports/cs/workflow).
@@ -53,14 +53,14 @@ interface StudentList { total: number; students: StudentRow[]; studentLink?: str
 /** A box of the map, a stage of the legend, or a team's / CS's row. */
 interface Pick { label: string; box?: BoxKey; stage?: string; teamId?: string; csId?: string }
 
-// Tetra Commission's own stage colours (its followupUi STAGE_CLS), New made indigo so it is not the grey of "No follow-up".
+// CS Portal's own stage colours (its followupUi STAGE_CLS), New made indigo so it is not the grey of "No follow-up".
 const STAGES: Record<string, string> = {
   New: "#6366f1", Contacted: "#3b82f6", Qualified: "#06b6d4", "Session with CM": "#8b5cf6", "Objection Stage": "#f59e0b",
   Converted: "#10b981", Lost: "#f43f5e", "No follow-up": "#94a3b8",
 };
 const stageColor = (s: string) => STAGES[s] ?? "#64748b";
 const SOURCE: Record<string, string> = { finance: "finance", lms: "LMS", sheet: "sheets", manual: "by hand" };
-/* Why a bonus waits, as Tetra Commission says (its students/bonusPending.ts), in the order a CS can act on them. */
+/* Why a bonus waits, as CS Portal says (its students/bonusPending.ts), in the order a CS can act on them. */
 const BONUS_REASON: Record<BonusReason, string> = {
   sent_back: "sent back to the CS", after_payment: "waiting for full payment", needs_call: "needs a connected call",
   with_finance: "with finance", waiting_broker: "waiting for a broker admin",
@@ -69,7 +69,7 @@ const usd = (n: number | undefined) => `$${(n ?? 0).toLocaleString("en-US", { ma
 // 1 of 300 is "<1%", not "0%".
 const pctOf = (n: number, of: number) => (!of ? "—" : n > 0 && Math.round((n / of) * 100) === 0 ? "<1%" : `${Math.round((n / of) * 100)}%`);
 const n0 = (n: number | undefined) => (n ?? 0).toLocaleString("en-US");
-/** A day, Dubai time: a YYYY-MM-DD as it is, or an instant (Tetra Commission sends the period's ends as instants). */
+/** A day, Dubai time: a YYYY-MM-DD as it is, or an instant (CS Portal sends the period's ends as instants). */
 const dayLabel = (v: string) => {
   const d = /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T12:00:00+04:00`) : new Date(v);
   return Number.isNaN(d.getTime()) ? "…" : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Dubai" });
@@ -237,7 +237,7 @@ function WorkflowMap({ data, title, onPick }: { data: StudentWorkflow; title: st
           )}
         </div>
         <p className="pt-3 text-xs text-muted-foreground">
-          As Tetra Commission counts them: late = not onboarded within {hours} h of coming in. Assigned and pool are where each student is now.
+          As CS Portal counts them: late = not onboarded within {hours} h of coming in. Assigned and pool are where each student is now.
         </p>
       </CardContent>
     </Card>

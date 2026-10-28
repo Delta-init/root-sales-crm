@@ -14,7 +14,7 @@ router.use(authenticate);
 
 router.get("/", requireRole("root_admin"), overview);
 // A recording also plays for somebody given that sales CRM's Pending tab, where its calls are listed (2026-10-24) — or
-// its Reports tab, and Tetra Commission's for the CS portal's report (2026-10-27).
+// its Reports tab, and CS Portal's for the CS portal's report (2026-10-27).
 const mayPlay = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
   const portal = String(req.params.portal);
   const report = req.admin?.reportAccess ?? [];

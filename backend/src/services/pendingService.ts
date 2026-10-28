@@ -14,7 +14,7 @@ import { resolveTarget, callTarget } from "../lib/targetClient.js";
  *     "assigned"): the Leads badge;
  *   - Reminders — reminders they set that are not done, overdue ones among
  *     them counted apart: the Reminders badge.
- * Every other portal — Tetra Commission, Finance, HRMS, LMS, Media ERP (the
+ * Every other portal — CS Portal, Finance, HRMS, LMS, Media ERP (the
  * user, 2026-10-11) — answers for itself: GET /api/v1/service/pending with the
  * portal secret Root already holds for it, its own sidebar's badges and whom
  * each waits on. Root does not copy their logic. A badge that waits on anyone

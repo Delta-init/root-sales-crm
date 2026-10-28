@@ -1,23 +1,23 @@
 /**
  * The CSEs pages' API (services/cseService.ts), end to end against a stand-in
- * Tetra Commission:
+ * CS Portal:
  *
- *   Case 1  happy path   the list and one CSE's page, as Tetra Commission says,
+ *   Case 1  happy path   the list and one CSE's page, as CS Portal says,
  *                        asked with its portal secret; each student's link
  *   Case 2  edge         the period cut in Gulf time and passed as instants;
- *                        none — none passed; a Tetra Commission without the route
+ *                        none — none passed; a CS Portal without the route
  *   Case 3  errors       bad dates, an id that is not one, a CSE it does not know
  *   Case 4  permission   no session, an admin who is not a root admin
  *
  * And Reports → CS portal (GET /portal-reports/cs, 2026-10-17): the period as
- * Gulf days to Tetra Commission's /service/cs-report, the filters passed on.
+ * Gulf days to CS Portal's /service/cs-report, the filters passed on.
  *
- * And Pending → CS portal (GET /pending/cs): what waits on each CS, as Tetra
- * Commission's /service/cs-pending says, with the student link (2026-10-17).
+ * And Pending → CS portal (GET /pending/cs): what waits on each CS, as CS
+ * Portal's /service/cs-pending says, with the student link (2026-10-17).
  *
  * And Reports → CS portal → Student workflow (GET /portal-reports/cs/workflow and
- * /cs/workflow/students, 2026-10-20): the filters as Gulf days and ids to Tetra
- * Commission's /service/student-workflow, a box or stage checked, its being
+ * /cs/workflow/students, 2026-10-20): the filters as Gulf days and ids to CS
+ * Portal's /service/student-workflow, a box or stage checked, its being
  * down said plainly.
  *
  * Run through scripts/cses-check.sh. Scratch database on 127.0.0.1 only.
@@ -49,7 +49,7 @@ async function call(method: string, path: string, headers: Record<string, string
   return { status: r.status, body: await r.json().catch(() => ({})) };
 }
 
-// ── A stand-in Tetra Commission ──────────────────────────────────────────────
+// ── A stand-in CS Portal ──────────────────────────────────────────────
 const seen: { path: string; search: string; secret: string }[] = [];
 let oldServer = false, down = false;
 const figures = { students: 3, deposits: { count: 2, usd: 1400 }, commissionUsd: 50, followupsToday: 1, followupsOverdue: 1,
@@ -112,7 +112,7 @@ async function main() {
   await mongoose.connection.db!.dropDatabase();
   const { AdminUser } = await import("../models/AdminUser.js");
   const { Organization } = await import("../models/Organization.js");
-  await Organization.create({ code: "commission", kind: "commission", name: "Tetra Commission", timezone: "Asia/Dubai", currency: "USD", fxToBase: 1, isActive: true, sortOrder: 5, accent: "#0d9488" });
+  await Organization.create({ code: "commission", kind: "commission", name: "CS Portal", timezone: "Asia/Dubai", currency: "USD", fxToBase: 1, isActive: true, sortOrder: 5, accent: "#0d9488" });
   await AdminUser.create({ name: "Root E2E", email: "root@cses-e2e.test", password: PASSWORD, role: "root_admin", status: "active" });
   await AdminUser.create({ name: "Member E2E", email: "member@cses-e2e.test", password: PASSWORD, role: "member", status: "active" });
   const login = async (email: string) => (await (await fetch(`${ROOT}/auth/login`, {
@@ -121,22 +121,22 @@ async function main() {
   const root = { authorization: `Bearer ${await login("root@cses-e2e.test")}` };
   const member = { authorization: `Bearer ${await login("member@cses-e2e.test")}` };
 
-  step("Case 1 — happy path: the list and one CSE, as Tetra Commission says");
+  step("Case 1 — happy path: the list and one CSE, as CS Portal says");
   let r = await call("GET", "/cses?from=2026-10-01&to=2026-10-31", root);
   const row = r.body?.data?.rows?.[0];
   check("the list: Cee One with students, deposits, commission, dues, bonus, not onboarded", r.status === 200 && row?.name === "Cee One" && row.students === 3
     && row.deposits.usd === 1400 && row.commissionUsd === 50 && row.balance.amount.USD === 500 && row.bonus.clients === 1 && row.notOnboardedLate === 1, show(r.body));
-  check("…asked of Tetra Commission with its portal secret", seen.at(-1)?.path === "/commission/api/v1/service/cs-overview" && seen.at(-1)?.secret === "cses-e2e-commission-secret", show(seen.at(-1)));
-  check("…with each student's link into Tetra Commission", r.body?.data?.studentLink === "https://tetra.example.test/StudentDetail?id=", show(r.body?.data?.studentLink));
+  check("…asked of CS Portal with its portal secret", seen.at(-1)?.path === "/commission/api/v1/service/cs-overview" && seen.at(-1)?.secret === "cses-e2e-commission-secret", show(seen.at(-1)));
+  check("…with each student's link into CS Portal", r.body?.data?.studentLink === "https://tetra.example.test/StudentDetail?id=", show(r.body?.data?.studentLink));
   r = await call("GET", "/pending/cs", root);
-  check("Pending → CS portal: each CS's counts and the students, as Tetra Commission says", r.status === 200 && r.body?.data?.people?.[0]?.counts?.onboarding === 2
+  check("Pending → CS portal: each CS's counts and the students, as CS Portal says", r.status === 200 && r.body?.data?.people?.[0]?.counts?.onboarding === 2
     && r.body.data.items.onboarding[0].student === "Asha" && r.body.data.totals.total === 3, show(r.body));
   check("…asked of its /service/cs-pending with the portal secret, with the student link", seen.at(-1)?.path === "/commission/api/v1/service/cs-pending"
     && seen.at(-1)?.secret === "cses-e2e-commission-secret" && r.body?.data?.studentLink === "https://tetra.example.test/StudentDetail?id=", show(seen.at(-1)));
 
   r = await call("GET", "/portal-reports/cs?from=2026-09-30T20:00:00.000Z&to=2026-10-31T19:59:59.999Z&location=bangalore&team=6ac000000000000000000009&cs=nope", root);
   const rp = new URLSearchParams(seen.at(-1)?.search ?? "");
-  check("Reports → CS portal: Tetra Commission's report, with the student link", r.status === 200 && r.body?.data?.revenue?.total?.deposit_usd === 1500
+  check("Reports → CS portal: CS Portal's report, with the student link", r.status === 200 && r.body?.data?.revenue?.total?.deposit_usd === 1500
     && r.body.data.studentLink === "https://tetra.example.test/StudentDetail?id=" && seen.at(-1)?.path === "/commission/api/v1/service/cs-report", show(r.body));
   check("…the period as Gulf days, location and team passed, a bad cs id dropped", rp.get("period") === "custom" && rp.get("from") === "2026-10-01" && rp.get("to") === "2026-10-31"
     && rp.get("location") === "bangalore" && rp.get("team") === "6ac000000000000000000009" && !rp.has("cs"), seen.at(-1)?.search);
@@ -146,7 +146,7 @@ async function main() {
 
   r = await call("GET", "/portal-reports/cs/workflow?from=2026-09-30T20:00:00.000Z&to=2026-10-31T19:59:59.999Z&location=dubai&team=6ac000000000000000000009&cs=" + CS, root);
   let wp = new URLSearchParams(seen.at(-1)?.search ?? "");
-  check("Student workflow: Tetra Commission's totals, stages, sources, teams, people, with the student link", r.status === 200 && r.body?.data?.totals?.came === 300
+  check("Student workflow: CS Portal's totals, stages, sources, teams, people, with the student link", r.status === 200 && r.body?.data?.totals?.came === 300
     && r.body.data.totals.late === 13 && r.body.data.stages[0].stage === "No follow-up" && r.body.data.sources.length === 3 && r.body.data.people[0].name === "Cee One"
     && r.body.data.wait_hours === 6 && r.body.data.studentLink === "https://tetra.example.test/StudentDetail?id=", show(r.body));
   check("…asked of its /service/student-workflow with the portal secret", seen.at(-1)?.path === "/commission/api/v1/service/student-workflow"
@@ -167,7 +167,7 @@ async function main() {
 
   r = await call("GET", `/portal-reports/cs/workflow/students?from=2026-10-01&to=2026-10-31&location=bangalore&box=late&csId=${CS}`, root);
   wp = new URLSearchParams(seen.at(-1)?.search ?? "");
-  check("A box's students: Tetra Commission's list, with the student link", r.status === 200 && r.body?.data?.total === 1 && r.body.data.students[0].name === "Asha"
+  check("A box's students: CS Portal's list, with the student link", r.status === 200 && r.body?.data?.total === 1 && r.body.data.students[0].name === "Asha"
     && r.body.data.students[0].late === true && r.body.data.studentLink === "https://tetra.example.test/StudentDetail?id=", show(r.body));
   check("…asked of /service/student-workflow/students with the secret, the box, csId and filters passed on", seen.at(-1)?.path === "/commission/api/v1/service/student-workflow/students"
     && seen.at(-1)?.secret === "cses-e2e-commission-secret" && wp.get("box") === "late" && wp.get("csId") === CS && wp.get("location") === "bangalore"
@@ -193,7 +193,7 @@ async function main() {
 
   down = true;
   r = await call("GET", "/portal-reports/cs/workflow", root);
-  check("Tetra Commission down: 502 saying it could not be reached", r.status === 502 && /Tetra Commission could not be reached/.test(r.body?.message ?? ""), show(r.body));
+  check("CS Portal down: 502 saying it could not be reached", r.status === 502 && /CS Portal could not be reached/.test(r.body?.message ?? ""), show(r.body));
   r = await call("GET", "/portal-reports/cs/workflow/students?box=came", root);
   check("…for a box's students too", r.status === 502 && /could not be reached/.test(r.body?.message ?? ""), show(r.body));
   down = false;
@@ -210,7 +210,7 @@ async function main() {
   check("no period: none passed (all time)", seen.at(-1)?.search === "", show(seen.at(-1)));
   oldServer = true;
   r = await call("GET", "/cses", root);
-  check("a Tetra Commission from before this page: says its server needs updating", r.status === 409 && /needs updating/.test(r.body?.message ?? ""), show(r.body));
+  check("a CS Portal from before this page: says its server needs updating", r.status === 409 && /needs updating/.test(r.body?.message ?? ""), show(r.body));
   r = await call("GET", "/portal-reports/cs", root);
   check("…and the Reports tab says so too", r.status === 409 && /no CS report yet/.test(r.body?.message ?? ""), show(r.body));
   r = await call("GET", "/portal-reports/cs/workflow", root);
@@ -226,11 +226,11 @@ async function main() {
   check("from after to: 400", (await call("GET", "/cses?from=2026-10-31&to=2026-10-01", root)).status === 400);
   check("an id that is not one: 404, without asking", (await call("GET", "/cses/not-an-id", root)).status === 404);
   r = await call("GET", "/cses/6ac0000000000000000000ff", root);
-  check("a CSE Tetra Commission does not know: 404", r.status === 404 && /No such CSE/.test(r.body?.message ?? ""), show(r.body));
+  check("a CSE CS Portal does not know: 404", r.status === 404 && /No such CSE/.test(r.body?.message ?? ""), show(r.body));
 
-  step("Reports → Mentors (2026-10-24): Tetra Commission's Mentor Report");
+  step("Reports → Mentors (2026-10-24): CS Portal's Mentor Report");
   r = await call("GET", "/portal-reports/mentors?from=2026-10-20&to=2026-10-22", root);
-  check("every mentor, as Tetra Commission says", r.status === 200 && r.body?.data?.mentors?.[0]?.name === "Chief Ann" && r.body.data.mentors[0].total.commission_usd === 52.5
+  check("every mentor, as CS Portal says", r.status === 200 && r.body?.data?.mentors?.[0]?.name === "Chief Ann" && r.body.data.mentors[0].total.commission_usd === 52.5
     && r.body.data.everyone === true, show(r.body));
   check("…asked of its /service/mentor-report with the portal secret and the days", seen.at(-1)?.path === "/commission/api/v1/service/mentor-report"
     && seen.at(-1)?.secret === "cses-e2e-commission-secret" && seen.at(-1)?.search === "?from=2026-10-20&to=2026-10-22", show(seen.at(-1)));
@@ -247,11 +247,11 @@ async function main() {
   // What is behind each number (2026-10-27).
   r = await call("GET", `/portal-reports/mentors/details?kind=missed&from=2026-10-20&to=2026-10-22&mentorId=${"a".repeat(24)}&programId=${"b".repeat(24)}`, root);
   const dv = new URLSearchParams(seen.at(-1)?.search ?? "");
-  check("details: Tetra Commission's rows, the kind, dates, mentor and Program passed on", r.status === 200 && r.body?.data?.rows?.[0]?.title === "Gold"
+  check("details: CS Portal's rows, the kind, dates, mentor and Program passed on", r.status === 200 && r.body?.data?.rows?.[0]?.title === "Gold"
     && seen.at(-1)?.path === "/commission/api/v1/service/mentor-report/details" && dv.get("kind") === "missed" && dv.get("from") === "2026-10-20"
     && dv.get("mentorId") === "a".repeat(24) && dv.get("programId") === "b".repeat(24), show(seen.at(-1)));
   const before = seen.length;
-  check("details: a kind that isn't one, a bad mentor id, no dates — 400, Tetra Commission not asked",
+  check("details: a kind that isn't one, a bad mentor id, no dates — 400, CS Portal not asked",
     (await call("GET", "/portal-reports/mentors/details?kind=all&from=2026-10-20&to=2026-10-22", root)).status === 400
     && (await call("GET", "/portal-reports/mentors/details?kind=classes&from=2026-10-20&to=2026-10-22&mentorId=x", root)).status === 400
     && (await call("GET", "/portal-reports/mentors/details?kind=classes", root)).status === 400 && seen.length === before);
@@ -259,7 +259,7 @@ async function main() {
     && (await call("GET", "/portal-reports/mentors/details?kind=classes&from=2026-10-20&to=2026-10-22", member)).status === 403);
   oldServer = true;
   r = await call("GET", "/portal-reports/mentors?from=2026-10-20&to=2026-10-22", root);
-  check("Tetra Commission's server from before: 409, it needs updating", r.status === 409 && /needs updating — it has no mentors' report yet/.test(r.body?.message ?? ""), show(r.body));
+  check("CS Portal's server from before: 409, it needs updating", r.status === 409 && /needs updating — it has no mentors' report yet/.test(r.body?.message ?? ""), show(r.body));
   oldServer = false;
   check("root admins only: 401 with no session, 403 for a non-root admin", (await call("GET", "/portal-reports/mentors?from=2026-10-20&to=2026-10-22")).status === 401
     && (await call("GET", "/portal-reports/mentors?from=2026-10-20&to=2026-10-22", member)).status === 403

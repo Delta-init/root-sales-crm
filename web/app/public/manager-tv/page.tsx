@@ -7,7 +7,7 @@ import type { SalesTvData, SalesTvFetcher } from "@/lib/salesTv";
 /*
  * The open Manager TV (the user, 2026-10-23): the Sales TV with the CS team as a fourth card, for the office TVs —
  * no sign-in. Asks the backend's GET /public/manager-tv (names, teams, counts, amounts, photos — never an email)
- * every few seconds; the backend's caches decide how often the CRMs and Tetra Commission are actually asked.
+ * every few seconds; the backend's caches decide how often the CRMs and CS Portal are actually asked.
  */
 const fetchPublic: SalesTvFetcher = async (since) => {
   const qs = since ? `?since=${encodeURIComponent(since)}` : "";

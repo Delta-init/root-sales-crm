@@ -7,7 +7,7 @@ import { callTarget, httpError, resolveTarget } from "../lib/targetClient.js";
  * 3CX calls, every portal at once (the user, 2026-10-14): the "3CX calls" page
  * under Sales, and each person's calls on the Pending page.
  *
- *   - The Sales CRM (delta), Draw and Tetra Commission sync their calls from
+ *   - The Sales CRM (delta), Draw and CS Portal sync their calls from
  *     3CX and answer for themselves: GET /api/v1/service/calls with the portal
  *     secret Root already holds — their own Calls page's filters, totals and
  *     per-person table, each person with their email. Root does not copy their

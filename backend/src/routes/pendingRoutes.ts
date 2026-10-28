@@ -18,7 +18,7 @@ router.get("/", requireRole("root_admin"), overview);
 router.get("/calls", requireRole("root_admin"), byPerson);
 // Every sales CRM's enrolment workflow — where each unfinished close stands and whom it waits on (2026-10-14).
 router.get("/enrolments", requirePendingTab("enrolments"), enrolments);
-// What waits on each Tetra Commission CS, and which students — the CS portal tab (2026-10-17).
+// What waits on each CS Portal CS, and which students — the CS portal tab (2026-10-17).
 router.get("/cs", requirePendingTab("cs"), cs);
 // A tab per sales CRM: inactive leads, overdue reminders, not connected, lost and calls (2026-10-17) — the list cut to
 // the CRMs somebody was given.

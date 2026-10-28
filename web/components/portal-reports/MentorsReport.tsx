@@ -12,10 +12,10 @@ import { cn } from "@/lib/utils";
 import { BreakdownDialog, MeetingsTab, Opens, ProgramsTab, type Spec } from "@/components/portal-reports/MentorBreakdown";
 
 /**
- * Reports → Mentors (the user, 2026-10-24: "the mentors report, same as the commission portal's"): every mentor, day
+ * Reports → Mentors (the user, 2026-10-24: "the mentors report, same as the CS Portal's"): every mentor, day
  * by day — classes held and cancelled, students' bookings and how many cancelled, attended, missed, their 1:1
- * meetings and the reviews students left, from the LMS, with the commission Tetra Commission credited them (pool
- * shares included). Tetra Commission's own Mentor Report as a Super Admin sees it (GET /service/mentor-report);
+ * meetings and the reviews students left, from the LMS, with the commission CS Portal credited them (pool
+ * shares included). CS Portal's own Mentor Report as a Super Admin sees it (GET /service/mentor-report);
  * a row opens the mentor's days and reviews. Dubai days. Root admins only; read-only.
  */
 

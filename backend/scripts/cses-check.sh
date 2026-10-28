@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# End-to-end check of the CSEs pages' API: Root asks Tetra Commission (a
+# End-to-end check of the CSEs pages' API: Root asks CS Portal (a
 # stand-in, inside the check) for each CSE's figures, with its portal secret and
 # the period cut in Gulf time, and hands them on with a link to each student.
 # Stands up a throwaway mongod for the portal's own database; nothing touches a

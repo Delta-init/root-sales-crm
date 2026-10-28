@@ -20,7 +20,7 @@ const TABS = [
   { href: "/portal-reports/sales", label: "Sales" },
   { href: "/portal-reports/finance", label: "Finance" },
   { href: "/portal-reports/hrms", label: "HRMS" },
-  // Tetra Commission's Mentor Report: classes, bookings, meetings, reviews and commission per mentor (2026-10-24).
+  // CS Portal's Mentor Report: classes, bookings, meetings, reviews and commission per mentor (2026-10-24).
   { href: "/portal-reports/mentors", label: "Mentors" },
   { href: "/portal-reports/media", label: "Media ERP", soon: true },
 ];

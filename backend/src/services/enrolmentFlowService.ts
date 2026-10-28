@@ -10,7 +10,7 @@ import { callTarget, resolveTarget } from "../lib/targetClient.js";
  * at as its own My Enrolments shows it (finance approved → LMS account → CS
  * assigned → onboarded → MT5 bonus; Banglore only the first two), and whom that
  * waits on. Root adds them up per CRM and in all, and ranks who holds the most:
- * finance, the LMS, Tetra Commission's CS managers, each CS, the broker admins,
+ * finance, the LMS, CS Portal's CS managers, each CS, the broker admins,
  * each salesperson (a close sent back to them). Read only.
  */
 

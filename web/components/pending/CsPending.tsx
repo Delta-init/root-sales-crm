@@ -18,8 +18,8 @@ import { cn } from "@/lib/utils";
 import type { BonusStage, CsLocation, CsPending, CsPendingCounts, CsPendingWho } from "@/lib/types";
 
 /**
- * Pending → CS portal (the user, 2026-10-17): what waits on each Tetra
- * Commission CS, with a total card for each, and exactly which students —
+ * Pending → CS portal (the user, 2026-10-17): what waits on each CS
+ * Portal CS, with a total card for each, and exactly which students —
  *
  *   Onboarding    not onboarded yet; late = from finance, waiting 6 hours or more
  *   Bonus         MT5 bonuses not decided, and where each is stuck: sent back to
@@ -28,11 +28,11 @@ import type { BonusStage, CsLocation, CsPending, CsPendingCounts, CsPendingWho }
  *   Follow-ups    due today, and overdue
  *   Class calls   classes attended that still wait for the CS's call
  *
- * Tetra Commission counts them by its own sidebar's rules: a student is their
+ * CS Portal counts them by its own sidebar's rules: a student is their
  * CS's and any Common CS's, so a CS's figures can add up to more than the
  * team's, which counts each student once. Students with no CS yet have a row
  * of their own. Every figure opens the students behind it; a student opens in
- * Tetra Commission. Root admins only; nothing is changed.
+ * CS Portal. Root admins only; nothing is changed.
  */
 
 type Kind = "onboarding" | "bonus" | "tickets" | "followups" | "completions";
@@ -388,7 +388,7 @@ function ItemsDialog({ data, pick, loc, onClose }: { data: CsPending; pick: NonN
     const rows = mine(data.items.tickets);
     count = rows.length;
     about = data.tickets.available
-      ? "LMS Help & Support tickets still open, the longest quiet first. They are answered on the LMS or the student's page in Tetra Commission."
+      ? "LMS Help & Support tickets still open, the longest quiet first. They are answered on the LMS or the student's page in CS Portal."
       : `The LMS could not be asked — ${data.tickets.message ?? ""}`;
     const list = (xs: typeof rows) => table(["Student", "Ticket", "Last message", "Status"], xs.map((x) => ({
       key: x.ticketId,

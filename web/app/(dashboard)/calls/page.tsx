@@ -22,7 +22,7 @@ import { BreakdownDialog, Bars, BreakdownHint, cardButton } from "@/components/c
 
 /**
  * 3CX calls (the user, 2026-10-14): every call in every portal that has one —
- * the Sales CRM, Draw and Tetra Commission sync theirs from 3CX; Banglore's
+ * the Sales CRM, Draw and CS Portal sync theirs from 3CX; Banglore's
  * come from a phone call-recorder app — with the totals, everybody's figures
  * (one person's put together across portals by email), and each call with its
  * recording, played from the portal that has it on a link it signs for 10
@@ -110,7 +110,7 @@ export default function CallsPage() {
             <Phone className="h-6 w-6 text-primary" /> 3CX calls
           </h2>
           <p className="mt-1 max-w-3xl text-muted-foreground">
-            Every call in every portal — who took it, how long, and the recording. The Sales CRM, Draw and Tetra Commission from 3CX; Banglore from its call recorder.
+            Every call in every portal — who took it, how long, and the recording. The Sales CRM, Draw and CS Portal from 3CX; Banglore from its call recorder.
           </p>
         </div>
         <div className="flex items-center gap-2">

@@ -377,7 +377,7 @@ function CrmColumn({ crm, tv }: { crm: SalesTvCrm; tv: boolean }) {
 // ── The CS team: the Manager TV's fourth card ─────────────────────────────────
 
 /*
- * As Tetra Commission's CS leaderboard ranks them: the course payments each CS collected this month (approved by
+ * As CS Portal's CS leaderboard ranks them: the course payments each CS collected this month (approved by
  * finance, AED), today's, and how many. #, CS, month, today, payments.
  */
 const CS_COLS = "grid grid-cols-[clamp(1.7rem,1.9vw,2.9rem)_minmax(0,1fr)_minmax(0,clamp(3.6rem,4.2vw,6.2rem))_minmax(0,clamp(3rem,3.4vw,5rem))_minmax(0,clamp(1.9rem,2.1vw,3.1rem))] items-center whitespace-nowrap gap-x-[clamp(0.15rem,0.25vw,0.45rem)]";

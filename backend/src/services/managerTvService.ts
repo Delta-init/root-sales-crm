@@ -5,10 +5,10 @@ import { salesTv, type SalesTvOptions } from "./salesTvService.js";
  * Manager TV (the user, 2026-10-23): "same as the Sales TV, only a new card for the CS, exactly like the CS
  * leaderboard" — Dubai Sales, Draw and Remote as the Sales TV has them (salesTvService.ts, its own cache), with the
  * team leaders, Sales Managers and Super Admins the Sales TV hides (and no On break / Latest closes cards), and a
- * fourth card: the CS team, as Tetra Commission's own CS leaderboard / CS TV ranks it — each CS by the course
+ * fourth card: the CS team, as CS Portal's own CS leaderboard / CS TV ranks it — each CS by the course
  * payments they collected this month (approved, AED), with today's and how many, their HRMS photos and teams.
  *
- * The CS figures are Tetra Commission's open CS board (GET /api/public/cs-tv?location=dubai — the one behind its
+ * The CS figures are CS Portal's open CS board (GET /api/public/cs-tv?location=dubai — the one behind its
  * /cs/dubai TV link: names, teams and amounts, never a student or an email), asked at most every 20 seconds
  * however many screens there are. A course payment approved since the screen opened is announced like a sale
  * ("CS payment"): it joins the closes with crm "cs".
@@ -53,8 +53,8 @@ async function refreshCs(now: number): Promise<void> {
       const target = await resolveTarget(CODE);
       const res = await fetch(`${target.base}/api/public/cs-tv?location=${CS_LOCATION}`, { signal: controller.signal });
       const body = (await res.json().catch(() => ({}))) as CsAnswer & { error?: string; message?: string };
-      if (res.status === 404) throw new Error("Tetra Commission's server needs updating — it has no CS board yet");
-      if (!res.ok || !Array.isArray(body.cs)) throw new Error(body.error ?? body.message ?? `Tetra Commission answered ${res.status}`);
+      if (res.status === 404) throw new Error("CS Portal's server needs updating — it has no CS board yet");
+      if (!res.ok || !Array.isArray(body.cs)) throw new Error(body.error ?? body.message ?? `CS Portal answered ${res.status}`);
       state.data = body;
       state.at = Date.now();
       state.error = null;
@@ -62,7 +62,7 @@ async function refreshCs(now: number): Promise<void> {
       for (const p of body.recent ?? []) if (p?.id && !state.seen.has(p.id)) state.seen.set(p.id, { p, seenAt });
       for (const [id, s] of state.seen) if (Date.now() - Date.parse(s.p.at) > KEEP_MS) state.seen.delete(id);
     } catch (err) {
-      state.error = (err as Error)?.name === "AbortError" ? "Tetra Commission didn't answer in time" : (err as Error)?.message || "Tetra Commission can't be reached";
+      state.error = (err as Error)?.name === "AbortError" ? "CS Portal didn't answer in time" : (err as Error)?.message || "CS Portal can't be reached";
     } finally {
       clearTimeout(timer);
       state.inflight = null;

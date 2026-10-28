@@ -406,7 +406,7 @@ async function main() {
   for (const path of closed) if ((await call(path, people.maneesh!.auth)).status !== 403) leaked.push(path);
   check("…nothing else", leaked.length === 0, leaked.join(", "));
   g = await send("PATCH", `/access/${people.doney!.id}/reports`, { tabs: ["cs"] }, root);
-  check("Doney given the CS report: it opens, a Tetra Commission recording plays (not refused), Sales doesn't",
+  check("Doney given the CS report: it opens, a CS Portal recording plays (not refused), Sales doesn't",
     (await call("/portal-reports/cs", people.doney!.auth)).status !== 403 && (await call("/calls/commission/c1/recording-link", people.doney!.auth)).status !== 403
     && (await call("/portal-reports/sales", people.doney!.auth)).status === 403);
   check("Pending stays as given: Doney's Reports grant opens no Pending tab beyond the CS portal", (await call("/pending/hrms", people.doney!.auth)).status === 403);
