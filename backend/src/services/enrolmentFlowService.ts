@@ -75,9 +75,13 @@ export interface WaitingOn {
   portals: Record<string, number>;
 }
 
-/** Every sales CRM's workflow, and all of them together. A CRM that cannot answer says why and leaves the rest. */
-export async function enrolmentFlow() {
-  const crms = await Organization.find({ isActive: true, kind: "crm" }).select("code name accent sortOrder").sort({ sortOrder: 1 }).lean();
+/**
+ * Every sales CRM's workflow, and all of them together. A CRM that cannot answer says why and leaves the rest.
+ * `only`: just that CRM (its Pending → Sales tab, 2026-10-29).
+ */
+export async function enrolmentFlow(only?: string) {
+  const crms = await Organization.find({ isActive: true, kind: "crm", ...(only ? { code: only } : {}) })
+    .select("code name accent sortOrder").sort({ sortOrder: 1 }).lean();
   const answers = await Promise.all(crms.map(async (org) => {
     try {
       const target = await resolveTarget(org.code);

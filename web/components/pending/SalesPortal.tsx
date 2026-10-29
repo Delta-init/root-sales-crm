@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { AxiosError } from "axios";
-import { AlarmClock, AlertTriangle, BellRing, Inbox, Phone, PhoneOff, RefreshCw, Search, ThumbsDown } from "lucide-react";
+import { AlarmClock, AlertTriangle, BellRing, ChevronRight, Inbox, Phone, PhoneOff, RefreshCw, Search, ThumbsDown, Undo2, X } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,9 +16,11 @@ import { BreakdownDialog, Bars, type BarRow, type BreakdownTab } from "@/compone
 import { Recording } from "@/components/calls/Recording";
 import { api } from "@/lib/axios";
 import { PersonLink } from "@/components/pending/access";
+import { FlowBox, StepDots, STEP_LABEL, STEP_OWNER, STEPS, daysSince, whoLabel } from "@/components/pending/EnrolmentFlow";
+import { fmtMoney } from "@/lib/salesTv";
 import { cn } from "@/lib/utils";
 import { CALL_PERIODS, callLength, periodDays, talkTime, type CallPeriod } from "@/lib/calls";
-import type { SalesPending, SalesPendingCounts } from "@/lib/types";
+import type { FlowStep, SalesPending, SalesPendingCounts } from "@/lib/types";
 
 /**
  * One sales CRM's tab on Pending → Sales (the user, 2026-10-17): total cards and
@@ -29,15 +32,20 @@ import type { SalesPending, SalesPendingCounts } from "@/lib/types";
  *   Lost             leads marked lost in the period, and why (lost reasons)
  *   Calls            calls in the calls period, connected, talk time — each
  *                    call with its recording
+ *   Sent back        (2026-10-29) enrolments finance sent back, not sent again
+ *                    yet — the course, the fee and what came in, finance's reason
+ *
+ * And the CRM's enrolment workflow (2026-10-29): Pending → Enrolments' chart
+ * for this CRM alone, each unfinished close with its course and money.
  *
  * Every figure opens the leads or calls behind it. Root admins only; read-only.
  */
 
-type Kind = "inactive" | "reminders" | "notConnected" | "lost" | "calls";
+type Kind = "inactive" | "reminders" | "notConnected" | "lost" | "calls" | "sentBack";
 type Pick = { kind: Kind; person?: string; personName?: string; reason?: string } | null;
 const PERIODS: { key: CallPeriod; label: string }[] = CALL_PERIODS.map((p) => ({ key: p.key, label: p.label }));
 const KIND_LABEL: Record<Kind, string> = {
-  inactive: "Inactive leads", reminders: "Reminders overdue", notConnected: "Not connected", lost: "Lost", calls: "Calls",
+  inactive: "Inactive leads", reminders: "Reminders overdue", notConnected: "Not connected", lost: "Lost", calls: "Calls", sentBack: "Sent back",
 };
 
 /** "not_interested" → "Not interested"; none given says so. */
@@ -60,7 +68,10 @@ const ago = (iso: string) => {
 const waited = (min: number) => (min < 60 ? `${min} m` : `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, "0")} m`);
 const periodText = (p: { from: string; to: string }) => (p.from === p.to ? p.from : `${p.from} → ${p.to}`);
 const countOf = (c: SalesPendingCounts, kind: Kind) =>
-  kind === "inactive" ? c.inactive : kind === "reminders" ? c.reminders_overdue : kind === "notConnected" ? c.not_connected : kind === "lost" ? c.lost : c.calls;
+  kind === "inactive" ? c.inactive : kind === "reminders" ? c.reminders_overdue : kind === "notConnected" ? c.not_connected : kind === "lost" ? c.lost
+    : kind === "sentBack" ? c.sent_back ?? 0 : c.calls;
+/** "AED 4,500 · INR 50,000" — each currency apart, never added together. */
+const amounts = (m: Record<string, number> | undefined) => Object.entries(m ?? {}).filter(([, n]) => n).map(([cur, n]) => fmtMoney(n, cur)).join(" · ");
 
 export function SalesPortalView({ code }: { code: string }) {
   const [period, setPeriod] = useState<CallPeriod>("month");
@@ -105,7 +116,7 @@ export function SalesPortalView({ code }: { code: string }) {
     return (
       <div className="space-y-4">
         {toolbar}
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">{[0, 1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-32 w-full rounded-2xl" />)}</div>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-7">{[0, 1, 2, 3, 4, 5, 6].map((i) => <Skeleton key={i} className="h-32 w-full rounded-2xl" />)}</div>
         <Skeleton className="h-96 w-full" />
       </div>
     );
@@ -140,8 +151,8 @@ export function SalesPortalView({ code }: { code: string }) {
     <div className="space-y-6">
       {toolbar}
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
-        <CseStatCard icon={Inbox} title="Total pending" value={String(t.total)} hint="inactive + reminders + not connected + lost" />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-7">
+        <CseStatCard icon={Inbox} title="Total pending" value={String(t.total)} hint="inactive + reminders + not connected + lost + sent back" />
         <CseStatCard icon={AlarmClock} accent="amber" title="Inactive leads" onClick={data.inactive.available ? () => setPick({ kind: "inactive" }) : undefined}
           value={data.inactive.available ? String(t.inactive) : "—"} hint={inactiveHint} alert={data.inactive.supported && !data.inactive.available} delay={0.05} />
         <CseStatCard icon={BellRing} accent="rose" title="Reminders overdue" onClick={() => setPick({ kind: "reminders" })} value={String(t.reminders_overdue)}
@@ -152,7 +163,14 @@ export function SalesPortalView({ code }: { code: string }) {
           hint={topReason ? `most: ${reasonLabel(topReason.reason)} (${topReason.count})` : `marked ${periodText(data.period)}`} delay={0.2} />
         <CseStatCard icon={Phone} accent="cyan" title="Calls" onClick={data.calls.available ? () => setPick({ kind: "calls" }) : undefined}
           value={data.calls.available ? String(t.calls) : "—"} hint={callsHint} alert={data.calls.supported && !data.calls.available} delay={0.25} />
+        <CseStatCard icon={Undo2} accent="amber" title="Sent back" onClick={data.sentBack?.available ? () => setPick({ kind: "sentBack" }) : undefined}
+          value={data.sentBack?.available ? String(t.sent_back ?? 0) : "—"}
+          hint={!data.sentBack ? "Root's server needs updating" : !data.sentBack.available ? data.sentBack.error || "could not be read"
+            : t.sent_back ? `${amounts(data.sentBack.amount)} · with the salesperson to correct` : "nothing sent back by finance"}
+          alert={(t.sent_back ?? 0) > 0} delay={0.3} />
       </div>
+
+      {data.workflow && <SalesWorkflow data={data} />}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="min-w-0 lg:col-span-1">
@@ -188,6 +206,7 @@ export function SalesPortalView({ code }: { code: string }) {
                       <th className="pb-2 pr-3 text-right font-medium">Reminders</th>
                       <th className="pb-2 pr-3 text-right font-medium">Not connected</th>
                       <th className="pb-2 pr-3 text-right font-medium">Lost</th>
+                      <th className="whitespace-nowrap pb-2 pr-3 text-right font-medium">Sent back</th>
                       <th className="pb-2 pr-3 text-right font-medium">Total</th>
                       <th className="whitespace-nowrap border-l border-border/40 pb-2 pl-3 pr-3 text-right font-medium">Calls</th>
                       <th className="pb-2 text-right font-medium">Talk</th>
@@ -214,6 +233,7 @@ export function SalesPortalView({ code }: { code: string }) {
                           <td className="py-2.5 pr-3 text-right tabular-nums">{cell("reminders")}</td>
                           <td className="py-2.5 pr-3 text-right tabular-nums">{cell("notConnected")}</td>
                           <td className="py-2.5 pr-3 text-right tabular-nums">{cell("lost")}</td>
+                          <td className="py-2.5 pr-3 text-right tabular-nums">{cell("sentBack")}</td>
                           <td className="py-2.5 pr-3 text-right font-semibold tabular-nums">{p.total || <span className="font-normal text-muted-foreground/60">—</span>}</td>
                           <td className="border-l border-border/40 py-2.5 pl-3 pr-3 text-right tabular-nums">
                             {cell("calls", p.counts.connected ? <span className="ml-1 text-xs text-muted-foreground">({p.counts.connected} conn.)</span> : null)}
@@ -228,6 +248,7 @@ export function SalesPortalView({ code }: { code: string }) {
             )}
             <p className="mt-3 text-xs text-muted-foreground">
               Lost and not connected are counted against the lead&apos;s owner, by when it was marked. Reminders against whoever set them.
+              Sent back against whoever closed it, until it is sent to finance again.
               {data.calls.kind === "recorder" ? " Calls come from the phone call-recorder app, which does not say who made them — only the total." : ""}
               {data.calls.unlinked ? ` ${data.calls.unlinked} calls were taken by extensions not linked to anyone here.` : ""}
             </p>
@@ -354,6 +375,37 @@ function ItemsDialog({ data, pick, onClose }: { data: SalesPending; pick: NonNul
       tabs.push({ key: "reason", label: "By reason", content: <Bars rows={Array.from(reasons).map(([r, n]) => ({ key: r, label: reasonLabel(r), value: n }))} empty="Nothing lost." /> });
     }
     if (ownerCol) tabs.push({ key: "person", label: "By person", content: <Bars rows={byPerson(rows)} empty="Nobody." /> });
+  } else if (pick.kind === "sentBack") {
+    const rows = mine(data.items.sentBack ?? []);
+    count = rows.length;
+    about = "Enrolments finance sent back to correct and not sent again yet, the longest waiting first — the course, the fee and what came in, and finance's reason.";
+    const stepsOf = new Map((data.workflow?.open ?? []).map((x) => [x.id, x.steps]));
+    tabs.push({ key: "list", label: `Enrolments · ${rows.length}`, content: table(["Client", "Course", "Amount", "Finance's reason", "Sent back", ...(ownerCol ? ["Closed by"] : [])], rows.map((x) => ({
+      key: x.studentId,
+      cells: [
+        <div key="c" className="min-w-0"><div className="font-medium">{x.client}</div>
+          <div className="text-xs text-muted-foreground">{[x.enrollmentNumber, x.phone, x.academy === "bangalore" ? "Bangalore" : ""].filter(Boolean).join(" · ")}</div>
+          {stepsOf.get(x.studentId) && <div className="mt-1"><StepDots steps={stepsOf.get(x.studentId)!} /></div>}</div>,
+        x.course || <span key="n" className="text-muted-foreground/60">—</span>,
+        <div key="a" className="whitespace-nowrap tabular-nums"><div className="font-medium">{fmtMoney(x.fee, x.currency)}</div>
+          <div className="text-xs text-muted-foreground">{fmtMoney(x.collected, x.currency)} in{x.balance > 0 ? ` · ${fmtMoney(x.balance, x.currency)} due` : ""}</div></div>,
+        <div key="r" className="max-w-[260px] text-xs">{x.reason || <span className="text-muted-foreground">No reason given</span>}</div>,
+        <div key="s" className="whitespace-nowrap text-xs">{x.returnedAt ? <>{when(x.returnedAt)}<div className="text-rose-500">{ago(x.returnedAt)} waiting</div></> : "—"}
+          {x.resends > 0 && <div className="text-muted-foreground">sent again {x.resends}× before</div>}</div>,
+        ...(ownerCol ? [<div key="o">{x.owner}{x.team ? <div className="text-xs text-muted-foreground">{x.team}</div> : null}</div>] : []),
+      ],
+    })), "Nothing sent back.") });
+    const groups = (keyOf: (x: typeof rows[number]) => string) => {
+      const m = new Map<string, { n: number; money: Record<string, number> }>();
+      for (const x of rows) {
+        const g = m.get(keyOf(x)) ?? { n: 0, money: {} };
+        g.n++; g.money[x.currency] = (g.money[x.currency] ?? 0) + x.fee;
+        m.set(keyOf(x), g);
+      }
+      return Array.from(m).map(([k, g]) => ({ key: k, label: k, value: g.n, sub: amounts(g.money) }));
+    };
+    if (ownerCol) tabs.push({ key: "person", label: "By person", content: <Bars rows={groups((x) => x.owner || "Nobody")} empty="Nobody." /> });
+    tabs.push({ key: "course", label: "By course", content: <Bars rows={groups((x) => x.course || "No course")} empty="Nothing." /> });
   } else {
     const rows = data.calls.list.filter((x) => !pick.person || x.personId === pick.person);
     count = pick.person ? countOf(data.people.find((p) => p.id === pick.person)?.counts ?? ({} as SalesPendingCounts), "calls") : data.totals.calls;
@@ -376,5 +428,106 @@ function ItemsDialog({ data, pick, onClose }: { data: SalesPending; pick: NonNul
   return (
     <BreakdownDialog open onClose={onClose} description={about} tabs={tabs}
       title={`${data.name} · ${pick.personName ? `${pick.personName} · ` : ""}${KIND_LABEL[pick.kind]}${pick.reason ? ` · ${reasonLabel(pick.reason)}` : ""} · ${count}`} />
+  );
+}
+
+/** This CRM's enrolment workflow — Pending → Enrolments' chart for it alone — and the closes behind each step. */
+function SalesWorkflow({ data }: { data: SalesPending }) {
+  const [step, setStep] = useState<FlowStep | null>(null);
+  const wf = data.workflow!;
+  if (!wf.available || !wf.counts) {
+    return (
+      <Card className="border-amber-500/40 bg-amber-500/5">
+        <CardContent className="flex gap-3 pt-6 text-sm">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+          <span className="text-muted-foreground">The enrolment workflow could not be read — {wf.error || "no answer"}.</span>
+        </CardContent>
+      </Card>
+    );
+  }
+  const counts = wf.counts;
+  // Banglore's closes go only as far as the LMS.
+  const steps = data.code === "banglore" ? STEPS.slice(0, 2) : STEPS;
+  const atStep = (k: FlowStep) => counts.atStep[k].waiting + counts.atStep[k].failed;
+  const biggest = steps.reduce<FlowStep | null>((best, k) => (atStep(k) > (best ? atStep(best) : 0) ? k : best), null);
+  const shown = wf.open.filter((c) => !step || c.stage === step);
+  const money: Record<string, number> = {};
+  for (const c of shown) money[c.currency] = (money[c.currency] ?? 0) + c.fee;
+
+  return (
+    <Card className="min-w-0">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Enrolment workflow · {counts.open} unfinished</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Every close handed to finance, where it stands now — pick a step for its enrolments.
+          {!wf.financeAnswered && " Finance could not be asked just now, so steps after the close show as unknown."}
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-stretch gap-2">
+          <FlowBox title="Closed" value={counts.total} hint="handed to finance" tone="muted" />
+          {steps.map((k) => (
+            <Fragment key={k}>
+              <ChevronRight className="hidden h-5 w-5 self-center text-muted-foreground sm:block" />
+              <FlowBox title={STEP_LABEL[k]} value={atStep(k)} hint={`on ${STEP_OWNER[k]}`} failed={counts.atStep[k].failed}
+                failedLabel={k === "finance" ? "sent back / refused" : k === "bonus" ? "turned down" : "failed"}
+                tone={k === biggest && atStep(k) > 0 ? "hot" : atStep(k) ? "warm" : "muted"}
+                active={step === k} onClick={() => setStep(step === k ? null : k)} />
+            </Fragment>
+          ))}
+          <ChevronRight className="hidden h-5 w-5 self-center text-muted-foreground sm:block" />
+          <FlowBox title="Done" value={counts.finished} hint="every step finished" tone="done" icon />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="font-medium">{step ? STEP_LABEL[step] : "Unfinished enrolments"} · {shown.length}</span>
+          {shown.length > 0 && <span className="text-xs text-muted-foreground">{amounts(money)}</span>}
+          {step && <Badge variant="outline" className="gap-1">{STEP_LABEL[step]}<button type="button" onClick={() => setStep(null)} aria-label="All steps"><X className="h-3 w-3" /></button></Badge>}
+        </div>
+        {shown.length === 0 ? <p className="py-4 text-center text-sm text-muted-foreground">None.</p> : (
+          <div className="max-h-[420px] overflow-auto">
+            <table className="w-full min-w-[900px] text-sm">
+              <thead className="sticky top-0 bg-card">
+                <tr className="border-b border-border/40 text-left text-xs text-muted-foreground">
+                  <th className="pb-2 pr-3 font-medium">Student</th>
+                  <th className="pb-2 pr-3 font-medium">Course</th>
+                  <th className="pb-2 pr-3 font-medium">Amount</th>
+                  <th className="pb-2 pr-3 font-medium">Closed by</th>
+                  <th className="pb-2 pr-3 font-medium">Steps</th>
+                  <th className="pb-2 pr-3 font-medium">Stands at</th>
+                  <th className="pb-2 pr-3 font-medium">Waiting on</th>
+                  <th className="pb-2 text-right font-medium">Since</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((c) => (
+                  <tr key={c.id} className="border-b border-border/20 align-top last:border-0">
+                    <td className="py-2 pr-3">
+                      <div className="font-medium">{c.name || "—"}</div>
+                      <div className="text-xs text-muted-foreground">{[c.enrollmentNumber, c.invoiceNumber].filter(Boolean).join(" · ")}</div>
+                    </td>
+                    <td className="py-2 pr-3">{c.course || <span className="text-muted-foreground/60">—</span>}</td>
+                    <td className="whitespace-nowrap py-2 pr-3 tabular-nums">
+                      <div className="font-medium">{fmtMoney(c.fee, c.currency)}</div>
+                      <div className="text-xs text-muted-foreground">{fmtMoney(c.collected, c.currency)} in{c.balance > 0 ? ` · ${fmtMoney(c.balance, c.currency)} due` : ""}</div>
+                    </td>
+                    <td className="py-2 pr-3">{c.closedBy.name || "—"}{c.team ? <div className="text-xs text-muted-foreground">{c.team}</div> : null}</td>
+                    <td className="py-2 pr-3"><StepDots steps={c.steps} /></td>
+                    <td className="py-2 pr-3">
+                      <Badge variant="outline" className={cn("py-0 text-[11px]", c.stageState === "failed" ? "border-rose-500/40 text-rose-500" : "border-amber-500/40 text-amber-500")}>
+                        {STEP_LABEL[c.stage]}
+                      </Badge>
+                      {c.detail && <div className="mt-0.5 max-w-[260px] text-xs text-muted-foreground">{c.detail}</div>}
+                    </td>
+                    <td className="py-2 pr-3 text-xs">{whoLabel(c.waitingOn)}</td>
+                    <td className="whitespace-nowrap py-2 text-right text-xs tabular-nums text-muted-foreground">{daysSince(c.since || c.closedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

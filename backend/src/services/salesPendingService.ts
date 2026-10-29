@@ -4,6 +4,7 @@ import { getSources } from "./crmConnections.js";
 import { resolveTarget, callTarget } from "../lib/targetClient.js";
 import { targetConfig } from "../config/targets.js";
 import { CALL_PORTALS, callsOverview, dubaiToday, periodOf } from "./callsService.js";
+import { enrolmentFlow, type FlowClose } from "./enrolmentFlowService.js";
 
 /*
  * Pending → Sales, a tab per sales CRM (the user, 2026-10-17): for each
@@ -20,6 +21,14 @@ import { CALL_PORTALS, callsOverview, dubaiToday, periodOf } from "./callsServic
  *                  and each call with its recording (Root's 3CX calls) — the
  *                  Sales CRM and Draw by person; Banglore's recorder only in
  *                  total; Remote has no calls.
+ *   sent back      (2026-10-29) enrolments finance sent back that are not sent
+ *                  again yet — the CRM's own record of finance's answer
+ *                  (financehandovers.approvalState "returned", with the reason),
+ *                  against the closer, with the course and the money. Not in a
+ *                  period: every one still waiting.
+ *
+ * And the CRM's enrolment workflow (2026-10-29), as Pending → Enrolments draws
+ * it for this CRM alone, each unfinished close with its fee and what came in.
  *
  * "Marked" is when the lead's status last changed to it (its activity log),
  * else when the lead was last updated. Read from the CRM's database as the rest
@@ -38,9 +47,13 @@ const monthStart = () => `${dubaiToday().slice(0, 7)}-01`;
 export interface SalesCounts {
   inactive: number; reminders_overdue: number; not_connected: number; lost: number;
   calls: number; connected: number; talkSeconds: number;
+  sent_back: number;
 }
-const blank = (): SalesCounts => ({ inactive: 0, reminders_overdue: 0, not_connected: 0, lost: 0, calls: 0, connected: 0, talkSeconds: 0 });
-const pendingTotal = (c: SalesCounts) => c.inactive + c.reminders_overdue + c.not_connected + c.lost;
+const blank = (): SalesCounts => ({ inactive: 0, reminders_overdue: 0, not_connected: 0, lost: 0, calls: 0, connected: 0, talkSeconds: 0, sent_back: 0 });
+const pendingTotal = (c: SalesCounts) => c.inactive + c.reminders_overdue + c.not_connected + c.lost + c.sent_back;
+const oidOf = (v: unknown) => (/^[a-f0-9]{24}$/i.test(String(v ?? "")) ? new Types.ObjectId(String(v)) : null);
+const isoOf = (v: unknown) => (v ? new Date(v as string).toISOString() : "");
+const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
 const httpError = (message: string, statusCode: number) => Object.assign(new Error(message), { statusCode });
 
@@ -85,7 +98,7 @@ export async function salesPending(code: string, q: { from?: unknown; to?: unkno
   if (!src) throw httpError(failures.find((f) => f.code === code)?.error ?? `${org.name} could not be read`, 409);
   const leads = src.conn.collection("leads");
 
-  const [overdue, closedOut, inactive, calls] = await Promise.all([
+  const [overdue, closedOut, inactive, calls, returned, flow] = await Promise.all([
     leads.aggregate<Lead>([
       { $match: { reminders: { $elemMatch: { isDone: { $ne: true }, remindAt: { $lt: now } } } } },
       { $unwind: "$reminders" },
@@ -110,7 +123,42 @@ export async function salesPending(code: string, q: { from?: unknown; to?: unkno
         })
         .catch((e) => ({ available: false as const, kind: CALL_PORTALS[code]!, error: e instanceof Error ? e.message : "Could not be read", data: null }))
       : Promise.resolve(null),
+    // Sent back and not sent again: sending it again sets it back to "pending".
+    src.conn.collection("financehandovers").find({ approvalState: "returned" },
+      { projection: { studentId: 1, returnedReason: 1, returnedAt: 1, resends: 1, resentAt: 1, invoiceNumber: 1 }, maxTimeMS: QUERY_MS }).toArray()
+      .then((rows) => ({ available: true, error: "", rows: rows as Lead[] }))
+      .catch((e) => ({ available: false, error: e instanceof Error ? e.message : "Could not be read", rows: [] as Lead[] })),
+    // The CRM's own enrolment workflow; this tab still shows the rest when it can't be had.
+    enrolmentFlow(code)
+      .then((f) => ({ ...f, error: "" }))
+      .catch((e) => ({ portals: [], open: [] as FlowClose[], error: e instanceof Error ? e.message : "Could not be read" })),
   ]);
+
+  // The enrolments behind both, with their money, course and closer — one read.
+  const flowPortal = flow.portals[0];
+  const flowOpen = flowPortal?.available ? flow.open : [];
+  const enrolIds = [...returned.rows.map((h) => oidOf(h.studentId)), ...flowOpen.map((x) => oidOf(x.id))].filter((x): x is Types.ObjectId => !!x);
+  const students = enrolIds.length
+    ? await src.conn.collection("students").find({ _id: { $in: enrolIds } }, {
+      projection: { name: 1, phone: 1, enrollmentNumber: 1, course: 1, courses: 1, academy: 1, totalFee: 1, paidAmount: 1, pendingAmount: 1, assignedTo: 1, team: 1, enrollmentDate: 1 },
+      maxTimeMS: QUERY_MS,
+    }).toArray()
+    : [];
+  const studentById = new Map(students.map((x) => [String(x._id), x as Lead]));
+  const courseIds = students.flatMap((x) => [x.course, ...(Array.isArray(x.courses) ? x.courses : [])]).map(oidOf).filter((x): x is Types.ObjectId => !!x);
+  const teamIds = students.map((x) => oidOf(x.team)).filter((x): x is Types.ObjectId => !!x);
+  const [courseDocs, teamDocs] = await Promise.all([
+    courseIds.length ? src.conn.collection("courses").find({ _id: { $in: courseIds } }, { projection: { name: 1 }, maxTimeMS: QUERY_MS }).toArray() : [],
+    teamIds.length ? src.conn.collection("teams").find({ _id: { $in: teamIds } }, { projection: { name: 1 }, maxTimeMS: QUERY_MS }).toArray() : [],
+  ]);
+  const courseName = new Map(courseDocs.map((x) => [String(x._id), String(x.name ?? "")]));
+  const teamName = new Map(teamDocs.map((x) => [String(x._id), String(x.name ?? "")]));
+  // The Banglore CRM is in rupees; elsewhere a Bangalore-academy close is kept in rupees too.
+  const currencyOf = (x: Lead | undefined) => ((org as { currency?: string }).currency === "INR" || x?.academy === "bangalore" ? "INR" : "AED");
+  const money = (x: Lead | undefined) => ({
+    currency: currencyOf(x), fee: num(x?.totalFee), collected: num(x?.paidAmount),
+    balance: x?.pendingAmount != null ? num(x.pendingAmount) : Math.max(0, num(x?.totalFee) - num(x?.paidAmount)),
+  });
 
   // Lost / not connected marked inside the period.
   const marked = closedOut.map((l) => ({ l, m: markedOf(l, String(l.status)) }))
@@ -120,6 +168,7 @@ export async function salesPending(code: string, q: { from?: unknown; to?: unkno
   const ids = new Set<string>();
   for (const r of overdue) ids.add(String(r.reminder?.createdBy ?? ""));
   for (const { l, m } of marked) { ids.add(String(l.assignedTo ?? "")); if (m.by) ids.add(m.by); }
+  for (const h of returned.rows) ids.add(String(studentById.get(String(h.studentId))?.assignedTo ?? ""));
   const oids = [...ids].filter((id) => /^[a-f0-9]{24}$/i.test(id)).map((id) => new Types.ObjectId(id));
   const users = await src.conn.collection("users").find(
     { $or: [{ _id: { $in: oids } }, { status: { $ne: "inactive" } }] },
@@ -170,6 +219,26 @@ export async function salesPending(code: string, q: { from?: unknown; to?: unkno
     };
   });
 
+  // Sent back, the longest waiting first, against whoever closed it. An enrolment since deleted is left out.
+  const sentBack = returned.rows
+    .map((h) => ({ h, x: studentById.get(String(h.studentId)) }))
+    .filter((r): r is { h: Lead; x: Lead } => !!r.x)
+    .map(({ h, x }) => {
+      const owner = String(x.assignedTo ?? "");
+      c(owner).sent_back++; totals.sent_back++;
+      const names = [x.course, ...(Array.isArray(x.courses) ? x.courses : [])].map((id) => courseName.get(String(id ?? "")) ?? "").filter(Boolean);
+      return {
+        studentId: String(x._id), client: String(x.name ?? "") || "No name", phone: String(x.phone ?? ""), enrollmentNumber: String(x.enrollmentNumber ?? ""),
+        course: [...new Set(names)].join(", "), academy: x.academy === "bangalore" ? "bangalore" : "dubai", ...money(x),
+        ownerId: owner, owner: nameOf(owner), team: teamName.get(String(x.team ?? "")) ?? "",
+        reason: String(h.returnedReason ?? ""), returnedAt: isoOf(h.returnedAt), closedAt: isoOf(x.enrollmentDate),
+        invoiceNumber: String(h.invoiceNumber ?? ""), resends: num(h.resends), resentAt: isoOf(h.resentAt),
+      };
+    })
+    .sort((a, b) => (a.returnedAt || "9").localeCompare(b.returnedAt || "9"));
+  const sentBackAmount: Record<string, number> = {};
+  for (const x of sentBack) sentBackAmount[x.currency] = (sentBackAmount[x.currency] ?? 0) + x.fee;
+
   // Calls by person: the CRM's own user id where it is one, else by email.
   let unlinkedCalls = 0;
   if (calls?.data) {
@@ -207,7 +276,12 @@ export async function salesPending(code: string, q: { from?: unknown; to?: unkno
           list: (calls.data?.calls ?? []).map((x) => ({ ...x, personId: (userById.has(x.person) ? x.person : idByEmail.get(x.personEmail) ?? "") })),
           total: calls.data?.total ?? 0 }
       : { supported: false, kind: null, available: false, error: "", unlinked: 0, list: [], total: 0 },
-    items: { inactive: inactiveRows, reminders: reminderRows, notConnected, lost },
+    sentBack: { available: returned.available, error: returned.error, amount: sentBackAmount },
+    workflow: flowPortal
+      ? { available: flowPortal.available, error: flowPortal.error, financeAnswered: flowPortal.financeAnswered, counts: flowPortal.counts,
+          open: flowOpen.map((x) => ({ ...x, ...money(studentById.get(x.id)) })) }
+      : { available: false, error: flow.error || "Could not be read", financeAnswered: false, counts: null, open: [] },
+    items: { inactive: inactiveRows, reminders: reminderRows, notConnected, lost, sentBack },
   };
 }
 

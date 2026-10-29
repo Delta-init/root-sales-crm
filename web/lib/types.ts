@@ -1028,6 +1028,15 @@ export interface SalesPortalInfo { code: string; name: string; accent: string; c
 export interface SalesPendingCounts {
   inactive: number; reminders_overdue: number; not_connected: number; lost: number;
   calls: number; connected: number; talkSeconds: number;
+  /** Enrolments finance sent back, not sent again yet, against the closer (2026-10-29). */
+  sent_back: number;
+}
+/** An enrolment's money, in its own currency: AED, or INR for Banglore and Bangalore-academy closes. */
+export interface EnrolmentMoney { currency: string; fee: number; collected: number; balance: number }
+export interface SalesSentBack extends EnrolmentMoney {
+  studentId: string; client: string; phone: string; enrollmentNumber: string; course: string; academy: "dubai" | "bangalore";
+  ownerId: string; owner: string; team: string; reason: string; returnedAt: string; closedAt: string;
+  invoiceNumber: string; resends: number; resentAt: string;
 }
 interface SalesLeadRef { leadId: string; lead: string; phone: string; source: string; ownerId: string; owner: string }
 export interface SalesPending {
@@ -1040,11 +1049,15 @@ export interface SalesPending {
   inactive: { supported: boolean; available: boolean; error: string; capped: boolean; limitMinutes: number };
   calls: { supported: boolean; kind: "3cx" | "recorder" | null; available: boolean; error: string; unlinked: number; total: number;
     list: (CallRow & { personId: string })[] };
+  /** Older Root servers send neither. */
+  sentBack?: { available: boolean; error: string; amount: Record<string, number> };
+  workflow?: { available: boolean; error: string; financeAnswered: boolean; counts: FlowCounts | null; open: (FlowClose & EnrolmentMoney)[] };
   items: {
     inactive: (SalesLeadRef & { team: string; assignedAt: string; waitingMinutes: number; moves: number; calls: { total: number; answered: number } | null })[];
     reminders: (SalesLeadRef & { status: string; title: string; note: string; remindAt: string })[];
     notConnected: (SalesLeadRef & { markedAt: string; markedBy: string })[];
     lost: (SalesLeadRef & { markedAt: string; markedBy: string; reason: string; notes: string })[];
+    sentBack?: SalesSentBack[];
   };
 }
 

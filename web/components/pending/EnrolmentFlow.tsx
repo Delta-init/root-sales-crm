@@ -23,7 +23,7 @@ export const STEP_LABEL: Record<FlowStep, string> = {
   onboarded: "Onboarded",
   bonus: "MT5 bonus",
 };
-const STEP_OWNER: Record<FlowStep, string> = {
+export const STEP_OWNER: Record<FlowStep, string> = {
   finance: "accounts · sent back: the salesperson",
   lms: "the LMS",
   cs: "CS Portal's CS managers",
@@ -39,9 +39,9 @@ export const ROLE_LABEL: Record<FlowRole, string> = {
   broker_admin: "Broker admins — the MT5 bonus",
   tetra: "CS Portal — on its way, or no answer",
 };
-const STEPS: FlowStep[] = ["finance", "lms", "cs", "onboarded", "bonus"];
+export const STEPS: FlowStep[] = ["finance", "lms", "cs", "onboarded", "bonus"];
 
-const daysSince = (iso: string) => {
+export const daysSince = (iso: string) => {
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return "";
   const d = Math.floor((Date.now() - t) / 86_400_000);
@@ -206,7 +206,7 @@ export function EnrolmentFlowView({ flow }: { flow: Flow }) {
   );
 }
 
-function FlowBox({ title, value, hint, failed = 0, failedLabel, tone, active, onClick, icon }: {
+export function FlowBox({ title, value, hint, failed = 0, failedLabel, tone, active, onClick, icon }: {
   title: string; value: number; hint: string; failed?: number; failedLabel?: string;
   tone: "muted" | "warm" | "hot" | "done"; active?: boolean; onClick?: () => void; icon?: boolean;
 }) {
@@ -249,7 +249,7 @@ function WhoBar({ w, max, active, onClick }: { w: FlowWaitingOn; max: number; ac
 }
 
 /** The five steps as dots: green done, amber waiting, red failed, grey not needed or unknown. */
-function StepDots({ steps }: { steps: FlowClose["steps"] }) {
+export function StepDots({ steps }: { steps: FlowClose["steps"] }) {
   return (
     <span className="flex items-center gap-1">
       {steps.map((s) => (

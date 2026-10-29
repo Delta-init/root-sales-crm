@@ -10,6 +10,9 @@
  *   Case 4  permission   no session, an admin who is not a root admin
  *   Case 5  access       Pending tabs given per person (2026-10-24): each sees only theirs, root admins all
  *
+ * And (2026-10-29) the enrolments finance sent back, with course and money, and the CRM's enrolment workflow
+ * with each close's money: rupees for a Bangalore close, a deleted enrolment left out, an old CRM server.
+ *
  * And the HRMS and Media ERP tabs (2026-10-17): /pending/hrms and /pending/media,
  * as each portal's hrms-watch / media-watch says, and their old servers. And
  * Reports → Finance (/portal-reports/finance → finance's finance-report): the
@@ -57,11 +60,13 @@ const dayOf = (n: number) => new Date(Date.parse(`${today}T00:00:00Z`) + n * 86_
 const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000);
 
 const asha = new Types.ObjectId(), bina = new Types.ObjectId(), old = new Types.ObjectId();
+const stuBack = new Types.ObjectId(), stuBackBlr = new Types.ObjectId(), stuLms = new Types.ObjectId(), stuGone = new Types.ObjectId();
 
 // ── A stand-in for the Sales CRM's API and finance's ─────────────────────────
 let financeOld = false;
 let workflowOld = false;
 let hrmsOld = false;
+let flowOld = false;
 const saw: string[] = [];
 const stand = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://x");
@@ -80,6 +85,18 @@ const stand = createServer((req, res) => {
       if (workflowOld) return send(404, { success: false, message: "Route not found" });
       if (url.searchParams.get("from") === "2026-01-01") return send(400, { success: false, message: "At most 92 days at a time" });
       return send(200, { success: true, data: { period: { from: url.searchParams.get("from"), to: url.searchParams.get("to") }, totals: { came: 11, moves: 2 } } });
+    }
+    if (url.pathname === "/delta/api/v1/service/enrolment-flow") {
+      if (flowOld) return send(404, { success: false, message: "Route not found" });
+      const close = (id: Types.ObjectId, name: string, stage: string, stageState: string, waitingOn: Record<string, string>) => ({
+        id: String(id), name, enrollmentNumber: `ENR-${name}`, course: "Forex", academy: "dubai", closedBy: { id: String(asha), name: "Asha", email: "asha@delta-e2e.test" },
+        team: "Falcons", closedAt: daysAgo(5).toISOString(), invoiceNumber: "", stage, stageState, detail: "", waitingOn, cs: "", since: daysAgo(2).toISOString(),
+        steps: [{ key: "finance", state: stage === "finance" ? stageState : "done" }, { key: "lms", state: stage === "lms" ? "waiting" : "pending" }],
+      });
+      return send(200, { success: true, data: { financeAnswered: true, total: 3, finished: 1, open: [
+        close(stuBack, "Back Bob", "finance", "failed", { role: "salesperson", name: "Asha" }),
+        close(stuLms, "Lms Lily", "lms", "waiting", { role: "lms", name: "" }),
+      ] } });
     }
     if (url.pathname === "/delta/api/v1/service/inactive-leads") {
       return send(200, { success: true, data: {
@@ -182,6 +199,24 @@ async function main() {
     // Old Hand (left): an overdue reminder still counts against them.
     lead({ name: "Left Behind", assignedTo: old, status: "followup", reminders: [{ title: "Ring", remindAt: daysAgo(5), createdBy: old, isDone: false }] }),
   ]);
+  // Enrolments: one sent back (Asha), one Bangalore one sent back in rupees (Bina), one with the LMS, one sent back whose
+  // enrolment was deleted since.
+  const forex = new Types.ObjectId(), falcons = new Types.ObjectId();
+  await deltaDb.collection("courses").insertOne({ _id: forex, name: "Forex" });
+  await deltaDb.collection("teams").insertOne({ _id: falcons, name: "Falcons" });
+  await deltaDb.collection("students").insertMany([
+    { _id: stuBack, name: "Back Bob", phone: "971500001111", enrollmentNumber: "ENR-1", course: forex, team: falcons, academy: "dubai", assignedTo: asha,
+      totalFee: 5000, paidAmount: 2000, pendingAmount: 3000, enrollmentDate: daysAgo(5) },
+    { _id: stuBackBlr, name: "Rupee Ravi", enrollmentNumber: "ENR-2", courses: [forex], academy: "bangalore", assignedTo: bina,
+      totalFee: 50000, paidAmount: 50000, pendingAmount: 0, enrollmentDate: daysAgo(3) },
+    { _id: stuLms, name: "Lms Lily", course: forex, assignedTo: asha, totalFee: 2250, paidAmount: 2250, pendingAmount: 0, enrollmentDate: daysAgo(4) },
+  ]);
+  await deltaDb.collection("financehandovers").insertMany([
+    { studentId: stuBack, status: "sent", approvalState: "returned", returnedReason: "Receipt unreadable", returnedAt: daysAgo(2), resends: 1, resentAt: daysAgo(3) },
+    { studentId: stuBackBlr, status: "sent", approvalState: "returned", returnedReason: "Wrong course", returnedAt: daysAgo(1), resends: 0 },
+    { studentId: stuLms, status: "sent", approvalState: "approved" },
+    { studentId: stuGone, status: "sent", approvalState: "returned", returnedReason: "Gone", returnedAt: daysAgo(4) },
+  ]);
   await drawDb.collection("users").insertOne({ _id: bina, name: "Bina Draw", email: "bina@draw-e2e.test", status: "active" });
   await drawDb.collection("leads").insertOne(lead({ name: "Draw Lost", assignedTo: bina, status: "lost", lostReason: "time", activityLogs: [changed("lost", daysAgo(1))] }));
 
@@ -204,7 +239,23 @@ async function main() {
   same("Asha: 1 inactive (from the CRM), 1 overdue reminder, 2 lost, 5 calls / 3 connected / 400s", [a.inactive, a.reminders_overdue, a.lost, a.not_connected, a.calls, a.connected, a.talkSeconds], [1, 1, 2, 0, 5, 3, 400]);
   same("Bina: 1 not connected", [b.not_connected, b.lost, b.inactive], [1, 0, 0]);
   same("Old Hand, who left: the overdue reminder still with them, marked", [person(old)?.counts?.reminders_overdue, person(old)?.active], [1, false]);
-  same("totals: inactive 1, reminders 2, not connected 1, lost 2, calls 7, pending 6", [d.totals?.inactive, d.totals?.reminders_overdue, d.totals?.not_connected, d.totals?.lost, d.totals?.calls, d.totals?.total], [1, 2, 1, 2, 7, 6]);
+  same("totals: inactive 1, reminders 2, not connected 1, lost 2, calls 7, sent back 2, pending 8",
+    [d.totals?.inactive, d.totals?.reminders_overdue, d.totals?.not_connected, d.totals?.lost, d.totals?.calls, d.totals?.sent_back, d.totals?.total], [1, 2, 1, 2, 7, 2, 8]);
+  same("sent back against the closer: Asha 1, Bina 1", [a.sent_back, b.sent_back], [1, 1]);
+  same("the amount sent back, each currency apart", d.sentBack, { available: true, error: "", amount: { AED: 5000, INR: 50000 } });
+  const bob = (d.items?.sentBack ?? [])[0], ravi = (d.items?.sentBack ?? [])[1];
+  check("a sent-back enrolment: course, fee, collected, due, reason, closer, team, sent again before — the longest waiting first",
+    bob?.client === "Back Bob" && bob.course === "Forex" && bob.currency === "AED" && bob.fee === 5000 && bob.collected === 2000 && bob.balance === 3000
+    && bob.reason === "Receipt unreadable" && bob.owner === "Asha" && bob.team === "Falcons" && bob.resends === 1 && bob.enrollmentNumber === "ENR-1", show(bob));
+  check("a Bangalore one: in rupees, its course from the course list", ravi?.client === "Rupee Ravi" && ravi.currency === "INR" && ravi.fee === 50000 && ravi.course === "Forex"
+    && ravi.academy === "bangalore" && ravi.owner === "Bina", show(ravi));
+  same("an enrolment deleted since, and an approved one: left out", (d.items?.sentBack ?? []).length, 2);
+  const wf = d.workflow ?? {};
+  check("the CRM's enrolment workflow, its counts as it says", wf.available === true && wf.counts?.open === 2 && wf.counts.total === 3 && wf.counts.finished === 1
+    && wf.counts.atStep.finance.failed === 1 && wf.counts.atStep.lms.waiting === 1 && wf.counts.byRole.salesperson === 1, show(wf));
+  const lily = (wf.open ?? []).find((x: Json) => x.name === "Lms Lily");
+  check("…each unfinished close with its money", lily?.fee === 2250 && lily.collected === 2250 && lily.balance === 0 && lily.currency === "AED" && lily.course === "Forex", show(lily));
+  check("…asked of this CRM alone", saw.filter((x) => x.includes("/service/enrolment-flow")).every((x) => x.startsWith("/delta/")), show(saw));
   same("lost reasons, most first, not given after the others", d.lostReasons, [{ reason: "price", count: 1 }, { reason: "not_given", count: 1 }]);
   const priya = (d.items?.lost ?? []).find((x: Json) => x.lead === "Priya Price");
   check("a lost lead: owner, reason, notes, when and by whom it was marked", !!priya && priya.owner === "Asha" && priya.reason === "price" && priya.notes === "Too costly"
@@ -244,6 +295,13 @@ async function main() {
   r = await call(`/pending/sales/draw?from=${dayOf(-7)}&to=${today}`, root);
   check("Draw, no API set: its database's figures, inactive leads and calls say why not", r.status === 200 && r.body?.data?.totals?.lost === 1
     && r.body.data.inactive.available === false && !!r.body.data.inactive.error && r.body.data.calls.available === false, show(r.body));
+  check("…nothing sent back there, and its workflow says why not", r.body?.data?.totals?.sent_back === 0 && r.body.data.sentBack.available === true
+    && r.body.data.workflow.available === false && !!r.body.data.workflow.error, show(r.body?.data?.workflow));
+  flowOld = true;
+  r = await call(`/pending/sales/delta?from=${dayOf(-7)}&to=${today}`, root);
+  check("a CRM from before the workflow: the rest of the tab still there, the workflow says its server needs updating", r.status === 200
+    && r.body?.data?.totals?.sent_back === 2 && r.body.data.workflow.available === false && /needs updating/.test(r.body.data.workflow.error), show(r.body?.data?.workflow));
+  flowOld = false;
   financeOld = true;
   r = await call("/pending/finance", root);
   check("finance from before this tab: says its server needs updating", r.status === 409 && /needs updating/.test(r.body?.message ?? ""), show(r.body));
