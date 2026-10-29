@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AxiosError } from "axios";
-import { AlertTriangle, Loader2, RefreshCw, Search } from "lucide-react";
+import { AlertTriangle, Loader2, Lock, RefreshCw, Search } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,9 @@ import { cn } from "@/lib/utils";
  * the LMS counts them (GET /service/student-report through Root); Dubai days. A cancelled seat, and a seat on a class
  * the academy cancelled, are counted, not listed. Non-active = enrolled, not signed in for 14 days or never — whatever
  * the dates. One programme at a time if picked (the user, 2026-10-29: "separate the forex course and digital and AI"),
- * by the class's course; non-active then counts the students enrolled in it. Read-only.
+ * by the class's course; non-active then counts the students enrolled in it. Course progress (the user, 2026-10-29:
+ * "course wise — which students completed, and where they stop — in a separate tab"): a course's students as the LMS
+ * has them now (GET /service/course-progress), whatever the dates. Read-only.
  */
 
 type State = "upcoming" | "live" | "attended" | "missed";
@@ -50,7 +52,7 @@ const PRESETS: [string, string, () => [string, string]][] = [
   ["past", "Past 30 days", () => { const t = dubaiToday(); return [shift(t, -30), shift(t, -1)]; }],
   ["month", "This month", () => { const t = dubaiToday(); return [`${t.slice(0, 8)}01`, t]; }],
 ];
-const VIEWS = [["bookings", "Bookings"], ["students", "Most-booked students"], ["classes", "Most-booked classes"], ["attendance", "Full attendance"], ["inactive", "Non-active"]] as const;
+const VIEWS = [["bookings", "Bookings"], ["students", "Most-booked students"], ["classes", "Most-booked classes"], ["attendance", "Full attendance"], ["inactive", "Non-active"], ["courses", "Course progress"]] as const;
 type View = (typeof VIEWS)[number][0];
 const when = (iso?: string) => (iso ? new Date(iso).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dubai" }) : "");
 const date = (iso?: string) => (iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Dubai" }) : "");
@@ -99,7 +101,8 @@ const Num = ({ v, tone }: { v: number; tone?: string }) => <td className={cn("px
 
 function Table({ head, empty, children, count }: { head: (string | [string, "right"])[]; empty: boolean; children: React.ReactNode; count: string }) {
   return (
-    <div>
+    // min-w-0: in Non-active's grid a cell would otherwise grow to the table's width and be cut off, not scroll, on a phone.
+    <div className="min-w-0">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-muted/40 text-left text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -228,6 +231,8 @@ export function StudentsReportView() {
             {VIEWS.map(([k, l]) => <Button key={k} size="sm" variant={view === k ? "default" : "outline"} onClick={() => setView(k)}>{l}</Button>)}
           </div>
 
+          {/* Its own course, cards and list; a new academy or programme starts it on that one's biggest course. */}
+          {view === "courses" ? <CourseProgress key={`${academy}|${program}`} academy={academy} program={program} /> : (
           <Card className="overflow-hidden">
             <CardContent className="p-0">
               <div className="flex flex-wrap items-center gap-2 border-b border-border/60 p-3">
@@ -342,8 +347,178 @@ export function StudentsReportView() {
               )}
             </CardContent>
           </Card>
+          )}
         </>
       )}
+    </div>
+  );
+}
+
+/* ── Course progress ───────────────────────────────────────────────────────── */
+
+type Progress = "completed" | "in_progress" | "not_started";
+interface CourseRow { id: string; title: string; program: Programme; students: number; completed: number }
+interface ProgressReport {
+  courses: CourseRow[];
+  course: null | {
+    id: string; title: string; program: Programme; lessons: number;
+    sections: { id: string; title: string; no: number; lessons: number; stopped: number }[];
+    totals: Record<Progress, number> & { enrolled: number; averagePercent: number; locked: number };
+    students: (Omit<Person, "cs"> & {
+      cs: { name: string; team: string };
+      state: Progress; percent: number; done: number; total: number;
+      stoppedAt: { sectionId: string; section: string; lesson: string; lessonNo: number; finished: boolean } | null;
+      lastActivityAt: string; enrolledAt: string; completedAt: string; locked: "partial" | "unpaid" | null;
+    })[];
+    listed: number;
+  };
+}
+const PROGRESS: Record<Progress, [string, string, string]> = {
+  completed: ["Completed", "bg-emerald-500/10 text-emerald-500", "bg-emerald-500"],
+  in_progress: ["In progress", "bg-sky-500/10 text-sky-500", "bg-sky-500"],
+  not_started: ["Not started", "bg-rose-500/10 text-rose-500", "bg-rose-500"],
+};
+
+function CourseProgress({ academy, program }: { academy: string; program: Programme | "" }) {
+  const [course, setCourse] = useState("");
+  const [state, setState] = useState<Progress | "">("");
+  const [section, setSection] = useState<string | null>(null);
+  const [locked, setLocked] = useState(false);
+  const [needle, setNeedle] = useState("");
+  const q = useQuery({
+    queryKey: ["portal-reports", "students", "courses", course, academy, program],
+    queryFn: async () => (await api.get("/portal-reports/students/courses", {
+      params: { ...(course ? { course } : {}), ...(academy ? { academy } : {}), ...(program ? { program } : {}) },
+    })).data.data as ProgressReport,
+    retry: 1,
+  });
+  const data = q.data, c = data?.course;
+  const find = needle.trim().toLowerCase();
+  const rows = (c?.students ?? []).filter((s) => (!state || s.state === state) && (!section || s.stoppedAt?.sectionId === section) && (!locked || !!s.locked)
+    && (!find || [s.name, s.email, s.phone, s.cs.name, s.cs.team, s.stoppedAt?.section, s.stoppedAt?.lesson].join(" ").toLowerCase().includes(find)));
+  const choose = (id: string) => { setCourse(id); setState(""); setSection(null); setLocked(false); };
+  const most = Math.max(1, ...(c?.sections ?? []).map((x) => x.stopped));
+
+  if (q.isError) {
+    return (
+      <Card className="border-amber-500/40 bg-amber-500/5">
+        <CardContent className="flex gap-3 pt-6 text-sm">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+          {message(q.error, q.error instanceof AxiosError && q.error.response?.status === 404 ? "Root's server is still on the previous version — this tab shows once it is updated." : "Could not load course progress. Refresh in a moment.")}
+        </CardContent>
+      </Card>
+    );
+  }
+  if (q.isLoading || !data) return <p className="flex justify-center py-10 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></p>;
+  if (!c) return <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">No course has a student in this academy and programme.</CardContent></Card>;
+
+  const t = c.totals;
+  const cards: [string, number | string, string, () => void, boolean][] = [
+    ["Enrolled", t.enrolled, `${c.lessons} lesson${c.lessons === 1 ? "" : "s"} in the course`, () => { setState(""); setLocked(false); }, !state && !locked],
+    ["Completed", t.completed, t.enrolled ? `${Math.round((t.completed / t.enrolled) * 100)}% of the students` : "", () => { setState("completed"); setLocked(false); }, state === "completed"],
+    ["In progress", t.in_progress, "started, not finished", () => { setState("in_progress"); setLocked(false); }, state === "in_progress"],
+    ["Not started", t.not_started, "no lesson opened", () => { setState("not_started"); setLocked(false); }, state === "not_started"],
+    ["Average progress", `${t.averagePercent}%`, "of the lessons done", () => { setState(""); setLocked(false); }, false],
+    ["Part paid", t.locked, "later modules locked", () => { setState(""); setLocked(true); }, locked],
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <select value={c.id} onChange={(e) => choose(e.target.value)} aria-label="Course"
+          className="h-9 w-full max-w-md rounded-md border border-border bg-background px-2 text-sm">
+          {!data.courses.some((x) => x.id === c.id) && <option value={c.id}>{c.title}</option>}
+          {data.courses.map((x) => <option key={x.id} value={x.id}>{x.title} · {x.students} student{x.students === 1 ? "" : "s"} · {x.completed} completed</option>)}
+        </select>
+        <ProgrammeTag p={c.program} hide={!!program} />
+        <span className="ml-auto text-xs text-muted-foreground">As it stands now — the dates above don&apos;t apply</span>
+        <Button variant="outline" size="sm" onClick={() => q.refetch()} disabled={q.isFetching}><RefreshCw className={cn(q.isFetching && "animate-spin")} /> Refresh</Button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        {cards.map(([label, value, sub, go, on]) => (
+          <button key={label} type="button" onClick={go} className="text-left">
+            <Card className={cn("h-full transition-colors hover:border-primary/40", on && "border-primary/60")}><CardContent className="p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+              <p className="mt-1 text-2xl font-bold">{value}</p>
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">{sub}</p>
+            </CardContent></Card>
+          </button>
+        ))}
+      </div>
+
+      {/* Where they stop: the in-progress students by the module of the furthest lesson they opened. */}
+      <Card>
+        <CardContent className="space-y-1 p-4">
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-sm font-semibold">Where they stop</p>
+            <p className="text-xs text-muted-foreground">{t.in_progress} in progress, by the module of the furthest lesson they opened · tap one for its students</p>
+          </div>
+          {c.sections.length === 0 ? <p className="py-4 text-center text-sm text-muted-foreground">This course has no modules in the LMS.</p> : c.sections.map((x) => (
+            <button key={x.id} type="button" onClick={() => { setSection(section === x.id ? null : x.id); setState(section === x.id ? "" : "in_progress"); setLocked(false); }}
+              className={cn("block w-full rounded-md px-2 py-1.5 text-left hover:bg-muted/50", section === x.id && "bg-primary/10")}>
+              <span className="flex items-baseline justify-between gap-2 text-sm">
+                <span className="min-w-0 truncate"><span className="text-muted-foreground">Module {x.no} ·</span> <span className="font-medium">{x.title}</span> <span className="text-xs text-muted-foreground">{x.lessons} lesson{x.lessons === 1 ? "" : "s"}</span></span>
+                <span className="shrink-0 font-semibold tabular-nums">{x.stopped}</span>
+              </span>
+              <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-muted">
+                <span className="block h-full rounded-full bg-sky-500/80" style={{ width: `${x.stopped ? Math.max(3, Math.round((x.stopped / most) * 100)) : 0}%` }} />
+              </span>
+            </button>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <CardContent className="p-0">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border/60 p-3">
+            <div className="relative w-full max-w-xs">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input value={needle} onChange={(e) => setNeedle(e.target.value)} placeholder="Find a student, CS or lesson…" className="h-9 pl-9" />
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {([["", "All"], ...Object.entries(PROGRESS).map(([k, [l]]) => [k, l])] as [Progress | "", string][]).map(([k, l]) => (
+                <Button key={k || "all"} size="sm" variant={state === k && !locked ? "secondary" : "ghost"} onClick={() => { setState(k); setLocked(false); if (k !== "in_progress") setSection(null); }}>
+                  {l}{k && <span className="ml-1 tabular-nums text-muted-foreground">{t[k]}</span>}
+                </Button>
+              ))}
+            </div>
+            {section && (
+              <Button size="sm" variant="outline" onClick={() => setSection(null)}>
+                Module {c.sections.find((x) => x.id === section)?.no} · {c.sections.find((x) => x.id === section)?.title} ✕
+              </Button>
+            )}
+          </div>
+          <Table head={["Student", "CS", "Progress", "Stopped at", "Last activity", "Completed", "Phone"]} empty={!rows.length}
+            count={`${rows.length} student${rows.length === 1 ? "" : "s"}${c.listed < t.enrolled ? ` (first ${c.listed} of ${t.enrolled} listed)` : ""}`}>
+            {rows.map((s) => (
+              <tr key={s.id} className="align-top hover:bg-muted/30">
+                <td className="py-2.5 pl-4 pr-3"><Who p={{ ...s, cs: { ...s.cs, code: "", open: false } }} /></td>
+                <td className="px-3 py-2.5"><CsCell cs={{ ...s.cs, code: "", open: false }} /></td>
+                <td className="px-3 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="block h-1.5 w-20 overflow-hidden rounded-full bg-muted"><span className={cn("block h-full rounded-full", PROGRESS[s.state][2])} style={{ width: `${s.percent}%` }} /></span>
+                    <span className="font-semibold tabular-nums">{s.percent}%</span>
+                  </div>
+                  <p className="mt-0.5 whitespace-nowrap text-xs text-muted-foreground">{s.done} of {s.total} lessons · <Tag tone={PROGRESS[s.state][1]}>{PROGRESS[s.state][0]}</Tag></p>
+                </td>
+                <td className="px-3 py-2.5">
+                  {s.stoppedAt ? (
+                    <div className="min-w-[180px]">
+                      <p className="text-xs text-muted-foreground">Module {c.sections.find((x) => x.id === s.stoppedAt!.sectionId)?.no ?? "?"} · {s.stoppedAt.section}</p>
+                      <p>Lesson {s.stoppedAt.lessonNo} · {s.stoppedAt.lesson}{!s.stoppedAt.finished && s.state !== "completed" && <span className="text-xs text-amber-500"> · not finished</span>}</p>
+                    </div>
+                  ) : <span className="text-muted-foreground">—</span>}
+                  {s.locked && <p className="mt-0.5 flex items-center gap-1 text-xs text-amber-500"><Lock className="h-3 w-3" /> {s.locked === "partial" ? "Part paid — later modules locked" : "Unpaid — modules locked"}</p>}
+                </td>
+                <td className="whitespace-nowrap px-3 py-2.5 tabular-nums">{s.lastActivityAt ? date(s.lastActivityAt) : <span className="text-muted-foreground">—</span>}</td>
+                <td className="whitespace-nowrap px-3 py-2.5 tabular-nums">{s.completedAt ? date(s.completedAt) : <span className="text-muted-foreground">—</span>}</td>
+                <td className="whitespace-nowrap px-3 py-2.5 text-muted-foreground">{s.phone || "—"}</td>
+              </tr>
+            ))}
+          </Table>
+        </CardContent>
+      </Card>
     </div>
   );
 }

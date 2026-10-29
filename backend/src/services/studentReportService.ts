@@ -30,3 +30,27 @@ export async function studentReport(q: Record<string, unknown>) {
     throw error;
   }
 }
+
+/*
+ * Reports → Students → Course progress (the user, 2026-10-29): a course's students — completed, in progress, not
+ * started — how many lessons done and where each stopped, as the LMS has it now (GET /service/course-progress).
+ */
+export async function courseProgress(q: Record<string, unknown>) {
+  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  const course = str(q.course), academy = str(q.academy).toLowerCase(), program = str(q.program).toLowerCase();
+  if (course && !/^[a-f0-9]{24}$/i.test(course)) throw httpError("course is a course id", 400);
+  if (academy && academy !== "dubai" && academy !== "bangalore") throw httpError("academy is dubai or bangalore", 400);
+  if (program && !["forex", "digital", "jura", "none"].includes(program)) throw httpError("program is forex, digital, jura or none", 400);
+  const target = await resolveTarget("lms");
+  const params = new URLSearchParams();
+  if (course) params.set("course", course);
+  if (academy) params.set("academy", academy);
+  if (program) params.set("program", program);
+  try {
+    return await callTarget<Record<string, unknown>>(target, `/course-progress${params.size ? `?${params}` : ""}`, { method: "GET", verb: "share course progress" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not be read";
+    if (/404|not found/i.test(message)) throw httpError("The LMS server needs updating — it has no course progress yet", 409);
+    throw error;
+  }
+}
