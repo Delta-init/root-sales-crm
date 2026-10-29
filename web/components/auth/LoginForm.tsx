@@ -141,7 +141,7 @@ export function LoginForm() {
               <Logo width={190} />
             </motion.div>
             <div>
-              <CardTitle className="text-2xl font-bold">Root Sales CRM</CardTitle>
+              <CardTitle className="text-2xl font-bold">Root CRM</CardTitle>
               <CardDescription className="mt-1">
                 Sign in to reach every system from one place
               </CardDescription>

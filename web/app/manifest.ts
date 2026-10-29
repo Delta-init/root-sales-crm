@@ -3,7 +3,7 @@ import type { MetadataRoute } from "next";
 /** Installable as an app (Add to Home Screen / Install); the service worker is public/app-sw.js. */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Root Sales CRM",
+    name: "Root CRM",
     short_name: "Root",
     description: "Control tower for Delta's portals",
     start_url: "/dashboard",

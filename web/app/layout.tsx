@@ -10,9 +10,9 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Root Sales CRM",
+  title: "Root CRM",
   description: "Control tower for Delta's sales CRMs",
-  applicationName: "Root Sales CRM",
+  applicationName: "Root CRM",
 };
 
 export const viewport: Viewport = {

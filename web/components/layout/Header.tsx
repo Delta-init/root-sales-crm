@@ -29,7 +29,7 @@ export function Header() {
         <div className="shrink-0"><Logo width={132} /></div>
         <div className="hidden h-8 w-px shrink-0 bg-border sm:block" />
         <div className="hidden shrink-0 leading-tight lg:block">
-          <div className="text-sm font-semibold">Root Sales CRM</div>
+          <div className="text-sm font-semibold">Root CRM</div>
           <div className="text-xs text-muted-foreground">Delta · Banglore · Draw</div>
         </div>
 
