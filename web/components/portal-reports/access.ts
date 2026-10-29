@@ -14,6 +14,7 @@ export const REPORT_TAB_OPTIONS: { tab: ReportTab; label: string }[] = [
   { tab: "finance", label: "Finance" },
   { tab: "hrms", label: "HRMS" },
   { tab: "mentors", label: "Mentors" },
+  { tab: "students", label: "Students" },
 ];
 
 type Who = { role: string; reportAccess?: string[] } | null | undefined;

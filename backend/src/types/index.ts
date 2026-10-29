@@ -39,7 +39,7 @@ export type TrafficAccess = "none" | "view" | "manage";
 export const PENDING_TABS = ["cs", "sales:delta", "sales:draw", "sales:remote", "sales:banglore", "finance", "hrms", "media", "enrolments"] as const;
 export type PendingTab = (typeof PENDING_TABS)[number];
 /** Reports tabs that can be given to somebody who is not a root admin (2026-10-27), as Pending's are. */
-export const REPORT_TABS = ["cs", "sales:delta", "sales:draw", "sales:remote", "sales:banglore", "finance", "hrms", "mentors"] as const;
+export const REPORT_TABS = ["cs", "sales:delta", "sales:draw", "sales:remote", "sales:banglore", "finance", "hrms", "mentors", "students"] as const;
 export type ReportTab = (typeof REPORT_TABS)[number];
 
 export interface IAdminUser extends Document {

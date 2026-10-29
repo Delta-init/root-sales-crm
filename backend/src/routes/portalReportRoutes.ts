@@ -5,6 +5,7 @@ import { csReport, csStudentWorkflow, csStudentWorkflowStudents, mentorReport, m
 import { salesLeadWorkflow, salesLeadWorkflowLeads, salesReport } from "../services/salesReportService.js";
 import { financeReport } from "../services/financeReportService.js";
 import { hrmsReport } from "../services/hrmsReportService.js";
+import { studentReport } from "../services/studentReportService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
 import type { AuthenticatedRequest } from "../types/index.js";
 
@@ -139,6 +140,18 @@ router.get("/finance", requireReportTab("finance"), async (req: AuthenticatedReq
 router.get("/hrms", requireReportTab("hrms"), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     sendSuccess(res, "HRMS report", await hrmsReport(req.query as Record<string, unknown>));
+  } catch (error) {
+    const status = (error as { statusCode?: number }).statusCode;
+    if (status) return sendError(res, (error as Error).message, status);
+    next(error);
+  }
+});
+
+/* Students: the dates' bookings, the most-booked students and classes, who attended fully, and the students away
+   from the LMS for 14 days by CS — as the LMS counts them (2026-10-29). */
+router.get("/students", requireReportTab("students"), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    sendSuccess(res, "Students report", await studentReport(req.query as Record<string, unknown>));
   } catch (error) {
     const status = (error as { statusCode?: number }).statusCode;
     if (status) return sendError(res, (error as Error).message, status);

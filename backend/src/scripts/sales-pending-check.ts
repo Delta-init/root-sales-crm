@@ -401,7 +401,7 @@ async function main() {
   check("Draw's report opens (not a refusal), HRMS's too", (await call("/portal-reports/sales/draw/workflow", people.maneesh!.auth)).status !== 403
     && (await call("/portal-reports/hrms", people.maneesh!.auth)).status !== 403);
   const closed = ["/portal-reports/sales/delta/workflow", "/portal-reports/sales/remote/workflow", "/portal-reports/cs", "/portal-reports/cs/workflow",
-    "/portal-reports/finance", "/portal-reports/mentors", "/portal-reports/mentors/reviews"];
+    "/portal-reports/finance", "/portal-reports/mentors", "/portal-reports/mentors/reviews", "/portal-reports/students"];
   const leaked: string[] = [];
   for (const path of closed) if ((await call(path, people.maneesh!.auth)).status !== 403) leaked.push(path);
   check("…nothing else", leaked.length === 0, leaked.join(", "));
@@ -410,6 +410,10 @@ async function main() {
     (await call("/portal-reports/cs", people.doney!.auth)).status !== 403 && (await call("/calls/commission/c1/recording-link", people.doney!.auth)).status !== 403
     && (await call("/portal-reports/sales", people.doney!.auth)).status === 403);
   check("Pending stays as given: Doney's Reports grant opens no Pending tab beyond the CS portal", (await call("/pending/hrms", people.doney!.auth)).status === 403);
+  // Reports → Students (2026-10-29): its own grant, and nothing else with it.
+  g = await send("PATCH", `/access/${people.maneesh!.id}/reports`, { tabs: ["students"] }, root);
+  check("Maneesh given Students: it opens (not a refusal), Mentors doesn't", g.status === 200 && (await call("/portal-reports/students?from=2026-10-29&to=2026-10-29", people.maneesh!.auth)).status !== 403
+    && (await call("/portal-reports/mentors", people.maneesh!.auth)).status === 403);
   g = await send("PATCH", `/access/${people.maneesh!.id}/reports`, { tabs: [] }, root);
   check("taken away: refused at once", g.status === 200 && (await call("/portal-reports/sales/draw/workflow", people.maneesh!.auth)).status === 403);
   check("a root admin still opens every report", ((await call("/portal-reports/sales", root)).body?.data ?? []).length === 4 && (await call("/portal-reports/mentors", root)).status !== 403);

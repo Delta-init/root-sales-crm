@@ -22,6 +22,8 @@ const TABS = [
   { href: "/portal-reports/hrms", label: "HRMS" },
   // CS Portal's Mentor Report: classes, bookings, meetings, reviews and commission per mentor (2026-10-24).
   { href: "/portal-reports/mentors", label: "Mentors" },
+  // LMS students: bookings, most booked, full attendance, away 14 days by CS (2026-10-29).
+  { href: "/portal-reports/students", label: "Students" },
   { href: "/portal-reports/media", label: "Media ERP", soon: true },
 ];
 
