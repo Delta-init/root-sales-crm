@@ -15,17 +15,21 @@ import { cn } from "@/lib/utils";
  * class has the most bookings, the non-active students with their CS counted, who they are, who attended fully"). As
  * the LMS counts them (GET /service/student-report through Root); Dubai days. A cancelled seat, and a seat on a class
  * the academy cancelled, are counted, not listed. Non-active = enrolled, not signed in for 14 days or never — whatever
- * the dates. Read-only.
+ * the dates. One programme at a time if picked (the user, 2026-10-29: "separate the forex course and digital and AI"),
+ * by the class's course; non-active then counts the students enrolled in it. Read-only.
  */
 
 type State = "upcoming" | "live" | "attended" | "missed";
 type Attendance = "full" | "some" | "none" | "not_due";
 interface Cs { name: string; team: string; code: string; open: boolean }
 interface Person { id: string; name: string; email: string; phone: string; academy: string; cs: Cs }
-interface Lesson { id: string; title: string; course: string; mentor: string; start: string; durationMins: number; online: boolean }
+type Programme = "forex" | "digital" | "jura" | "none";
+interface Lesson { id: string; title: string; course: string; mentor: string; start: string; durationMins: number; online: boolean; program?: Programme }
 interface Tally { booked: number; upcoming: number; live: number; attended: number; missed: number }
 interface Report {
   from: string; to: string; academy: string; academies: { slug: string; name: string }[];
+  /** Seats per programme in the dates and academy (absent from an LMS that predates programmes). */
+  programmes?: Record<Programme, number>;
   totals: Tally & { seats: number; cancelledSeats: number; cancelledClassSeats: number; students: number; classes: number };
   bookings: { id: string; state: State; bookedAt: string; student: Person; class: Lesson }[]; bookingsListed: number;
   students: (Person & Tally & { attendance: Attendance })[];
@@ -65,9 +69,19 @@ const ATTENDANCE: Record<Attendance, [string, string]> = {
   none: ["Missed all", "bg-rose-500/10 text-rose-500"],
   not_due: ["Nothing due yet", "bg-muted text-muted-foreground"],
 };
+/** Course.program in the LMS: Forex = 4x-trading, Digital = Digital Marketing + AI. JURA and Not set show only when there are some. */
+const PROGRAMMES: [Programme, string, string][] = [
+  ["forex", "Forex", "bg-indigo-500/10 text-indigo-400"],
+  ["digital", "Digital Marketing & AI", "bg-pink-500/10 text-pink-400"],
+  ["jura", "JURA", "bg-teal-500/10 text-teal-400"],
+  ["none", "Programme not set", "bg-muted text-muted-foreground"],
+];
+const PROGRAMME = Object.fromEntries(PROGRAMMES.map(([k, l, tone]) => [k, [l, tone]])) as Record<Programme, [string, string]>;
 const Tag = ({ tone, children }: { tone: string; children: React.ReactNode }) => (
   <span className={cn("inline-block whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] font-medium", tone)}>{children}</span>
 );
+
+const ProgrammeTag = ({ p, hide }: { p?: Programme; hide: boolean }) => (p && !hide ? <Tag tone={PROGRAMME[p][1]}>{PROGRAMME[p][0]}</Tag> : null);
 
 function Who({ p }: { p: Person }) {
   return (
@@ -108,6 +122,7 @@ export function StudentsReportView() {
   const [preset, setPreset] = useState("today");
   const [range, setRange] = useState<[string, string]>(() => PRESETS[0]![2]());
   const [academy, setAcademy] = useState("");
+  const [program, setProgram] = useState<Programme | "">("");
   const [view, setView] = useState<View>("bookings");
   const [needle, setNeedle] = useState("");
   const [state, setState] = useState<State | "">("");
@@ -115,8 +130,8 @@ export function StudentsReportView() {
   const [cs, setCs] = useState<string | null>(null);
   const [from, to] = range;
   const q = useQuery({
-    queryKey: ["portal-reports", "students", from, to, academy],
-    queryFn: async () => (await api.get("/portal-reports/students", { params: { from, to, ...(academy ? { academy } : {}) } })).data.data as Report,
+    queryKey: ["portal-reports", "students", from, to, academy, program],
+    queryFn: async () => (await api.get("/portal-reports/students", { params: { from, to, ...(academy ? { academy } : {}), ...(program ? { program } : {}) } })).data.data as Report,
     retry: 1,
   });
   const data = q.data;
@@ -171,10 +186,21 @@ export function StudentsReportView() {
           <Button variant="outline" size="sm" onClick={() => q.refetch()} disabled={q.isFetching}><RefreshCw className={cn(q.isFetching && "animate-spin")} /> Refresh</Button>
         </div>
       </div>
-      <div className="flex flex-wrap gap-1" role="group" aria-label="Academy">
-        {[{ slug: "", name: "Both academies" }, ...(data?.academies ?? [{ slug: "dubai", name: "Dubai" }, { slug: "bangalore", name: "Bangalore" }])].map((a) => (
-          <Button key={a.slug || "all"} size="sm" variant={academy === a.slug ? "secondary" : "ghost"} onClick={() => { setAcademy(a.slug); setCs(null); }}>{a.name}</Button>
-        ))}
+      <div className="flex flex-wrap items-center gap-1">
+        <div className="flex flex-wrap gap-1" role="group" aria-label="Academy">
+          {[{ slug: "", name: "Both academies" }, ...(data?.academies ?? [{ slug: "dubai", name: "Dubai" }, { slug: "bangalore", name: "Bangalore" }])].map((a) => (
+            <Button key={a.slug || "all"} size="sm" variant={academy === a.slug ? "secondary" : "ghost"} onClick={() => { setAcademy(a.slug); setCs(null); }}>{a.name}</Button>
+          ))}
+        </div>
+        <div className="mx-1 hidden h-6 w-px bg-border sm:block" />
+        <div className="flex flex-wrap gap-1" role="group" aria-label="Programme">
+          {([["", "All programmes"], ...PROGRAMMES.map(([k, l]) => [k, l])] as [Programme | "", string][])
+            .filter(([k]) => !k || k === "forex" || k === "digital" || k === program || (data?.programmes?.[k] ?? 0) > 0)
+            .map(([k, l]) => {
+              const n = k ? data?.programmes?.[k] : undefined;
+              return <Button key={k || "all"} size="sm" variant={program === k ? "secondary" : "ghost"} onClick={() => { setProgram(k); setCs(null); }}>{l}{n !== undefined && <span className="ml-1 tabular-nums text-muted-foreground">{n}</span>}</Button>;
+            })}
+        </div>
       </div>
 
       {q.isError ? (
@@ -233,7 +259,7 @@ export function StudentsReportView() {
                   {bookings.map((b) => (
                     <tr key={b.id} className="hover:bg-muted/30">
                       <td className="whitespace-nowrap py-2.5 pl-4 pr-3 tabular-nums">{when(b.class.start)}</td>
-                      <td className="px-3 py-2.5"><p className="font-medium">{b.class.title}</p><p className="text-xs text-muted-foreground">{[b.class.course, b.class.mentor, b.class.online ? "" : "In person"].filter(Boolean).join(" · ")}</p></td>
+                      <td className="px-3 py-2.5"><p className="font-medium">{b.class.title} <ProgrammeTag p={b.class.program} hide={!!program} /></p><p className="text-xs text-muted-foreground">{[b.class.course, b.class.mentor, b.class.online ? "" : "In person"].filter(Boolean).join(" · ")}</p></td>
                       <td className="px-3 py-2.5"><Who p={b.student} /></td>
                       <td className="px-3 py-2.5"><CsCell cs={b.student.cs} /></td>
                       <td className="px-3 py-2.5"><Tag tone={STATE[b.state][1]}>{STATE[b.state][0]}</Tag></td>
@@ -259,7 +285,7 @@ export function StudentsReportView() {
                   {classes.map((c, i) => (
                     <tr key={c.id} className="hover:bg-muted/30">
                       <td className="py-2.5 pl-4 pr-3 tabular-nums text-muted-foreground">{i + 1}</td>
-                      <td className="px-3 py-2.5"><p className="font-medium">{c.title}</p><p className="text-xs text-muted-foreground">{[c.course, c.academy, c.online ? "" : "In person"].filter(Boolean).join(" · ")}</p></td>
+                      <td className="px-3 py-2.5"><p className="font-medium">{c.title} <ProgrammeTag p={c.program} hide={!!program} /></p><p className="text-xs text-muted-foreground">{[c.course, c.academy, c.online ? "" : "In person"].filter(Boolean).join(" · ")}</p></td>
                       <td className="whitespace-nowrap px-3 py-2.5 tabular-nums">{when(c.start)}</td>
                       <td className="px-3 py-2.5">{c.mentor || <span className="text-muted-foreground">—</span>}</td>
                       <Num v={c.booked} tone="font-semibold" /><Num v={c.attended} tone="text-emerald-500" /><Num v={c.missed} tone="text-amber-500" /><Num v={c.upcoming + c.live} tone="text-sky-500" />
