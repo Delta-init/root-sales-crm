@@ -1,15 +1,20 @@
 import { Types } from "mongoose";
 import { getSources, type CrmSource } from "./crmConnections.js";
+import { CommissionPlan } from "../models/CommissionPlan.js";
+import { AuditLog } from "../models/AuditLog.js";
+import type {
+  ICommissionPlan, IPlanCourse, IPlanPerson, IPlanSlabRow, IPlanSlabVersion, PlanPortal, PlanSlabRole, PlanTlRule,
+} from "../types/index.js";
 
 /*
- * Commission plans, every sales CRM's, read only (the user, 2026-10-09): the
- * plans are no longer edited anywhere — not in the CRMs, not here — so Root
- * shows each one as it stands. Read straight from each CRM's database, as the
- * Pending page reads them.
+ * Commission plans. Each sales CRM's own plan, read straight from its database (the user, 2026-10-09: read only),
+ * and — since 2026-11-01 ("read from one db, one logic, edited from Root") — the plan kept in Root: copied once from
+ * the CRM (scripts/commission-plan-copy.ts), then edited here by root admins, by portal, position and course. Both
+ * are shown, so where they differ can be seen before the CRMs are switched to count with Root's.
  */
 
 /** The CRMs that pay commission, and how each pays a sale's team leader (their TL_RULE). */
-const TL_RULES: Record<string, { rule: string; label: string }> = {
+const TL_RULES: Record<string, { rule: PlanTlRule; label: string }> = {
   delta: { rule: "zero_if_sm", label: "TL paid, except on a team the Sales Manager leads" },
   draw: { rule: "never", label: "No TL commission — Sales Staff and the Sales Manager only" },
   remote: { rule: "always", label: "TL always paid, the Sales Manager too when they lead" },
@@ -33,6 +38,21 @@ export interface SlabRow {
   salary: number;
   percent: number;
 }
+/** Root's plan for a portal, as the page shows it: this month's slabs, every CRM course with its row (or none yet). */
+export interface RootPlanView {
+  tlSlab: boolean;
+  courses: Array<PlanRow & { set: boolean; inCrm: boolean; updatedAt: string | null; updatedByEmail: string }>;
+  salesManager: IPlanPerson | null;
+  excluded: IPlanPerson[];
+  slabs: { from: string; sales: SlabRow[]; tl: SlabRow[]; sm: SlabRow[]; updatedAt: string | null; updatedByEmail: string };
+  copiedAt: string | null;
+  updatedAt: string | null;
+  updatedByEmail: string;
+  /** The CRM's people, for choosing the Sales Manager and who earns nothing. */
+  people: IPlanPerson[];
+  /** The latest changes made here. */
+  changes: Array<{ at: string; by: string; detail: string }>;
+}
 export interface CrmPlan {
   code: string;
   name: string;
@@ -45,7 +65,54 @@ export interface CrmPlan {
   excluded: string[];
   /** The slabs in force this month; null while the CRM still uses its built-in ones. */
   slabs: { from: string; sales: SlabRow[]; tl: SlabRow[]; sm: SlabRow[] } | null;
+  /** The plan kept in Root (2026-11-01); null until it has been copied there. */
+  root: RootPlanView | null;
 }
+
+/*
+ * What each CRM pays from when it has no slabs saved — its DEFAULT_SLABS, as in its code (2026-11-01). Copied into
+ * Root as the first version, so every month reads the same from Root as from the CRM.
+ */
+const SALES_STAFF: IPlanSlabRow[] = [
+  { name: "Base", target: 0, salary: 2000, percent: 0 },
+  { name: "E", target: 10_000, salary: 2000, percent: 0 },
+  { name: "D", target: 15_000, salary: 2500, percent: 50 },
+  { name: "C", target: 22_000, salary: 3000, percent: 100 },
+  { name: "B", target: 26_000, salary: 3500, percent: 100 },
+  { name: "A", target: 32_000, salary: 4000, percent: 100 },
+];
+const DRAW_REMOTE_SM: IPlanSlabRow[] = [
+  { name: "Base", target: 0, salary: 5000, percent: 50 },
+  { name: "Level 1", target: 120_000, salary: 5000, percent: 50 },
+  { name: "Level 2", target: 154_000, salary: 10_000, percent: 100 },
+];
+export const BUILT_IN: Record<PlanPortal, { tlSlab: boolean; slabs: Record<PlanSlabRole, IPlanSlabRow[]> }> = {
+  delta: {
+    tlSlab: true,
+    slabs: {
+      sales: SALES_STAFF,
+      tl: [
+        { name: "Base", target: 0, salary: 4000, percent: 50 },
+        { name: "Level 1", target: 80_000, salary: 4000, percent: 50 },
+        { name: "Level 2", target: 100_000, salary: 4000, percent: 100 },
+        { name: "Level 3", target: 132_000, salary: 8000, percent: 100 },
+      ],
+      sm: [
+        { name: "Base", target: 0, salary: 5000, percent: 50 },
+        { name: "Level 1", target: 200_000, salary: 5000, percent: 50 },
+        { name: "Level 2", target: 250_000, salary: 5000, percent: 75 },
+        { name: "Level 3", target: 330_000, salary: 10_000, percent: 100 },
+      ],
+    },
+  },
+  draw: { tlSlab: false, slabs: { sales: SALES_STAFF, tl: [{ name: "Base", target: 0, salary: 2000, percent: 0 }], sm: DRAW_REMOTE_SM } },
+  remote: { tlSlab: false, slabs: { sales: SALES_STAFF, tl: [{ name: "Base", target: 0, salary: 2000, percent: 0 }], sm: DRAW_REMOTE_SM } },
+};
+/** The month the built-in slabs are dated from in Root: before any saved version. */
+export const BUILT_IN_FROM = "2000-01";
+const SLAB_KEYS: PlanSlabRole[] = ["sales", "tl", "sm"];
+export const isPortal = (code: string): code is PlanPortal => code in BUILT_IN;
+export const slabRolesOf = (portal: PlanPortal): PlanSlabRole[] => (BUILT_IN[portal].tlSlab ? SLAB_KEYS : ["sales", "sm"]);
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const slabRows = (v: unknown): SlabRow[] =>
@@ -53,7 +120,24 @@ const slabRows = (v: unknown): SlabRow[] =>
     name: String(r.name ?? ""), target: num(r.target), salary: num(r.salary), percent: num(r.percent),
   }));
 /** This month in UAE time, YYYY-MM, as the CRMs count it. */
-const uaeMonth = () => new Date(Date.now() + 4 * 60 * 60_000).toISOString().slice(0, 7);
+export const uaeMonth = () => new Date(Date.now() + 4 * 60 * 60_000).toISOString().slice(0, 7);
+const iso = (d: Date | null | undefined) => (d ? new Date(d).toISOString() : null);
+const rowsOf = (rows: IPlanSlabRow[] | undefined) => (rows ?? []).map((r) => ({ name: r.name, target: r.target, salary: r.salary, percent: r.percent }));
+
+/** The version of a plan's slabs in force in a month: the latest that starts on or before it. */
+export function slabsInForce(versions: IPlanSlabVersion[], month: string): IPlanSlabVersion | null {
+  return [...versions].filter((v) => v.from <= month).sort((a, b) => (a.from < b.from ? 1 : -1))[0] ?? null;
+}
+
+/** What is wrong with a position's slab rows, or null — the CRMs' rule: a base at 0 first, then targets rising. */
+export function slabProblem(rows: IPlanSlabRow[]): string | null {
+  if (!rows.length) return "A slab needs at least its base row";
+  if (rows[0]!.target !== 0) return "The first row is the base: its target must be 0";
+  for (let i = 1; i < rows.length; i++) {
+    if (!(rows[i]!.target > rows[i - 1]!.target)) return `Each level's target must be higher than the one before (row ${i + 1})`;
+  }
+  return null;
+}
 
 async function planOf(src: CrmSource): Promise<CrmPlan> {
   const db = src.conn;
@@ -91,6 +175,102 @@ async function planOf(src: CrmSource): Promise<CrmPlan> {
     salesManager: nameOf(settings?.salesManager),
     excluded: ((settings?.excludedUsers as unknown[]) ?? []).map((id) => nameOf(id) ?? ""),
     slabs: now ? { from: String(now.from), sales: slabRows(now.sales), tl: slabRows(now.tl), sm: slabRows(now.sm) } : null,
+    root: null,
+  };
+}
+
+/**
+ * A CRM's plan as Root keeps it — what the copy script saves: every course's row, the Sales Manager and who earns
+ * nothing (ids and names), and the slabs as versions, a version's position with no rows of its own taking the
+ * built-in ones as the CRM does, the built-in slabs first. Read from the CRM's database; nothing is written there.
+ */
+export async function planFromCrm(src: CrmSource): Promise<Omit<ICommissionPlan, "copiedAt" | "updatedByEmail">> {
+  const code = src.org.code;
+  if (!isPortal(code)) throw new Error(`${code} has no commission plan`);
+  const db = src.conn;
+  const [courses, settings] = await Promise.all([
+    db.collection("courses").find({}, { projection: { name: 1, commission: 1 }, maxTimeMS: QUERY_MS }).sort({ name: 1 }).toArray(),
+    db.collection("commissionsettings").findOne({ key: "default" }, { maxTimeMS: QUERY_MS }),
+  ]);
+  const ids = [settings?.salesManager, ...((settings?.excludedUsers as unknown[]) ?? [])].filter((id) => id);
+  const users = new Map(
+    (await db.collection("users").find({ _id: { $in: ids as Types.ObjectId[] } }, { projection: { name: 1 }, maxTimeMS: QUERY_MS }).toArray())
+      .map((u) => [String(u._id), String(u.name ?? "")]),
+  );
+  const person = (id: unknown): IPlanPerson => ({ id: String(id), name: users.get(String(id)) ?? "(removed user)" });
+  const built = BUILT_IN[code].slabs;
+  const saved = ((settings?.salarySlabs as Record<string, unknown>[] | undefined) ?? [])
+    .map((v) => {
+      const at = v.updatedAt instanceof Date ? v.updatedAt : null;
+      const pick = (role: PlanSlabRole) => { const rows = slabRows(v[role]); return rows.length ? rows : rowsOf(built[role]); };
+      return { from: String(v.from ?? ""), sales: pick("sales"), tl: pick("tl"), sm: pick("sm"), updatedAt: at, updatedByEmail: "copied from the CRM" };
+    })
+    .filter((v) => /^\d{4}-\d{2}$/.test(v.from))
+    .sort((a, b) => a.from.localeCompare(b.from));
+  return {
+    portal: code,
+    tlRule: TL_RULES[code]!.rule,
+    tlSlab: BUILT_IN[code].tlSlab,
+    salesManager: settings?.salesManager ? person(settings.salesManager) : null,
+    excluded: ((settings?.excludedUsers as unknown[]) ?? []).map(person),
+    courses: courses.map((c): IPlanCourse => {
+      const p = (c.commission ?? {}) as Record<string, unknown>;
+      return {
+        courseId: String(c._id), name: String(c.name ?? ""), sales: num(p.sales), tl: num(p.tl), sm: num(p.sm), creditUsd: num(p.creditUsd),
+        updatedAt: p.updatedAt instanceof Date ? p.updatedAt : null, updatedByEmail: "copied from the CRM",
+      };
+    }),
+    slabs: [
+      { from: BUILT_IN_FROM, sales: rowsOf(built.sales), tl: rowsOf(built.tl), sm: rowsOf(built.sm), updatedAt: null, updatedByEmail: "the CRM's built-in slabs" },
+      ...saved.filter((v) => v.from > BUILT_IN_FROM),
+    ],
+  };
+}
+
+/** Root's plan for a portal as the page shows it, with the CRM's courses and people beside it. */
+async function rootView(src: CrmSource | null, doc: ICommissionPlan): Promise<RootPlanView> {
+  const crmCourses = src
+    ? await src.conn.collection("courses").find({}, { projection: { name: 1, amount: 1, status: 1 }, maxTimeMS: QUERY_MS }).sort({ status: 1, name: 1 }).toArray()
+    : [];
+  const people = src
+    ? (await src.conn.collection("users").find({ status: { $ne: "inactive" } }, { projection: { name: 1 }, maxTimeMS: QUERY_MS }).sort({ name: 1 }).toArray())
+      .map((u) => ({ id: String(u._id), name: String(u.name ?? "") }))
+    : [];
+  const rows = new Map(doc.courses.map((c) => [c.courseId, c]));
+  const seen = new Set<string>();
+  const courses: RootPlanView["courses"] = crmCourses.map((c) => {
+    const id = String(c._id);
+    seen.add(id);
+    const r = rows.get(id);
+    return {
+      id, name: String(c.name ?? r?.name ?? ""), fee: num(c.amount), status: String(c.status ?? ""),
+      sales: r?.sales ?? 0, tl: r?.tl ?? 0, sm: r?.sm ?? 0, creditUsd: r?.creditUsd ?? 0,
+      set: !!r, inCrm: true, updatedAt: iso(r?.updatedAt), updatedByEmail: r?.updatedByEmail ?? "",
+    };
+  });
+  for (const r of doc.courses) {
+    if (seen.has(r.courseId)) continue;
+    courses.push({
+      id: r.courseId, name: r.name, fee: 0, status: "", sales: r.sales, tl: r.tl, sm: r.sm, creditUsd: r.creditUsd,
+      set: true, inCrm: !src, updatedAt: iso(r.updatedAt), updatedByEmail: r.updatedByEmail,
+    });
+  }
+  const now = slabsInForce(doc.slabs, uaeMonth());
+  const changes = await AuditLog.find({ action: "commission_plan_changed", org: doc.portal }).sort({ createdAt: -1 }).limit(15).lean();
+  return {
+    tlSlab: doc.tlSlab,
+    courses,
+    salesManager: doc.salesManager,
+    excluded: doc.excluded,
+    slabs: {
+      from: now?.from ?? BUILT_IN_FROM, sales: rowsOf(now?.sales), tl: rowsOf(now?.tl), sm: rowsOf(now?.sm),
+      updatedAt: iso(now?.updatedAt), updatedByEmail: now?.updatedByEmail ?? "",
+    },
+    copiedAt: iso(doc.copiedAt),
+    updatedAt: iso(doc.updatedAt),
+    updatedByEmail: doc.updatedByEmail,
+    people,
+    changes: changes.map((c) => ({ at: iso((c as { createdAt?: Date }).createdAt) ?? "", by: c.adminEmail, detail: c.detail })),
   };
 }
 
@@ -99,14 +279,110 @@ export async function commissionPlans(): Promise<CrmPlan[]> {
   const { sources, failures } = await getSources();
   const empty = (code: string, name: string, error: string): CrmPlan => ({
     code, name, available: false, error, tlRule: TL_RULES[code].rule, tlRuleLabel: TL_RULES[code].label,
-    courses: [], salesManager: null, excluded: [], slabs: null,
+    courses: [], salesManager: null, excluded: [], slabs: null, root: null,
   });
+  const kept = new Map((await CommissionPlan.find({}).lean<ICommissionPlan[]>()).map((d) => [d.portal, d]));
+  const withRoot = async (plan: CrmPlan, src: CrmSource | null) => {
+    const doc = kept.get(plan.code as PlanPortal);
+    if (doc) plan.root = await rootView(src, doc).catch(() => rootView(null, doc));
+    return plan;
+  };
   const plans = await Promise.all(
     sources.filter((s) => TL_RULES[s.org.code]).map((s) =>
-      planOf(s).catch((e) => empty(s.org.code, s.org.name, e instanceof Error ? e.message : "Could not be read")),
+      planOf(s)
+        .catch((e) => empty(s.org.code, s.org.name, e instanceof Error ? e.message : "Could not be read"))
+        .then((p) => withRoot(p, p.available ? s : null)),
     ),
   );
-  for (const f of failures) if (TL_RULES[f.code]) plans.push(empty(f.code, f.name, f.error));
+  for (const f of failures) if (TL_RULES[f.code]) plans.push(await withRoot(empty(f.code, f.name, f.error), null));
   const order = Object.keys(TL_RULES);
   return plans.sort((a, b) => order.indexOf(a.code) - order.indexOf(b.code));
+}
+
+/* ── Editing Root's plan (root admins, 2026-11-01) ─────────────────────────────────────────────────────────────── */
+
+type Fail = Error & { statusCode: number };
+const fail = (statusCode: number, message: string): Fail => Object.assign(new Error(message), { statusCode });
+const aedOf = (n: number) => `AED ${n.toLocaleString("en-US")}`;
+
+async function sourceOf(code: PlanPortal): Promise<CrmSource | null> {
+  const { sources } = await getSources();
+  return sources.find((s) => s.org.code === code) ?? null;
+}
+async function planDoc(code: string) {
+  if (!isPortal(code)) throw fail(404, `No commission plan for "${code}"`);
+  const doc = await CommissionPlan.findOne({ portal: code });
+  if (!doc) throw fail(409, "This CRM's plan has not been copied to Root yet");
+  return doc;
+}
+const nameOf = (code: PlanPortal) => ({ delta: "Sales CRM", draw: "Draw", remote: "Remote" })[code];
+
+/** One course's row: what a sale of it pays each position, and the MT5 credit. Only for sales counted from now on. */
+export async function saveCourse(
+  code: string, courseId: string, input: { sales: number; tl: number; sm: number; creditUsd: number }, by: string,
+): Promise<string> {
+  const doc = await planDoc(code);
+  const portal = doc.portal;
+  if (doc.tlRule === "never" && input.tl > 0) throw fail(400, `${nameOf(portal)} pays team leaders nothing on a sale`);
+  const row = doc.courses.find((c) => c.courseId === courseId);
+  let name = row?.name ?? "";
+  if (!row) {
+    // A course not in the plan yet must be one of the CRM's.
+    const src = await sourceOf(portal);
+    if (!src || !Types.ObjectId.isValid(courseId)) throw fail(404, "Course not found in the CRM");
+    const course = await src.conn.collection("courses").findOne({ _id: new Types.ObjectId(courseId) }, { projection: { name: 1 }, maxTimeMS: QUERY_MS });
+    if (!course) throw fail(404, "Course not found in the CRM");
+    name = String(course.name ?? "");
+  }
+  const before = row ? `${aedOf(row.sales)} / ${aedOf(row.tl)} / ${aedOf(row.sm)} / $${row.creditUsd}` : "not set";
+  const next = { courseId, name, ...input, updatedAt: new Date(), updatedByEmail: by };
+  if (row) Object.assign(row, next);
+  else doc.courses.push(next);
+  doc.updatedByEmail = by;
+  await doc.save();
+  return `${nameOf(portal)} · ${name}: ${before} → ${aedOf(input.sales)} / ${aedOf(input.tl)} / ${aedOf(input.sm)} / $${input.creditUsd} (sales / TL / SM / credit)`;
+}
+
+/** A position's slab rows, in force from this month (UAE) on; the other positions carried as they stand. */
+export async function saveSlabs(code: string, role: string, rows: IPlanSlabRow[], by: string): Promise<string> {
+  const doc = await planDoc(code);
+  const portal = doc.portal;
+  if (!(slabRolesOf(portal) as string[]).includes(role)) throw fail(400, `${nameOf(portal)} has no ${role} slab`);
+  const problem = slabProblem(rows);
+  if (problem) throw fail(400, problem);
+  const month = uaeMonth();
+  const now = slabsInForce(doc.slabs, month);
+  const next: IPlanSlabVersion = {
+    from: month,
+    sales: rowsOf(now?.sales), tl: rowsOf(now?.tl), sm: rowsOf(now?.sm),
+    updatedAt: new Date(), updatedByEmail: by,
+  };
+  next[role as PlanSlabRole] = rowsOf(rows);
+  doc.slabs = [...doc.slabs.filter((v) => v.from !== month), next].sort((a, b) => (a.from < b.from ? -1 : 1)) as typeof doc.slabs;
+  doc.updatedByEmail = by;
+  await doc.save();
+  const label = { sales: "Sales Staff", tl: "Team Leader", sm: "Sales Manager" }[role as PlanSlabRole];
+  return `${nameOf(portal)} · ${label} slab from ${month}: ${rows.map((r) => `${r.name} ${r.target.toLocaleString("en-US")} → ${r.salary.toLocaleString("en-US")} + ${r.percent}%`).join(", ")}`;
+}
+
+/** The Sales Manager and the logins that earn nothing — people of the CRM, by id. */
+export async function saveSettings(code: string, input: { salesManager: string | null; excluded: string[] }, by: string): Promise<string> {
+  const doc = await planDoc(code);
+  const portal = doc.portal;
+  const ids = [...new Set([...(input.salesManager ? [input.salesManager] : []), ...input.excluded])];
+  if (ids.some((id) => !Types.ObjectId.isValid(id))) throw fail(400, "Unknown user");
+  const src = await sourceOf(portal);
+  if (!src) throw fail(503, `${nameOf(portal)} can't be reached to check its people — try again`);
+  const found = new Map(
+    (await src.conn.collection("users").find({ _id: { $in: ids.map((id) => new Types.ObjectId(id)) } }, { projection: { name: 1 }, maxTimeMS: QUERY_MS }).toArray())
+      .map((u) => [String(u._id), String(u.name ?? "")]),
+  );
+  if (found.size !== ids.length) throw fail(400, "Unknown user");
+  const person = (id: string): IPlanPerson => ({ id, name: found.get(id) ?? "" });
+  const before = `SM ${doc.salesManager?.name ?? "none"}; earn nothing: ${doc.excluded.map((p) => p.name).join(", ") || "no one"}`;
+  doc.salesManager = input.salesManager ? person(input.salesManager) : null;
+  doc.excluded = [...new Set(input.excluded)].map(person);
+  doc.updatedByEmail = by;
+  await doc.save();
+  return `${nameOf(portal)} · ${before} → SM ${doc.salesManager?.name ?? "none"}; earn nothing: ${doc.excluded.map((p) => p.name).join(", ") || "no one"}`;
 }

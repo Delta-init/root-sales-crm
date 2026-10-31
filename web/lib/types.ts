@@ -613,6 +613,22 @@ export interface CrmCommissionPlan {
   excluded: string[];
   /** The slabs in force this month; null while the CRM still uses its built-in ones. */
   slabs: { from: string; sales: CommissionSlabRow[]; tl: CommissionSlabRow[]; sm: CommissionSlabRow[] } | null;
+  /** The plan kept in Root (2026-11-01); null until it has been copied there. Older servers leave it out. */
+  root?: RootCommissionPlan | null;
+}
+export interface PlanPerson { id: string; name: string }
+/** A sales CRM's commission plan as Root keeps it, edited by root admins (2026-11-01). */
+export interface RootCommissionPlan {
+  tlSlab: boolean;
+  courses: Array<CommissionPlanRow & { set: boolean; inCrm: boolean; updatedAt: string | null; updatedByEmail: string }>;
+  salesManager: PlanPerson | null;
+  excluded: PlanPerson[];
+  slabs: { from: string; sales: CommissionSlabRow[]; tl: CommissionSlabRow[]; sm: CommissionSlabRow[]; updatedAt: string | null; updatedByEmail: string };
+  copiedAt: string | null;
+  updatedAt: string | null;
+  updatedByEmail: string;
+  people: PlanPerson[];
+  changes: Array<{ at: string; by: string; detail: string }>;
 }
 
 // ── Salespeople: each sales CRM's people, and one person's figures ────────────

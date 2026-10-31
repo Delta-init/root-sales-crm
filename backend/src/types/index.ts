@@ -199,6 +199,8 @@ export type AuditAction =
   | "account_deleted"
   // Lead traffic: the split decides which CRM every sheet lead lands in, so
   // who changed it, and who pushed a stuck lead through by hand, is recorded.
+  // A sales CRM's commission plan changed in Root (2026-11-01): what people are paid follows it.
+  | "commission_plan_changed"
   | "traffic_rules_changed"
   | "traffic_lead_retried"
   | "traffic_access_changed"
@@ -416,4 +418,43 @@ export interface AuthenticatedRequest extends Request {
     email: string;
     org: { code: string; name: string; timezone: string; currency: string };
   };
+}
+
+// ── Commission plans, kept in Root (2026-11-01) ───────────────────────────────
+
+export type PlanPortal = "delta" | "draw" | "remote";
+export type PlanTlRule = "zero_if_sm" | "never" | "always";
+export type PlanSlabRole = "sales" | "tl" | "sm";
+export interface IPlanSlabRow { name: string; target: number; salary: number; percent: number }
+export interface IPlanSlabVersion {
+  from: string;
+  sales: IPlanSlabRow[];
+  tl: IPlanSlabRow[];
+  sm: IPlanSlabRow[];
+  updatedAt: Date | null;
+  updatedByEmail: string;
+}
+export interface IPlanCourse {
+  courseId: string;
+  name: string;
+  sales: number;
+  tl: number;
+  sm: number;
+  creditUsd: number;
+  updatedAt: Date | null;
+  updatedByEmail: string;
+}
+export interface IPlanPerson { id: string; name: string }
+export interface ICommissionPlan {
+  portal: PlanPortal;
+  tlRule: PlanTlRule;
+  tlSlab: boolean;
+  salesManager: IPlanPerson | null;
+  excluded: IPlanPerson[];
+  courses: IPlanCourse[];
+  slabs: IPlanSlabVersion[];
+  copiedAt: Date | null;
+  updatedByEmail: string;
+  createdAt?: Date;
+  updatedAt?: Date;
 }

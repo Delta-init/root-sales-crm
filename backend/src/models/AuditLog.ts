@@ -49,6 +49,8 @@ const auditLogSchema = new Schema<IAuditLog>(
         "task_verified",
         "task_rejected",
         // Lead traffic: the split between the CRMs, and a stuck lead sent by hand.
+        // A sales CRM's commission plan changed in Root (2026-11-01).
+        "commission_plan_changed",
         "traffic_rules_changed",
         "traffic_lead_retried",
         "traffic_access_changed",
