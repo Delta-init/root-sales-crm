@@ -2,6 +2,8 @@ import { Types } from "mongoose";
 import { getSources, type CrmSource } from "./crmConnections.js";
 import { CommissionPlan } from "../models/CommissionPlan.js";
 import { AuditLog } from "../models/AuditLog.js";
+import { compareSales, payRows, slabsOfMonth, PAY_FROM_MONTH, type EnginePayRow, type SaleCompare } from "./commissionEngine.js";
+import { payOf } from "./crmCommissionService.js";
 import type {
   ICommissionPlan, IPlanCourse, IPlanPerson, IPlanSlabRow, IPlanSlabVersion, PlanPortal, PlanSlabRole, PlanTlRule,
 } from "../types/index.js";
@@ -86,9 +88,11 @@ const DRAW_REMOTE_SM: IPlanSlabRow[] = [
   { name: "Level 1", target: 120_000, salary: 5000, percent: 50 },
   { name: "Level 2", target: 154_000, salary: 10_000, percent: 100 },
 ];
-export const BUILT_IN: Record<PlanPortal, { tlSlab: boolean; slabs: Record<PlanSlabRole, IPlanSlabRow[]> }> = {
+export const BUILT_IN: Record<PlanPortal, { tlSlab: boolean; tlPaidOnOwnClose: boolean; slabs: Record<PlanSlabRole, IPlanSlabRow[]> }> = {
   delta: {
     tlSlab: true,
+    // TL_PAID_WHEN_THEY_CLOSE = false in the Sales CRM: a team leader's own close pays them as Sales Staff only.
+    tlPaidOnOwnClose: false,
     slabs: {
       sales: SALES_STAFF,
       tl: [
@@ -105,8 +109,9 @@ export const BUILT_IN: Record<PlanPortal, { tlSlab: boolean; slabs: Record<PlanS
       ],
     },
   },
-  draw: { tlSlab: false, slabs: { sales: SALES_STAFF, tl: [{ name: "Base", target: 0, salary: 2000, percent: 0 }], sm: DRAW_REMOTE_SM } },
-  remote: { tlSlab: false, slabs: { sales: SALES_STAFF, tl: [{ name: "Base", target: 0, salary: 2000, percent: 0 }], sm: DRAW_REMOTE_SM } },
+  draw: { tlSlab: false, tlPaidOnOwnClose: false, slabs: { sales: SALES_STAFF, tl: [{ name: "Base", target: 0, salary: 2000, percent: 0 }], sm: DRAW_REMOTE_SM } },
+  // Remote pays a team leader the TL line on their own close too.
+  remote: { tlSlab: false, tlPaidOnOwnClose: true, slabs: { sales: SALES_STAFF, tl: [{ name: "Base", target: 0, salary: 2000, percent: 0 }], sm: DRAW_REMOTE_SM } },
 };
 /** The month the built-in slabs are dated from in Root: before any saved version. */
 export const BUILT_IN_FROM = "2000-01";
@@ -211,6 +216,7 @@ export async function planFromCrm(src: CrmSource): Promise<Omit<ICommissionPlan,
     portal: code,
     tlRule: TL_RULES[code]!.rule,
     tlSlab: BUILT_IN[code].tlSlab,
+    tlPaidOnOwnClose: BUILT_IN[code].tlPaidOnOwnClose,
     salesManager: settings?.salesManager ? person(settings.salesManager) : null,
     excluded: ((settings?.excludedUsers as unknown[]) ?? []).map(person),
     courses: courses.map((c): IPlanCourse => {
@@ -385,4 +391,83 @@ export async function saveSettings(code: string, input: { salesManager: string |
   doc.updatedByEmail = by;
   await doc.save();
   return `${nameOf(portal)} · ${before} → SM ${doc.salesManager?.name ?? "none"}; earn nothing: ${doc.excluded.map((p) => p.name).join(", ") || "no one"}`;
+}
+
+/* ── Stage 2 (2026-11-01): Root's figures beside the CRM's, and the plan as a CRM will read it ─────────────────── */
+
+/** A portal's plan kept in Root, and its CRM's database — what Root works its figures out from. */
+export async function engineInputs(code: string): Promise<{ plan: ICommissionPlan; src: CrmSource }> {
+  if (!isPortal(code)) throw fail(404, `No commission plan for "${code}"`);
+  const plan = await CommissionPlan.findOne({ portal: code }).lean<ICommissionPlan>();
+  if (!plan) throw fail(409, "This CRM's plan has not been copied to Root yet");
+  const src = await sourceOf(code);
+  if (!src) throw fail(503, `${nameOf(code)}'s database can't be reached — try again`);
+  return { plan, src };
+}
+
+export interface PayCompare {
+  user: string;
+  name: string;
+  crm: { role: string; level: string; percent: number; earned: number; balance: number; payable: number } | null;
+  root: { role: string; level: string; percent: number; salary: number; target: number; earned: number; balance: number; payable: number } | null;
+  same: boolean;
+}
+
+/**
+ * A month of a portal side by side (root admins): each person's My Pay as the CRM gives it and as Root works it out
+ * from its plan, and each decided sale's lines as the CRM recorded them and as Root's plan gives them now.
+ */
+export async function compareMonth(code: string, month: string) {
+  const { plan, src } = await engineInputs(code);
+  const [rootRows, crmPay, sales] = await Promise.all([
+    payRows(src.conn, plan, month),
+    month < PAY_FROM_MONTH ? Promise.resolve({ people: [] }) : payOf(code, month),
+    compareSales(src.conn, plan, month),
+  ]);
+  const crmPeople = "people" in crmPay ? crmPay.people : null;
+  const byUser = new Map<string, PayCompare>();
+  const r2 = (n: unknown) => Math.round((Number(n) || 0) * 100) / 100;
+  for (const r of rootRows as EnginePayRow[]) {
+    byUser.set(r.user, {
+      user: r.user, name: r.name, crm: null,
+      root: { role: r.role, level: r.level.name, percent: r.percent, salary: r.salary, target: r.sales.value, earned: r.commission.earned, balance: r.commission.balance, payable: r.commission.payable },
+      same: false,
+    });
+  }
+  for (const p of crmPeople ?? []) {
+    const row = byUser.get(String(p.user)) ?? { user: String(p.user), name: p.name, crm: null, root: null, same: false };
+    row.crm = { role: String(p.role ?? ""), level: String(p.level ?? ""), percent: r2(p.percent), earned: r2(p.earned), balance: r2(p.balance), payable: r2(p.payable) };
+    byUser.set(row.user, row);
+  }
+  const people = [...byUser.values()].map((p) => ({
+    ...p,
+    same: !!p.crm && !!p.root && p.crm.role === p.root.role && p.crm.level === p.root.level && p.crm.percent === p.root.percent
+      && p.crm.earned === p.root.earned && p.crm.balance === p.root.balance && p.crm.payable === p.root.payable,
+  }));
+  const { from } = slabsOfMonth(plan, month);
+  return {
+    code, month, slabsFrom: from,
+    pay: { crmError: "error" in crmPay ? crmPay.error : null, people, differ: people.filter((p) => !p.same).length },
+    sales: { list: sales as SaleCompare[], differ: sales.filter((s) => !s.same).length },
+  };
+}
+
+/** The plan as a CRM reads it from Root (stage 3): its rules, every course's row, the people, the month's slabs. */
+export async function planForCrm(code: string, month: string) {
+  if (!isPortal(code)) throw fail(404, `No commission plan for "${code}"`);
+  const plan = await CommissionPlan.findOne({ portal: code }).lean<ICommissionPlan>();
+  if (!plan) throw fail(409, "This CRM's plan has not been copied to Root yet");
+  const { from, slabs } = slabsOfMonth(plan, month);
+  return {
+    portal: plan.portal,
+    tlRule: plan.tlRule,
+    tlSlab: plan.tlSlab,
+    tlPaidOnOwnClose: typeof plan.tlPaidOnOwnClose === "boolean" ? plan.tlPaidOnOwnClose : BUILT_IN[plan.portal].tlPaidOnOwnClose,
+    salesManager: plan.salesManager,
+    excluded: plan.excluded,
+    courses: plan.courses.map((c) => ({ courseId: c.courseId, name: c.name, sales: c.sales, tl: c.tl, sm: c.sm, creditUsd: c.creditUsd })),
+    month,
+    slabsFrom: from,
+    slabs,
+  };
 }

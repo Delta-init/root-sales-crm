@@ -60,6 +60,8 @@ const commissionPlanSchema = new Schema<ICommissionPlan>(
     tlRule: { type: String, enum: ["zero_if_sm", "never", "always"], required: true },
     /** Whether team leaders have a slab of their own (the Sales CRM); elsewhere they are on the Sales Staff slab. */
     tlSlab: { type: Boolean, default: false },
+    /** Whether a team leader closing a sale in their own team is paid its TL line too (Remote) or not (the Sales CRM). */
+    tlPaidOnOwnClose: { type: Boolean, default: null },
     salesManager: { type: personSchema, default: null },
     excluded: { type: [personSchema], default: [] },
     courses: { type: [courseRowSchema], default: [] },

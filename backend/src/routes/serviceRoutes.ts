@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getMine, saveMine } from "../controllers/serviceTrackerController.js";
 import { crmLeads } from "../controllers/crmLeadsController.js";
 import { crmCommissionForFinance } from "../controllers/crmCommissionController.js";
+import * as engine from "../controllers/commissionEngineController.js";
 import { authenticateOrgService, authenticatePortalService } from "../middleware/orgServiceAuth.js";
 
 const router = Router();
@@ -22,5 +23,11 @@ router.use(authenticateOrgService);
 
 router.get("/tracker/me", getMine);
 router.put("/tracker/me", saveMine);
+
+// A sales CRM's commission worked out by Root from the plan kept here (2026-11-01): its plan, who earns what on a
+// sale, its My Pay. Only its own — the CRM is the one whose secret matched.
+router.get("/commission/plan", engine.plan);
+router.post("/commission/resolve", engine.resolve);
+router.get("/commission/pay", engine.pay);
 
 export default router;

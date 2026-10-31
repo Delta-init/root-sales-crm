@@ -56,10 +56,10 @@ export interface CrmCommission {
   inrPerAed: number | null;
 }
 
-interface PayPerson { user: string; name: string; percent: number; level: string; earned: number; payable: number }
+export interface PayPerson { user: string; name: string; role?: string; percent: number; level: string; earned: number; balance?: number; payable: number; notCountedYet?: number }
 
 /** A CRM's My Pay figures for the month, through its API — or why not. */
-async function payOf(code: string, month: string): Promise<{ people: PayPerson[] } | { error: string }> {
+export async function payOf(code: string, month: string): Promise<{ people: PayPerson[] } | { error: string }> {
   try {
     const target = await resolveTarget(code);
     const data = await callTarget<{ people?: PayPerson[] }>(target, `/pay?month=${encodeURIComponent(month)}`, { method: "GET", verb: "share My Pay" });

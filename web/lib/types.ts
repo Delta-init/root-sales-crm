@@ -1129,3 +1129,33 @@ export interface MediaWatch {
       leaders: { id: string; name: string }[]; due: string; since: string }[];
   };
 }
+
+/** A month of a sales CRM: its My Pay and its decided sales beside Root's figures (2026-11-01, stage 2). */
+export interface CommissionCompare {
+  code: string;
+  month: string;
+  slabsFrom: string;
+  pay: {
+    crmError: string | null;
+    differ: number;
+    people: Array<{
+      user: string;
+      name: string;
+      crm: { role: string; level: string; percent: number; earned: number; balance: number; payable: number } | null;
+      root: { role: string; level: string; percent: number; salary: number; target: number; earned: number; balance: number; payable: number } | null;
+      same: boolean;
+    }>;
+  };
+  sales: {
+    differ: number;
+    list: Array<{
+      saleId: string;
+      student: string;
+      course: string;
+      saleDate: string | null;
+      crm: { state: string; lines: Array<{ role: string; userName: string; amount: number }> };
+      root: { state: string; reason: string; lines: Array<{ role: string; userName: string; amount: number }> };
+      same: boolean;
+    }>;
+  };
+}

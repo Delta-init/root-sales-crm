@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { plans, putCourse, putSettings, putSlabs } from "../controllers/commissionPlanController.js";
+import { compare, plans, putCourse, putSettings, putSlabs } from "../controllers/commissionPlanController.js";
 import { authenticate, requireRole } from "../middleware/auth.js";
 
 const router = Router();
@@ -11,6 +11,8 @@ const router = Router();
 router.use(authenticate, requireRole("root_admin"));
 
 router.get("/", plans);
+// Root's figures beside the CRM's for a month (stage 2) — before a CRM is switched to Root's.
+router.get("/:code/compare", compare);
 router.put("/:code/courses/:courseId", putCourse);
 router.put("/:code/slabs/:role", putSlabs);
 router.put("/:code/settings", putSettings);

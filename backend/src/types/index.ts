@@ -449,6 +449,8 @@ export interface ICommissionPlan {
   portal: PlanPortal;
   tlRule: PlanTlRule;
   tlSlab: boolean;
+  /** Missing on a plan copied before 2026-11-01's stage 2: the portal's built-in setting then. */
+  tlPaidOnOwnClose?: boolean | null;
   salesManager: IPlanPerson | null;
   excluded: IPlanPerson[];
   courses: IPlanCourse[];

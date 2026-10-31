@@ -1,6 +1,7 @@
 import type { Response, NextFunction } from "express";
 import { z } from "zod";
-import { commissionPlans, saveCourse, saveSettings, saveSlabs } from "../services/commissionPlanService.js";
+import { commissionPlans, compareMonth, saveCourse, saveSettings, saveSlabs } from "../services/commissionPlanService.js";
+import { validMonth } from "../services/crmCommissionService.js";
 import { record } from "../services/auditService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
 import type { AuthenticatedRequest, OrgCode } from "../types/index.js";
@@ -10,6 +11,25 @@ export const plans = async (_req: AuthenticatedRequest, res: Response, next: Nex
   try {
     sendSuccess(res, "Commission plans", await commissionPlans());
   } catch (error) {
+    next(error);
+  }
+};
+
+/* GET /commission-plans/:code/compare?month= — a month of a portal, the CRM's figures beside Root's (2026-11-01). */
+export const compare = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  const month = req.query.month;
+  if (!validMonth(month)) {
+    sendError(res, "month is required as YYYY-MM", 400);
+    return;
+  }
+  try {
+    sendSuccess(res, "Compared", await compareMonth(req.params.code, month));
+  } catch (error) {
+    const status = (error as { statusCode?: number }).statusCode;
+    if (status) {
+      sendError(res, (error as Error).message, status);
+      return;
+    }
     next(error);
   }
 };

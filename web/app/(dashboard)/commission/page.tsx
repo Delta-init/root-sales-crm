@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api, apiErrorMessage } from "@/lib/axios";
-import type { CommissionSlabRow, CrmCommissionPlan, RootCommissionPlan } from "@/lib/types";
+import type { CommissionCompare, CommissionSlabRow, CrmCommissionPlan, RootCommissionPlan } from "@/lib/types";
 
 /**
  * Commission plans. Each sales CRM's own plan, read only (the user, 2026-10-09), and — since 2026-11-01 ("one plan,
@@ -414,6 +414,8 @@ function RootPlanSection({ code, name, tlPaid, crm, root }: { code: string; name
         </CardContent>
       </Card>
 
+      <CompareCard code={code} name={name} />
+
       {root.changes.length > 0 && (
         <Card>
           <CardHeader className="pb-3"><CardTitle className="text-base">Changes made here</CardTitle></CardHeader>
@@ -568,5 +570,137 @@ function PeopleDialog({ code, root, onClose }: { code: string; root: RootCommiss
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/* ── Root's figures beside the CRM's (2026-11-01, stage 2) ──────────────────────────────────────────────────────── */
+
+const ROLE_SHORT: Record<string, string> = { sales: "Sales Staff", tl: "Team Leader", sm: "Sales Manager" };
+/** Every month from October 2026 (when commission starts) to this one, newest first. */
+function payMonths(): string[] {
+  const now = new Date(Date.now() + 4 * 3_600_000).toISOString().slice(0, 7);
+  const out: string[] = [];
+  for (let m = "2026-10"; m <= now; ) {
+    out.unshift(m);
+    const [y, mo] = m.split("-").map(Number);
+    m = mo === 12 ? `${y! + 1}-01` : `${y}-${String(mo! + 1).padStart(2, "0")}`;
+  }
+  return out;
+}
+const linesText = (ls: Array<{ role: string; userName: string; amount: number }>) =>
+  ls.length ? ls.map((l) => `${ROLE_SHORT[l.role] ?? l.role} ${l.userName} ${aed(l.amount)}`).join(" · ") : "nobody";
+
+function CompareCard({ code, name }: { code: string; name: string }) {
+  const months = payMonths();
+  const [month, setMonth] = useState(months[0]!);
+  const [asked, setAsked] = useState<string | null>(null);
+  const [onlyDiff, setOnlyDiff] = useState(true);
+  const q = useQuery({
+    queryKey: ["commission-compare", code, asked],
+    queryFn: async () => (await api.get(`/commission-plans/${code}/compare?month=${asked}`)).data.data as CommissionCompare,
+    enabled: !!asked,
+    retry: false,
+  });
+  const d = q.data;
+  const people = (d?.pay.people ?? []).filter((p) => !onlyDiff || !p.same);
+  const sales = (d?.sales.list ?? []).filter((s) => !onlyDiff || !s.same);
+  const cell = (crm: number | string | undefined, root: number | string | undefined, fmt: (v: number | string) => string = String) => (
+    <td className="whitespace-nowrap py-2 pr-3 text-right">
+      {root === undefined ? "—" : fmt(root)}
+      {crm !== undefined && crm !== root && <span className="block text-[11px] text-amber-600 dark:text-amber-400">CRM: {fmt(crm)}</span>}
+    </td>
+  );
+  const money2 = (v: number | string) => aed(Number(v));
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Root&apos;s figures beside {name}&apos;s</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          My Pay and who earns what, worked out by Root from the plan above, next to what {name} gives now. Use it to check Root agrees before {name} is switched to Root&apos;s figures.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <select aria-label="Month" value={month} onChange={(e) => setMonth(e.target.value)} className="h-9 rounded-md border border-border bg-background px-2 text-sm">
+            {months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+          </select>
+          <Button size="sm" onClick={() => { setAsked(month); if (asked === month) void q.refetch(); }} disabled={q.isFetching}>
+            {q.isFetching ? "Comparing…" : "Compare"}
+          </Button>
+          {d && (
+            <label className="ml-auto flex cursor-pointer items-center gap-2 text-sm">
+              <input type="checkbox" checked={onlyDiff} onChange={(e) => setOnlyDiff(e.target.checked)} /> Only differences
+            </label>
+          )}
+        </div>
+        {q.error && <p className="text-sm text-destructive">{apiErrorMessage(q.error, "Could not compare")}</p>}
+        {d && (
+          <>
+            <div className="flex flex-wrap gap-2 text-sm">
+              <Badge variant={d.pay.differ ? "warning" : "success"}>My Pay: {d.pay.differ ? `${d.pay.differ} of ${d.pay.people.length} people differ` : `all ${d.pay.people.length} the same`}</Badge>
+              <Badge variant={d.sales.differ ? "warning" : "success"}>Sales: {d.sales.differ ? `${d.sales.differ} of ${d.sales.list.length} differ` : `all ${d.sales.list.length} the same`}</Badge>
+            </div>
+            {d.pay.crmError && <p className="text-sm text-amber-600 dark:text-amber-400">{name}&apos;s own My Pay couldn&apos;t be had: {d.pay.crmError}. Root&apos;s figures are shown alone.</p>}
+            {people.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[720px] text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                      <th className="pb-2 pr-3 font-medium">Person</th>
+                      <th className="pb-2 pr-3 font-medium">Position</th>
+                      <th className="pb-2 pr-3 text-right font-medium">Target (Root)</th>
+                      <th className="pb-2 pr-3 text-right font-medium">Level</th>
+                      <th className="pb-2 pr-3 text-right font-medium">%</th>
+                      <th className="pb-2 pr-3 text-right font-medium">Earned</th>
+                      <th className="pb-2 pr-3 text-right font-medium">Waiting</th>
+                      <th className="pb-2 text-right font-medium">Payable</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {people.map((p) => (
+                      <tr key={p.user} className="border-b border-border/50 last:border-0">
+                        <td className="py-2 pr-3">
+                          <span className="font-medium">{p.name}</span>
+                          {!p.crm && !d.pay.crmError && <span className="block text-[11px] text-amber-600 dark:text-amber-400">Not on the CRM&apos;s My Pay</span>}
+                          {!p.root && <span className="block text-[11px] text-amber-600 dark:text-amber-400">Not on Root&apos;s</span>}
+                        </td>
+                        <td className="py-2 pr-3">
+                          {ROLE_SHORT[p.root?.role ?? p.crm?.role ?? ""] ?? "—"}
+                          {p.crm && p.root && p.crm.role !== p.root.role && <span className="block text-[11px] text-amber-600 dark:text-amber-400">CRM: {ROLE_SHORT[p.crm.role] ?? p.crm.role}</span>}
+                        </td>
+                        <td className="whitespace-nowrap py-2 pr-3 text-right">{p.root ? aed(p.root.target) : "—"}</td>
+                        {cell(p.crm?.level, p.root?.level)}
+                        {cell(p.crm?.percent, p.root?.percent, (v) => `${v}%`)}
+                        {cell(p.crm?.earned, p.root?.earned, money2)}
+                        {cell(p.crm?.balance, p.root?.balance, money2)}
+                        {cell(p.crm?.payable, p.root?.payable, money2)}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {sales.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Who earns what on {monthLabel(d.month)}&apos;s sales</p>
+                <ul className="space-y-2 text-sm">
+                  {sales.map((s) => (
+                    <li key={s.saleId} className="rounded-md border border-border p-2.5">
+                      <p className="font-medium">{s.student} <span className="font-normal text-muted-foreground">· {s.course}{s.saleDate ? ` · ${s.saleDate.slice(0, 10)}` : ""}</span></p>
+                      <p className="mt-1 text-xs"><span className="text-muted-foreground">CRM ({s.crm.state}):</span> {linesText(s.crm.lines)}</p>
+                      <p className={`text-xs ${s.same ? "" : "text-amber-600 dark:text-amber-400"}`}>
+                        <span className="text-muted-foreground">Root ({s.root.state}):</span> {linesText(s.root.lines)}{s.root.reason ? ` — ${s.root.reason}` : ""}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-xs text-muted-foreground">A sale keeps the amounts of the plan it was counted under, so a plan change since shows here as a difference — expected, not a fault.</p>
+              </div>
+            )}
+            {!people.length && !sales.length && <p className="text-sm text-muted-foreground">{onlyDiff ? "No differences." : "Nothing this month."}</p>}
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }

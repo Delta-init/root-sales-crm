@@ -38,7 +38,7 @@ const run = async () => {
     for (const c of plan.courses.filter((c) => c.sales || c.tl || c.sm || c.creditUsd)) {
       console.log(`    ${c.name}: sales ${c.sales}, TL ${c.tl}, SM ${c.sm}, credit $${c.creditUsd}`);
     }
-    console.log(`  team leaders: ${plan.tlRule}${plan.tlSlab ? ", with their own slab" : ", on the Sales Staff slab"}`);
+    console.log(`  team leaders: ${plan.tlRule}${plan.tlSlab ? ", with their own slab" : ", on the Sales Staff slab"}${plan.tlPaidOnOwnClose ? ", paid the TL line on their own close" : ""}`);
     console.log(`  Sales Manager: ${plan.salesManager?.name ?? "none"}; earn nothing: ${plan.excluded.map((p) => p.name).join(", ") || "no one"}`);
     console.log(`  slab versions: ${plan.slabs.map((v) => v.from).join(", ")}; in force ${month}: from ${now?.from}`);
     for (const role of ["sales", "tl", "sm"] as const) {
