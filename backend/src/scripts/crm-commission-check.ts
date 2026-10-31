@@ -14,6 +14,7 @@
  *                        finance's Collected column (2026-10-31)
  *   Case 7  full payment paid in full first (2026-10-31): a part-paid sale earns nothing, all of it waiting; a sale
  *                        finished next month earns there, not here; an older sale finished this month earns here
+ *   Case 8  names        each line names the sale's salesperson and team leader (2026-10-31)
  *   Case 3  errors       no month, a bad month → 400
  *   Case 4  permission   no secret, a wrong one, a CRM's secret → 401; finance switched off in the registry → 503
  *
@@ -186,6 +187,13 @@ async function main() {
   check("November: the October sale finished on 3 Nov earns all 230 there; nothing waiting", nadiaNov?.amount === 230 && nadiaNov?.waiting === 0
     && JSON.stringify(nadiaNov?.lines?.map((l: Json) => l.student)) === JSON.stringify(["P2"]), show(nadiaNov));
   check("a sale with no payments followed (older ones) earns in its sale month, as before", delta.people?.find((p: Json) => p.name === "Ria")?.lines?.every((l: Json) => l.waiting === 0 && l.paidInFullAt), show(delta.people?.[0]?.lines));
+
+  step("Case 8 — the sale's salesperson and team leader on each line (2026-10-31)");
+  const lenaS3 = lenaRow?.lines?.find((l: Json) => l.student === "S3" && l.role === "tl");
+  const abrarS1 = delta.people?.find((p: Json) => p.name === "Abrar")?.lines?.find((l: Json) => l.student === "S1");
+  check("Abrar's S1 (sales manager): sold by Ria, Lena its team leader", abrarS1?.salesName === "Ria" && abrarS1?.tlName === "Lena", show(abrarS1));
+  check("Lena's own S3: she sold it and leads it", lenaS3?.salesName === "Lena" && lenaS3?.tlName === "Lena", show(lenaS3));
+  check("Draw's D1, no team leader line: the salesperson, no team leader", crm("draw").people?.[0]?.lines?.[0]?.salesName === "Irfana" && crm("draw").people?.[0]?.lines?.[0]?.tlName === "", show(crm("draw").people?.[0]?.lines?.[0]));
 
   step("Case 3 — errors");
   check("no month: 400", (await ask(null)).status === 400);

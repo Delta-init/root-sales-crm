@@ -33,6 +33,8 @@ export interface CommissionLine {
   amount: number; waiting: number;
   /** When the client finished paying; null while they owe. */
   paidInFullAt: string | null;
+  /** Who sold it and their team leader (2026-10-31: "show the salesperson and team leader"); "" when none. */
+  salesName: string; tlName: string;
   /** The CRM's student (finance's invoice external id); "" when the sale doesn't say. */
   studentId: string;
 }
@@ -104,7 +106,7 @@ export async function crmCommission(month: string): Promise<{ month: string; crm
       const [counted, progress, waiting] = await Promise.all([
         sales.find(
           { state: "counted", $or: [{ month }, { collections: { $elemMatch: { paidAt: { $gte: from, $lte: to } } } }] },
-          { projection: { student: 1, studentName: 1, courseName: 1, invoiceNumber: 1, saleDate: 1, month: 1, lines: 1, owedShare: 1, collections: 1 } },
+          { projection: { student: 1, studentName: 1, courseName: 1, invoiceNumber: 1, saleDate: 1, month: 1, lines: 1, owedShare: 1, collections: 1, closerName: 1 } },
         ).sort({ saleDate: 1 }).toArray(),
         sales.countDocuments({ month, state: "progress" }),
         sales.countDocuments({ month, state: "waiting" }),
@@ -116,6 +118,8 @@ export async function crmCommission(month: string): Promise<{ month: string; crm
         const earnedHere = !!fullAt && fullAt >= from && fullAt <= to;
         const waitingHere = !fullAt;
         if (!earnedHere && !waitingHere) continue;   // paid in full in another month: earned there
+        const nameAs = (role: string) => String((s.lines ?? []).find((l: Record<string, unknown>) => l.role === role)?.userName ?? "");
+        const salesName = nameAs("sales") || String(s.closerName ?? ""), tlName = nameAs("tl");
         const sold = new Set<string>();
         for (const l of s.lines ?? []) {
           const amount = Number(l.amount) || 0;
@@ -138,7 +142,7 @@ export async function crmCommission(month: string): Promise<{ month: string; crm
           p.lines.push({
             saleId: String(s._id), saleDate: new Date(s.saleDate).toISOString(), student: String(s.studentName ?? ""), course: String(s.courseName ?? ""),
             invoiceNumber: String(s.invoiceNumber ?? ""), role: String(l.role), amount: earned, waiting: held,
-            paidInFullAt: fullAt ? fullAt.toISOString() : null, studentId: s.student ? String(s.student) : "",
+            paidInFullAt: fullAt ? fullAt.toISOString() : null, salesName, tlName, studentId: s.student ? String(s.student) : "",
           });
           byPerson.set(id, p);
         }
