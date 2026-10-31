@@ -113,10 +113,20 @@ async function teamFor(db: Connection, saleTeam: string, closer: string, closerN
 export async function resolveSale(
   db: Connection,
   plan: ICommissionPlan,
-  input: { closer?: string | null; team?: string | null; course?: string | null },
+  input: {
+    closer?: string | null; team?: string | null; course?: string | null;
+    /** A bundle (Draw): every course of the sale — their rows added up, as the CRM adds them. */
+    courses?: string[] | null;
+    /** The amounts a held sale was held at (2026-11-01, stage 3): used instead of the course's row. */
+    amounts?: { sales: number; tl: number; sm: number; creditUsd?: number } | null;
+  },
   names: Names = new Names(db),
 ): Promise<Resolved> {
-  const row = courseRow(plan, idOf(input.course));
+  const row = input.amounts
+    ? { sales: positive(input.amounts.sales), tl: positive(input.amounts.tl), sm: positive(input.amounts.sm), creditUsd: positive(input.amounts.creditUsd) }
+    : input.courses?.length
+      ? input.courses.map((c) => courseRow(plan, idOf(c))).reduce((t, r) => ({ sales: t.sales + r.sales, tl: t.tl + r.tl, sm: t.sm + r.sm, creditUsd: t.creditUsd + r.creditUsd }), { sales: 0, tl: 0, sm: 0, creditUsd: 0 })
+      : courseRow(plan, idOf(input.course));
   const rules = rulesOf(plan);
   const none = { team: null, teamName: "", lines: [] as EngineLine[], plan: row };
   const closer = idOf(input.closer);

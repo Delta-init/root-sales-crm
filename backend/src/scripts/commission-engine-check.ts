@@ -2,7 +2,7 @@
  * Root's commission logic (services/commissionEngine.ts, 2026-11-01 stage 2), end to end — the same October data
  * (commission-engine-fixture.ts) in the Sales CRM, Draw and Remote, the plans copied into Root:
  *
- *   Case 1  who earns    a sale's lines under each portal's rules: the Sales CRM pays the TL but not on a team the
+ *   Case 1  who earns    a sale's lines under each portal's rules (a held sale at the amounts it was held at): the Sales CRM pays the TL but not on a team the
  *                        Sales Manager leads nor on their own close; Remote pays both; Draw never pays a TL; a shared
  *                        login earns nothing; a closer in two teams, a team with no leader, no closer, no Sales
  *                        Manager wait; the amounts are Root's (an edited course row is used at once)
@@ -131,6 +131,12 @@ async function main() {
   check("…no closer waits", r?.state === "waiting" && /closer/.test(r.reason), show(r));
   r = await resolve("delta", { closer: String(D.users.ria), team: String(D.teams.glad), course: String(new Types.ObjectId()) });
   check("…a course with no row: counted at 0", r?.state === "counted" && lines(r) === "sales:Ria:0 tl:Lena:0 sm:Abrar:0", show(r));
+  r = await resolve("delta", { closer: String(D.users.ria), team: String(D.teams.glad), course: String(D.courses.mbt), amounts: { sales: 200, tl: 70, sm: 90 } });
+  check("a held sale settled at the amounts it was held at (200 / 70 / 90), not the course's row", lines(r) === "sales:Ria:200 tl:Lena:70 sm:Abrar:90" && r.plan.sales === 200, show(r));
+  r = await resolve("draw", { closer: String(W.users.ria), team: null, courses: [String(W.courses.mbt), String(W.courses.dwt)] });
+  check("Draw: a bundle of MBT + DWT pays both rows added up (730 / SM 400)", r?.state === "counted" && lines(r) === "sales:Ria:730 sm:Abrar:400" && r.plan.creditUsd === 1500, show(r));
+  r = await call("POST", "/service/commission/resolve", as("delta"), { closer: String(D.users.ria), amounts: { sales: -1, tl: 0, sm: 0 } });
+  check("…a negative held amount → 400", r.status === 400, show(r.body));
   let put = await call("PUT", `/commission-plans/delta/courses/${D.courses.mbt}`, root, { sales: 250, tl: 90, sm: 100, creditUsd: 500 });
   r = await resolve("delta", { closer: String(D.users.ria), team: String(D.teams.glad), course: String(D.courses.mbt) });
   check("a course row edited in Root is used at once: 250 / 90", put.status === 200 && lines(r) === "sales:Ria:250 tl:Lena:90 sm:Abrar:100", show(r));

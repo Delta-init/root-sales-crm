@@ -32,7 +32,13 @@ export const plan = async (req: AuthenticatedRequest, res: Response, next: NextF
 };
 
 const idish = z.string().max(64).nullable().optional();
-const resolveSchema = z.object({ closer: idish, team: idish, course: idish });
+const amount = z.number().min(0).max(1_000_000);
+const resolveSchema = z.object({
+  closer: idish, team: idish, course: idish,
+  courses: z.array(z.string().max(64)).max(20).nullable().optional(),
+  // A held sale is settled at the amounts it was held at, not the course's row now.
+  amounts: z.object({ sales: amount, tl: amount, sm: amount, creditUsd: amount.optional() }).nullable().optional(),
+});
 
 /* POST /service/commission/resolve — who earns what on one sale, under Root's plan. Nothing is written. */
 export const resolve = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
