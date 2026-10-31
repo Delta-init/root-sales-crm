@@ -44,14 +44,13 @@ export function monthRange(month: string): { from: Date; to: Date } {
   return { from, to: new Date(next.getTime() - 1) };
 }
 
-/** The portal's fixed rules, from its plan (a plan copied before they were kept falls back to the portal's own). */
+/**
+ * The portal's fixed rules. Whether a team leader's own close pays the TL line is the portal's own, from code
+ * (BUILT_IN) — not what was stored when the plan was copied — so changing it (the Sales CRM, 2026-11-01) needs no
+ * change to a plan already in Root.
+ */
 function rulesOf(plan: ICommissionPlan) {
-  const built = BUILT_IN[plan.portal];
-  return {
-    tlRule: plan.tlRule,
-    tlSlab: plan.tlSlab,
-    tlPaidOnOwnClose: typeof plan.tlPaidOnOwnClose === "boolean" ? plan.tlPaidOnOwnClose : built.tlPaidOnOwnClose,
-  };
+  return { tlRule: plan.tlRule, tlSlab: plan.tlSlab, tlPaidOnOwnClose: BUILT_IN[plan.portal].tlPaidOnOwnClose };
 }
 
 /* ── Who earns what on a sale ─────────────────────────────────────────────────────────────────────────────────── */

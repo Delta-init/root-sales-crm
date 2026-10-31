@@ -91,8 +91,9 @@ const DRAW_REMOTE_SM: IPlanSlabRow[] = [
 export const BUILT_IN: Record<PlanPortal, { tlSlab: boolean; tlPaidOnOwnClose: boolean; slabs: Record<PlanSlabRole, IPlanSlabRow[]> }> = {
   delta: {
     tlSlab: true,
-    // TL_PAID_WHEN_THEY_CLOSE = false in the Sales CRM: a team leader's own close pays them as Sales Staff only.
-    tlPaidOnOwnClose: false,
+    // A team leader's own close pays them Sales Staff and TL (the user, 2026-11-01; Sales Only before), as the Sales
+    // CRM's TL_PAID_WHEN_THEY_CLOSE.
+    tlPaidOnOwnClose: true,
     slabs: {
       sales: SALES_STAFF,
       tl: [
@@ -462,7 +463,7 @@ export async function planForCrm(code: string, month: string) {
     portal: plan.portal,
     tlRule: plan.tlRule,
     tlSlab: plan.tlSlab,
-    tlPaidOnOwnClose: typeof plan.tlPaidOnOwnClose === "boolean" ? plan.tlPaidOnOwnClose : BUILT_IN[plan.portal].tlPaidOnOwnClose,
+    tlPaidOnOwnClose: BUILT_IN[plan.portal].tlPaidOnOwnClose,
     salesManager: plan.salesManager,
     excluded: plan.excluded,
     courses: plan.courses.map((c) => ({ courseId: c.courseId, name: c.name, sales: c.sales, tl: c.tl, sm: c.sm, creditUsd: c.creditUsd })),

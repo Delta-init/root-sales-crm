@@ -94,7 +94,7 @@ async function main() {
   const copied = spawnSync("bun", ["--no-env-file", path.join(process.env.E2E_REPO!, "src/scripts/commission-plan-copy.ts"), "--write"], { cwd: process.env.E2E_WORK, env: process.env, encoding: "utf8" });
   check("the three plans copied into Root", copied.status === 0 && (copied.stdout.match(/copied to Root/g) ?? []).length === 3, `${copied.stdout}${copied.stderr}`.slice(-400));
   const kept = await mongoose.connection.db!.collection("commissionplans").find().toArray();
-  check("…each with its fixed rule for a team leader's own close: the Sales CRM no, Remote yes", kept.find((p) => p.portal === "delta")?.tlPaidOnOwnClose === false
+  check("…each with its fixed rule for a team leader's own close: the Sales CRM and Remote pay the TL line", kept.find((p) => p.portal === "delta")?.tlPaidOnOwnClose === true
     && kept.find((p) => p.portal === "remote")?.tlPaidOnOwnClose === true && kept.find((p) => p.portal === "draw")?.tlRule === "never", show(kept.map((p) => [p.portal, p.tlRule, p.tlPaidOnOwnClose])));
 
   const login = async (email: string) => {
@@ -112,7 +112,10 @@ async function main() {
   check("Sales CRM: Ria's MBT, no team on the sale — her one team's: 230 / Lena 85 / Abrar 100", r?.state === "counted" && r.teamName === "Gladiators"
     && lines(r) === "sales:Ria:230 tl:Lena:85 sm:Abrar:100", show(r));
   r = await resolve("delta", { closer: String(D.users.lena), team: String(D.teams.glad), course: String(D.courses.mbt) });
-  check("…Lena closing in her own team: no TL line for her", lines(r) === "sales:Lena:230 tl:Lena:0 sm:Abrar:100" && /themselves/.test(r.lines[1].note), show(r));
+  check("…Lena closing in her own team: Sales Staff and TL (2026-11-01), the SM his", lines(r) === "sales:Lena:230 tl:Lena:85 sm:Abrar:100" && !r.lines[1].note, show(r));
+  await mongoose.connection.db!.collection("commissionplans").updateOne({ portal: "delta" }, { $set: { tlPaidOnOwnClose: false } });
+  r = await resolve("delta", { closer: String(D.users.lena), team: String(D.teams.glad), course: String(D.courses.mbt) });
+  check("…the portal's rule, not what a plan copied earlier stored", lines(r) === "sales:Lena:230 tl:Lena:85 sm:Abrar:100", show(r));
   r = await resolve("remote", { closer: String(R.users.lena), team: String(R.teams.glad), course: String(R.courses.mbt) });
   check("Remote: Lena closing in her own team is paid the TL line too", lines(r) === "sales:Lena:230 tl:Lena:85 sm:Abrar:100", show(r));
   r = await resolve("delta", { closer: String(D.users.nina), team: String(D.teams.managers), course: String(D.courses.mbt) });
@@ -152,8 +155,8 @@ async function main() {
   const fig = (x: Json) => x && [x.role, x.sales.value, x.level.name, x.salary, x.percent, x.commission.earned, x.commission.balance, x.commission.payable, x.total].join(" ");
   check("Ria: 22,000 received (s1 15,000, s2 5,000, s5's October 2,000) → C, 3,000 + 100%; 460 earned, 230 waiting",
     fig(row(pay, "Ria")) === "sales 22000 C 3000 100 460 230 460 3460" && row(pay, "Ria").sales.count === 3, fig(row(pay, "Ria")));
-  check("Lena on the TL slab: her team's 23,000 → Base 4,000 + 50%; 400 earned (her own close in it), 85 waiting",
-    fig(row(pay, "Lena")) === "tl 23000 Base 4000 50 400 85 200 4200" && row(pay, "Lena").teams.join() === "Gladiators", fig(row(pay, "Lena")));
+  check("Lena on the TL slab: her team's 23,000 → Base 4,000 + 50%; 485 earned (her own close in it, TL line too), 85 waiting",
+    fig(row(pay, "Lena")) === "tl 23000 Base 4000 50 485 85 242.5 4242.5" && row(pay, "Lena").teams.join() === "Gladiators", fig(row(pay, "Lena")));
   check("Abrar on the SM slab counts every sale, the shared login's too: 28,250 → Base 5,000 + 50%; 400 earned",
     fig(row(pay, "Abrar")) === "sm 28250 Base 5000 50 400 100 200 5200" && row(pay, "Abrar").awaitingFinance.count === 1, fig(row(pay, "Abrar")));
   check("Mo: his payment in AED counts (2,250) → Base, 0%: 200 earned, nothing payable", fig(row(pay, "Mo")) === "sales 2250 Base 2000 0 200 0 0 2000", fig(row(pay, "Mo")));
@@ -163,7 +166,7 @@ async function main() {
     !row(pay, "Shared login") && !row(pay, "Old") && row(pay, "Nina")?.total === 2000 && row(pay, "Zed")?.total === 2000, show(pay?.people?.map((p: Json) => p.name)));
   check("the SM first, then team leaders, then the rest", pay?.people?.[0]?.name === "Abrar" && ["tl", "tl"].join() === pay.people.slice(1, 3).map((p: Json) => p.role).join(), show(pay?.people?.map((p: Json) => p.role)));
   const drawPay = (await call("GET", "/service/commission/pay?month=2026-10", as("draw"))).body?.data;
-  check("Draw: Lena on the Sales Staff slab, her own close only: 1,000 → Base", fig(row(drawPay, "Lena")) === "sales 1000 Base 2000 0 400 85 0 2000", fig(row(drawPay, "Lena")));
+  check("Draw: Lena on the Sales Staff slab, her own close only: 1,000 → Base", fig(row(drawPay, "Lena")) === "sales 1000 Base 2000 0 485 85 0 2000", fig(row(drawPay, "Lena")));
   check("…Draw's Sales Manager slab (Base 5,000 + 50%)", fig(row(drawPay, "Abrar")) === "sm 28250 Base 5000 50 400 100 200 5200", fig(row(drawPay, "Abrar")));
   const month = new Date(Date.now() + 4 * 3600_000).toISOString().slice(0, 7);
   put = await call("PUT", "/commission-plans/delta/slabs/sales", root, { rows: [{ name: "Base", target: 0, salary: 2500, percent: 10 }] });
@@ -185,7 +188,7 @@ async function main() {
   let cmp = await call("GET", "/commission-plans/delta/compare?month=2026-10", root);
   const pp = (n: string) => cmp.body?.data?.pay?.people?.find((p: Json) => p.name === n);
   check("Ria the same in both", cmp.status === 200 && pp("Ria")?.same === true && pp("Ria").root.target === 22000, show(pp("Ria")));
-  check("Lena differs: the CRM pays 210, Root 200", pp("Lena")?.same === false && pp("Lena").crm.payable === 210 && pp("Lena").root.payable === 200, show(pp("Lena")));
+  check("Lena differs: the CRM pays 210, Root 242.50", pp("Lena")?.same === false && pp("Lena").crm.payable === 210 && pp("Lena").root.payable === 242.5, show(pp("Lena")));
   check("someone only Root lists (Abrar) differs, counted", pp("Abrar")?.crm === null && cmp.body?.data?.pay?.differ >= 2 && cmp.body.data.pay.crmError === null, show(cmp.body?.data?.pay?.differ));
   const sales = cmp.body?.data?.sales;
   const sl = (k: string) => sales?.list?.find((s: Json) => s.student === `Student ${k}`);

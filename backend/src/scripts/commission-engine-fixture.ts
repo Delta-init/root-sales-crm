@@ -9,7 +9,7 @@
  *   Sales      s1 Ria, 15,000 paid in full in October          s2 Ria, 10,000, half paid in October (owes half)
  *              s3 Gopika, 5,000, finance not approved yet      s4 Mo, 2,250 paid in AED, lines from an older plan
  *              s5 Ria, a September sale finished in October     s6 reversed
- *              s7 Shared login's sale (excluded)                s8 Lena's own close, 1,000 paid in full
+ *              s7 Shared login's sale (excluded)                s8 Lena's own close, 1,000 paid in full (TL line paid)
  */
 import { Types } from "mongoose";
 
@@ -58,7 +58,7 @@ export async function seedCrm(db: Db) {
     sale("s6", { closer: u.ria, team: t.glad, state: "reversed", month: "2026-10", saleDate: at("2026-10-15T08:00:00Z"), fee: 9000, owedShare: 0, collections: [{ paidAt: at("2026-10-15T08:00:00Z"), share: 1 }], lines: glad("ria") }),
     sale("s7", { closer: u.shared, team: t.glad, state: "excluded", month: "2026-10", saleDate: at("2026-10-18T08:00:00Z"), fee: 3000, lines: [] }),
     sale("s8", { closer: u.lena, team: t.glad, state: "counted", month: "2026-10", saleDate: at("2026-10-08T08:00:00Z"), fee: 1000, owedShare: 0,
-      collections: [{ paidAt: at("2026-10-08T08:00:00Z"), share: 1 }], lines: [line("sales", "lena", 230), line("tl", "lena", 0), line("sm", "abrar", 100)] }),
+      collections: [{ paidAt: at("2026-10-08T08:00:00Z"), share: 1 }], lines: [line("sales", "lena", 230), line("tl", "lena", 85), line("sm", "abrar", 100)] }),
   ]);
   return { users: u, teams: t, courses: c, students: st };
 }
