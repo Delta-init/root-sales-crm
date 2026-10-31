@@ -5,7 +5,8 @@
  *   Case 1  happy path   per CRM, per person: their salesperson / team leader / sales manager lines added up, the
  *                        sales behind them, the CRM's currency; only counted sales of that month; in-progress and
  *                        waiting ones counted, not listed
- *   Case 2  edge         a person with lines in two roles of one sale counts the sale once; a zero line is left out;
+ *   Case 2  edge         a person with lines in two roles of one sale counts the sale once; a team leader's or sales
+ *                        manager's zero line is left out, a salesperson's zero sale kept (2026-10-31, as My Pay counts it);
  *                        a CRM that cannot be read says so and the rest still answer
  *   Case 5  payable      each person's My Pay figures from the CRM's API (2026-10-21): payable, percent, level; a
  *                        CRM whose API is not set up says why, with no payable
@@ -114,9 +115,11 @@ async function main() {
   PAY.draw = { secret: process.env.DRAW_SSO_SECRET ?? "", people: [
     { user: String(irfana), name: "Irfana", role: "sales", level: "Level 1", percent: 40, earned: 250, payable: 100, notCountedYet: 0 },
   ] };
-  await drawDb.collection("commissionsales").insertOne(
+  await drawDb.collection("commissionsales").insertMany([
     sale({ date: "2026-10-05T08:00:00Z", month: "2026-10", state: "counted", student: "D1", lines: [["sales", irfana, "Irfana", 250], ["sm", maneesh, "Maneesh", 25]] }),
-  );
+    // A course with no commission on the plan: Irfana's sale still counts (at 0), Maneesh's 0 doesn't.
+    sale({ date: "2026-10-06T08:00:00Z", month: "2026-10", state: "counted", student: "D2", lines: [["sales", irfana, "Irfana", 0], ["sm", maneesh, "Maneesh", 0]] }),
+  ]);
 
   await deltaDb.collection("appsettings").insertOne({ key: "app", bangaloreRevenue: { inrPerAed: 24 } });
 
@@ -134,6 +137,10 @@ async function main() {
   check("not reversed, not September's", !delta.people?.some((p: Json) => p.lines.some((l: Json) => ["S6", "S7"].includes(l.student))));
   check("Draw: Irfana 250, Maneesh 25", JSON.stringify(crm("draw").people?.map((p: Json) => [p.name, p.amount])) === JSON.stringify([["Irfana", 250], ["Maneesh", 25]]), show(crm("draw")));
   check("Remote: nothing this month, no error", (crm("remote").people ?? []).length === 0 && crm("remote").error === null, show(crm("remote")));
+
+  const irf = crm("draw").people?.find((p: Json) => p.name === "Irfana"), man = crm("draw").people?.find((p: Json) => p.name === "Maneesh");
+  check("a salesperson's sale with no commission: listed at 0, counted as a sale — not the sales manager's 0",
+    irf?.sales === 2 && irf?.lines?.some((l: Json) => l.student === "D2" && l.amount === 0) && man?.sales === 1 && !man?.lines?.some((l: Json) => l.student === "D2"), show(crm("draw").people));
 
   step("Case 2 — a CRM that cannot be read");
   check("Banglore: says it cannot be read, the others still answered", typeof crm("banglore").error === "string" && crm("banglore").error.length > 0 && delta.people?.length === 3, show(crm("banglore")));

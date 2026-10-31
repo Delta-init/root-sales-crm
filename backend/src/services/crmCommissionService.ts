@@ -10,6 +10,7 @@ import { inrPerAed } from "./bangaloreRevenue.js";
  * what decided once), per person: their lines as salesperson, team leader or sales manager added up, and the sales
  * behind them. Amounts in the CRM's own currency, major units, as the CRM keeps them. Sales still on their way (in
  * progress or waiting) are counted, not listed. A CRM that can't be reached says so and the others still answer.
+ * A salesperson's sale that earns nothing (no commission on its course) is listed at 0, as My Pay counts it.
  *
  * And what finance pays (the user, 2026-10-21: "finance pays My Pay's commission payable"): each person's My Pay
  * figures from the CRM's own API (GET /service/pay) — the commission earned × their salary-slab level's percent,
@@ -80,7 +81,10 @@ export async function crmCommission(month: string): Promise<{ month: string; crm
         const sold = new Set<string>();
         for (const l of s.lines ?? []) {
           const amount = Number(l.amount) || 0;
-          if (!l.user || !(amount > 0)) continue;
+          // A salesperson's own sale stays even at 0 — a course with no commission on the plan still counts toward
+          // their slab in My Pay (2026-10-31: finance listed 11 sales where My Pay and the TV had 12); a team leader's
+          // or sales manager's 0 is left out.
+          if (!l.user || !(amount > 0 || l.role === "sales")) continue;
           const id = String(l.user);
           const mine = payByUser?.get(id);
           const p = byPerson.get(id) ?? {
