@@ -1,5 +1,6 @@
 import { getSources } from "./crmConnections.js";
 import { resolveTarget, callTarget } from "../lib/targetClient.js";
+import { inrPerAed } from "./bangaloreRevenue.js";
 
 /**
  * GET /service/crm-commission?month=YYYY-MM — finance's CRM commission tab (the user, 2026-10-21: "commission of each
@@ -13,11 +14,17 @@ import { resolveTarget, callTarget } from "../lib/targetClient.js";
  * And what finance pays (the user, 2026-10-21: "finance pays My Pay's commission payable"): each person's My Pay
  * figures from the CRM's own API (GET /service/pay) — the commission earned × their salary-slab level's percent,
  * "payable" — which can only be worked out there. A CRM whose API can't say gives `payError` and no payable.
+ *
+ * And for finance's Collected column (2026-10-31: a Bangalore sale's INR 57,375 was added up as AED 57,375): each
+ * sale's student — its invoice's external id in finance, as invoice numbers repeat across finance's organizations —
+ * and the CRM's rupees-per-dirham rate, the one its revenue (and the TV) counts rupees at.
  * Read-only.
  */
 
 export interface CommissionLine {
   saleId: string; saleDate: string; student: string; course: string; invoiceNumber: string; role: string; amount: number;
+  /** The CRM's student (finance's invoice external id); "" when the sale doesn't say. */
+  studentId: string;
 }
 export interface CommissionPerson {
   userId: string; name: string; roles: string[]; amount: number; sales: number; lines: CommissionLine[];
@@ -29,6 +36,8 @@ export interface CrmCommission {
   people: CommissionPerson[]; total: number; pending: { progress: number; waiting: number };
   /** Payable this month, all people; null with payError when the CRM's My Pay figures couldn't be had. */
   payableTotal: number | null; payError: string | null;
+  /** 1 AED = this many rupees, the CRM's Settings rate; null when it couldn't be read. */
+  inrPerAed: number | null;
 }
 
 interface PayPerson { user: string; name: string; percent: number; level: string; earned: number; payable: number }
@@ -52,15 +61,17 @@ export function validMonth(v: unknown): v is string {
 
 export async function crmCommission(month: string): Promise<{ month: string; crms: CrmCommission[] }> {
   const { sources, failures } = await getSources();
-  const crms: CrmCommission[] = await Promise.all(sources.map(async ({ org, conn }) => {
+  const crms: CrmCommission[] = await Promise.all(sources.map(async (src) => {
+    const { org, conn } = src;
     const base = { code: org.code, name: org.name, currency: (org as { currency?: string }).currency || "AED" };
     const pay = await payOf(org.code, month);
     const payByUser = "people" in pay ? new Map(pay.people.map((p) => [String(p.user), p])) : null;
     const payError = "error" in pay ? pay.error : null;
+    const rate = await inrPerAed(src).catch(() => null);
     try {
       const sales = conn.collection("commissionsales");
       const [counted, progress, waiting] = await Promise.all([
-        sales.find({ month, state: "counted" }, { projection: { studentName: 1, courseName: 1, invoiceNumber: 1, saleDate: 1, lines: 1 } }).sort({ saleDate: 1 }).toArray(),
+        sales.find({ month, state: "counted" }, { projection: { student: 1, studentName: 1, courseName: 1, invoiceNumber: 1, saleDate: 1, lines: 1 } }).sort({ saleDate: 1 }).toArray(),
         sales.countDocuments({ month, state: "progress" }),
         sales.countDocuments({ month, state: "waiting" }),
       ]);
@@ -82,7 +93,7 @@ export async function crmCommission(month: string): Promise<{ month: string; crm
           if (!sold.has(id)) { p.sales++; sold.add(id); }
           p.lines.push({
             saleId: String(s._id), saleDate: new Date(s.saleDate).toISOString(), student: String(s.studentName ?? ""), course: String(s.courseName ?? ""),
-            invoiceNumber: String(s.invoiceNumber ?? ""), role: String(l.role), amount,
+            invoiceNumber: String(s.invoiceNumber ?? ""), role: String(l.role), amount, studentId: s.student ? String(s.student) : "",
           });
           byPerson.set(id, p);
         }
@@ -91,11 +102,11 @@ export async function crmCommission(month: string): Promise<{ month: string; crm
         .map((p) => ({ ...p, amount: Math.round(p.amount * 100) / 100 }))
         .sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name));
       const payableTotal = payByUser ? Math.round(people.reduce((t, p) => t + (p.payable ?? 0), 0) * 100) / 100 : null;
-      return { ...base, error: null, people, total: Math.round(people.reduce((t, p) => t + p.amount, 0) * 100) / 100, pending: { progress, waiting }, payableTotal, payError };
+      return { ...base, error: null, people, total: Math.round(people.reduce((t, p) => t + p.amount, 0) * 100) / 100, pending: { progress, waiting }, payableTotal, payError, inrPerAed: rate };
     } catch (e) {
-      return { ...base, error: e instanceof Error ? e.message : "Could not read its commission", people: [], total: 0, pending: { progress: 0, waiting: 0 }, payableTotal: null, payError };
+      return { ...base, error: e instanceof Error ? e.message : "Could not read its commission", people: [], total: 0, pending: { progress: 0, waiting: 0 }, payableTotal: null, payError, inrPerAed: rate };
     }
   }));
-  for (const f of failures) crms.push({ code: f.code, name: f.name, currency: "AED", error: f.error, people: [], total: 0, pending: { progress: 0, waiting: 0 }, payableTotal: null, payError: null });
+  for (const f of failures) crms.push({ code: f.code, name: f.name, currency: "AED", error: f.error, people: [], total: 0, pending: { progress: 0, waiting: 0 }, payableTotal: null, payError: null, inrPerAed: null });
   return { month, crms };
 }

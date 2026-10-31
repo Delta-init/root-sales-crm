@@ -9,6 +9,8 @@
  *                        a CRM that cannot be read says so and the rest still answer
  *   Case 5  payable      each person's My Pay figures from the CRM's API (2026-10-21): payable, percent, level; a
  *                        CRM whose API is not set up says why, with no payable
+ *   Case 6  rupees       each CRM's rupees-per-dirham rate (its Settings', 22.75 when unset) and each line's student, for
+ *                        finance's Collected column (2026-10-31)
  *   Case 3  errors       no month, a bad month → 400
  *   Case 4  permission   no secret, a wrong one, a CRM's secret → 401; finance switched off in the registry → 503
  *
@@ -116,6 +118,8 @@ async function main() {
     sale({ date: "2026-10-05T08:00:00Z", month: "2026-10", state: "counted", student: "D1", lines: [["sales", irfana, "Irfana", 250], ["sm", maneesh, "Maneesh", 25]] }),
   );
 
+  await deltaDb.collection("appsettings").insertOne({ key: "app", bangaloreRevenue: { inrPerAed: 24 } });
+
   step("Case 1 — a month's commission, per CRM and person");
   let r = await ask("2026-10");
   check("200 with every CRM", r.status === 200 && (r.body?.data?.crms ?? []).length === 4, show(r.body));
@@ -141,6 +145,13 @@ async function main() {
   check("Draw: Irfana 100 payable of 250", crm("draw").people?.[0]?.payable === 100 && crm("draw").payableTotal === 100, show(crm("draw").people));
   check("asked each CRM's API with its own secret, for the month", payHits.some((h) => h.crm === "delta" && h.secretOk && h.month === "2026-10") && payHits.some((h) => h.crm === "draw" && h.secretOk), show(payHits));
   check("Remote: its API isn't set up — says why, no payable", typeof crm("remote").payError === "string" && /not configured/.test(crm("remote").payError) && crm("remote").payableTotal === null, show(crm("remote")));
+
+  step("Case 6 — the rate and the student, for finance's Collected (2026-10-31)");
+  check("Sales CRM: its Settings rate, 24", delta.inrPerAed === 24, show(delta.inrPerAed));
+  check("Draw: none set — 22.75", crm("draw").inrPerAed === 22.75, show(crm("draw").inrPerAed));
+  const s1 = (await deltaDb.collection("commissionsales").findOne({ studentName: "S1" }))!;
+  const riaLines = delta.people?.find((p: Json) => p.name === "Ria")?.lines ?? [];
+  check("each line carries its sale's student", riaLines.find((l: Json) => l.student === "S1")?.studentId === String(s1.student) && riaLines.every((l: Json) => /^[a-f0-9]{24}$/.test(l.studentId)), show(riaLines));
 
   step("Case 3 — errors");
   check("no month: 400", (await ask(null)).status === 400);

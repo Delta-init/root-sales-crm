@@ -31,7 +31,7 @@ export const COUNTED_PAYMENT = {
 };
 
 /** The CRM's rate: 1 AED = this many rupees. */
-async function inrPerAed(src: CrmSource): Promise<number> {
+export async function inrPerAed(src: CrmSource): Promise<number> {
   const doc = await src.conn.collection("appsettings").findOne({ key: "app" }, { projection: { bangaloreRevenue: 1 } }).catch(() => null);
   const rate = (doc as { bangaloreRevenue?: { inrPerAed?: unknown } } | null)?.bangaloreRevenue?.inrPerAed;
   return typeof rate === "number" && rate > 0 ? rate : DEFAULT_INR_PER_AED;
