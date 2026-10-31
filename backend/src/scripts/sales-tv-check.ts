@@ -15,6 +15,9 @@
  *   Case 1b bosses       (2026-10-23) Delta's team leader (Tom), Sales Manager (Sam) and Super Admin (Ada) — read
  *                        from Delta's database — hidden on the Sales TV, shown on the Manager TV; a leader of an
  *                        inactive team (Dev) still shown
+ *   Case 6  today + hidden (2026-10-31) each CRM's money collected today, counted as the leaderboard counts (no rupees,
+ *                        a balance payment once approved, not yesterday's), on the TV's own people; the Manager TV
+ *                        hides Dilshad (a Super Admin) but counts his figures in the CRM's total, as `hidden`
  *   Case 5  Manager TV   (services/managerTvService.ts, 2026-10-23) the same three CRMs and the CS team as a fourth
  *                        card from CS Portal's open CS board, ranked as it ranks them; its approved payments
  *                        among the closes ("CS payment"), only the new ones with ?since=; asked at most every 20 s;
@@ -65,7 +68,7 @@ const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
 const MONTH_NOW = (() => { const g = new Date(Date.now() + 4 * 3_600_000); return `${g.getUTCFullYear()}-${String(g.getUTCMonth() + 1).padStart(2, "0")}`; })();
 // Delta's people are CRM users: ObjectIds, as a lead's assignedTo holds them.
 const oid = () => new mongoose.Types.ObjectId();
-const DELTA_ID = { asha: oid(), bina: oid(), cara: oid(), dev: oid(), eli: oid(), tom: oid(), sam: oid(), ada: oid() };
+const DELTA_ID = { asha: oid(), bina: oid(), cara: oid(), dev: oid(), eli: oid(), tom: oid(), sam: oid(), ada: oid(), dilshad: oid() };
 
 // ── The stand-in: three CRMs and HRMS ────────────────────────────────────────
 const hits: { crm: string; query: string }[] = [];
@@ -107,6 +110,7 @@ function crmAnswer(crm: string, url: URL) {
       // 1 (AED 4,000 each) — and on the same revenue and closings, more calls today first: Ada, then Sam.
       { id: String(DELTA_ID.sam), name: "Sam", email: "sam@delta-e2e.test", team: "Falcons", closingsMonth: 1, closingsToday: 0, revenueMonth: 4000, callsToday: 0, connectedToday: 0, talkSecondsToday: 0 },
       { id: String(DELTA_ID.ada), name: "Ada", email: "ada@delta-e2e.test", team: "Falcons", closingsMonth: 1, closingsToday: 0, revenueMonth: 4000, callsToday: 3, connectedToday: 1, talkSecondsToday: 0 },
+      { id: String(DELTA_ID.dilshad), name: "Dilshad", email: "dilshad@delta-e2e.test", team: "Falcons", closingsMonth: 2, closingsToday: 1, revenueMonth: 7000, callsToday: 2, connectedToday: 1, talkSecondsToday: 100 },
       { id: String(DELTA_ID.eli), name: "Eli", email: "eli@delta-e2e.test", team: "Falcons", closingsMonth: 0, closingsToday: 0, revenueMonth: 0, callsToday: 0, connectedToday: 0, talkSecondsToday: 0 },
     ]
     : [
@@ -188,8 +192,17 @@ async function main() {
   if (deltaDb.host !== "127.0.0.1") throw new Error("Delta's database is not local");
   await deltaDb.db!.dropDatabase();
   const monthStart = (() => { const [y, m] = MONTH_NOW.split("-").map(Number) as [number, number]; return new Date(Date.UTC(y, m - 1, 1) - 4 * 3_600_000); })();
+  // Paid today (Dubai) as the CRMs store a payment's day: that date at 00:00 UTC.
+  const todayPaid = (() => { const g = new Date(Date.now() + 4 * 3_600_000); return new Date(Date.UTC(g.getUTCFullYear(), g.getUTCMonth(), g.getUTCDate())); })();
+  const yesterdayPaid = new Date(todayPaid.getTime() - 86_400_000);
   await deltaDb.collection("leads").insertMany([
-    { name: "L1", phone: "1", status: "assigned", assignedTo: DELTA_ID.asha, createdAt: new Date() },
+    { name: "L1", phone: "1", status: "assigned", assignedTo: DELTA_ID.asha, createdAt: new Date(), payments: [
+      { amount: 2000, paidAt: todayPaid }, { amount: 999, paidAt: todayPaid, currency: "INR" },
+      { amount: 500, paidAt: todayPaid, finance: { externalId: "bp-1", state: "pending" } }, { amount: 300, paidAt: yesterdayPaid },
+    ] },
+    { name: "L6", phone: "6", status: "assigned", assignedTo: DELTA_ID.dev, createdAt: new Date(), payments: [{ amount: 1000, paidAt: todayPaid, finance: { externalId: "bp-2", state: "approved" } }] },
+    { name: "L7", phone: "7", status: "assigned", assignedTo: DELTA_ID.dilshad, createdAt: new Date(), payments: [{ amount: 4000, paidAt: todayPaid }] },
+    { name: "L8", phone: "8", status: "lost", assignedTo: DELTA_ID.cara, createdAt: new Date(monthStart.getTime() - 60_000), payments: [{ amount: 750, paidAt: todayPaid }] },
     { name: "L2", phone: "2", status: "assigned", assignedTo: DELTA_ID.asha, createdAt: new Date(monthStart.getTime() + 60_000) },
     { name: "L3", phone: "3", status: "assigned", assignedTo: DELTA_ID.dev, createdAt: new Date() },
     { name: "L4", phone: "4", status: "assigned", assignedTo: DELTA_ID.eli, createdAt: new Date(monthStart.getTime() - 60_000) }, // last month, a minute before
@@ -204,7 +217,7 @@ async function main() {
   ]);
   await deltaDb.collection("commissionsettings").insertOne({ key: "default", salesManager: DELTA_ID.sam });
   await deltaDb.collection("roles").insertOne({ _id: adminRole, roleName: "Super Admin", isSystemRole: true });
-  await deltaDb.collection("users").insertOne({ _id: DELTA_ID.ada, name: "Ada", role: adminRole, status: "active" });
+  await deltaDb.collection("users").insertMany([{ _id: DELTA_ID.ada, name: "Ada", role: adminRole, status: "active" }, { _id: DELTA_ID.dilshad, name: "Dilshad", role: adminRole, status: "active" }]);
   await deltaDb.close();
 
   step("Setting up: the registry and two admins");
@@ -242,7 +255,7 @@ async function main() {
     [["Bina", "delta", "Dubai Sales", "Falcons", "lunch"], ["Zed", "draw", "Draw CRM", "Tigers", null]]);
   same("photos from HRMS: Bina's link, Zed has none (initials)", (d.onBreak ?? []).map((b: Json) => b.photoUrl), ["https://hrms-e2e.test/photos/bina.jpg?sig=abc", null]);
   check("HRMS asked once, signed, for the people on a break and in the tables (each once)", hrmsHits.length === 1 && hrmsHits[0].signed
-    && hrmsHits[0].emails.sort().join() === "ada@delta-e2e.test,asha@delta-e2e.test,bina@delta-e2e.test,dev@delta-e2e.test,sam@delta-e2e.test,tom@delta-e2e.test,wasim@draw-e2e.test,yan@draw-e2e.test,zed@draw-e2e.test", show(hrmsHits));
+    && hrmsHits[0].emails.sort().join() === "ada@delta-e2e.test,asha@delta-e2e.test,bina@delta-e2e.test,dev@delta-e2e.test,dilshad@delta-e2e.test,sam@delta-e2e.test,tom@delta-e2e.test,wasim@draw-e2e.test,yan@draw-e2e.test,zed@draw-e2e.test", show(hrmsHits));
   same("the tables' people carry their photo too (the podium): Bina's link, Asha none", crmOf(d, "delta").people?.map((p: Json) => p.photoUrl),
     [null, "https://hrms-e2e.test/photos/bina.jpg?sig=abc", null]);
   check("each CRM asked once, the full answer (no parts=live, no after yet)", hitsOf("delta").length === 1 && hitsOf("draw").length === 1 && hitsOf("delta")[0].query === "", show(hits));
@@ -363,6 +376,22 @@ async function main() {
   check("CS Portal down: the CS card says why, the CRMs carry on", md.cs?.status === "error" && /exploded/.test(md.cs?.error ?? "") && (md.crms ?? []).length === 3, show(md.cs));
   const pubDown = await call("/public/manager-tv");
   check("…the open link in a plain sentence, without its words", pubDown.body?.data?.cs?.error === "The CS figures can't be reached right now." && !pubDown.text.includes("10.0.0.9"), show(pubDown.body?.data?.cs));
+
+  step("Case 6 — today's money, and Dilshad hidden on the Manager TV");
+  const sNow = (await call("/sales-tv", root)).body?.data ?? {};
+  check("Sales TV, Delta today: AED 3,000 — Asha 2,000 + Dev's approved 1,000 (not the rupees, the pending balance payment, yesterday's, nor Cara's, not on the TV)",
+    crmOf(sNow, "delta").revenueToday === 3000, show(crmOf(sNow, "delta").revenueToday));
+  check("…a CRM whose database can't be read: today unknown (null), not 0", crmOf(sNow, "draw").revenueToday === null && crmOf(sNow, "remote").revenueToday === null,
+    show([crmOf(sNow, "draw").revenueToday, crmOf(sNow, "remote").revenueToday]));
+  check("…nobody hidden on the Sales TV", !("hidden" in crmOf(sNow, "delta")), show(crmOf(sNow, "delta").hidden ?? null));
+  for (const [label, path, who] of [["signed in", "/manager-tv", root], ["the open link", "/public/manager-tv", undefined]] as [string, string, Record<string, string> | undefined][]) {
+    const mt = (await call(path, who)).body?.data ?? {};
+    const delta = crmOf(mt, "delta");
+    check(`Manager TV (${label}): Dilshad not listed — the other bosses still are`, !(delta.people ?? []).some((p: Json) => p.name === "Dilshad")
+      && ["Tom", "Sam", "Ada"].every((n) => (delta.people ?? []).some((p: Json) => p.name === n)), show(delta.people?.map((p: Json) => p.name)));
+    same(`…his figures counted as hidden (${label})`, delta.hidden, { count: 1, closingsMonth: 2, closingsToday: 1, revenueMonth: 7000, callsToday: 2, connectedToday: 1, talkSecondsToday: 100 });
+    check(`…today includes his AED 4,000: 7,000 (${label})`, delta.revenueToday === 7000, show(delta.revenueToday));
+  }
 
   step("Case 4 — root admins only for the signed-in page");
   check("no session: 401", (await call("/sales-tv")).status === 401);

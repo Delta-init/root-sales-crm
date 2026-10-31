@@ -20,6 +20,12 @@ const EVERY_MS = 20_000;
 const TIMEOUT_MS = 8_000;
 const WAIT_MS = 3_000;
 const KEEP_MS = 2 * 3_600_000;
+/**
+ * Not listed on the Manager TV (the user, 2026-10-31: "hide dilshad from the managers tv") — his money still counts in
+ * the Remote card's total and the header's (salesTv `hide`). MANAGER_TV_HIDE (names or emails, comma-separated)
+ * replaces the list on a server.
+ */
+const hidden = () => (process.env.MANAGER_TV_HIDE ?? "dilshad").split(",").map((v) => v.trim()).filter(Boolean);
 
 interface CsPerson {
   id: string; name: string; team_id?: string; team: string; month_aed: number; today_aed: number;
@@ -107,7 +113,7 @@ function csCloses(since: number | null) {
 export async function managerTv(opts: SalesTvOptions = {}) {
   // Everybody in the CRMs' tables — dilshad, the Sales Managers and the team leaders too (2026-10-23); the Sales TV
   // hides them.
-  const [sales] = await Promise.all([salesTv({ ...opts, withBosses: true }), within(refreshCs(Date.now()), WAIT_MS)]);
+  const [sales] = await Promise.all([salesTv({ ...opts, withBosses: true, hide: hidden() }), within(refreshCs(Date.now()), WAIT_MS)]);
   const since = validIso(opts.since) ? Date.parse(opts.since) : null;
   const closes = [...sales.closes, ...csCloses(since)].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   // Stamped after both: a payment Root first saw while the Sales TV was answering is in this answer, so the

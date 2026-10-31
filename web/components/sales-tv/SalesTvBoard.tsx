@@ -160,7 +160,8 @@ export function SalesTvBoard({ fetcher, variant, withCs = false, panels = true, 
   return (
     <div ref={root} className={cn("stv relative", boardFont.className, tv ? "stv-tv flex h-[100dvh] flex-col overflow-hidden p-[clamp(0.5rem,0.7vw,1.1rem)]" : "rounded-2xl p-3 sm:p-4")}>
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
-      <Header tv={tv} serverNow={serverNow} lastOk={lastOk} now={now} fetchError={fetchError} rootRef={root} title={title} subtitle={subtitle} />
+      <Header tv={tv} serverNow={serverNow} lastOk={lastOk} now={now} fetchError={fetchError} rootRef={root} title={title} subtitle={subtitle}
+        totals={withCs && crms ? boardTotals(crms, cs) : null} />
 
       <div
         className={cn(
@@ -203,9 +204,20 @@ const CS_PLACEHOLDER: SalesTvCs = {
 
 // ── Header ─────────────────────────────────────────────────────────────────────
 
-function Header({ tv, serverNow, lastOk, now, fetchError, rootRef, title, subtitle }: {
+/**
+ * The Manager TV's totals beside "Live" (the user, 2026-10-31): today's and this month's money — the three CRMs' (the
+ * people not listed too) and the CS team's course payments, AED. Today is unknown while a CRM's today can't be read.
+ */
+function boardTotals(crms: SalesTvCrm[], cs: SalesTvCs | null) {
+  const month = crms.reduce((a, c) => a + c.people.reduce((b, p) => b + (p.revenueMonth ?? 0), 0) + (c.hidden?.revenueMonth ?? 0), 0) + (cs?.totals.monthAed ?? 0);
+  const known = crms.every((c) => typeof c.revenueToday === "number") && Boolean(cs);
+  const today = known ? crms.reduce((a, c) => a + (c.revenueToday ?? 0), 0) + (cs?.totals.todayAed ?? 0) : null;
+  return { today, month, monthName: monthLabel(crms.find((c) => c.month)?.month ?? cs?.month ?? null) };
+}
+
+function Header({ tv, serverNow, lastOk, now, fetchError, rootRef, title, subtitle, totals }: {
   tv: boolean; serverNow: number; lastOk: number | null; now: number; fetchError: string | null; rootRef: RefObject<HTMLDivElement>;
-  title: string; subtitle: string;
+  title: string; subtitle: string; totals?: ReturnType<typeof boardTotals> | null;
 }) {
   const pref = useSoundPref();
   const soundOn = pref !== "off";
@@ -243,6 +255,13 @@ function Header({ tv, serverNow, lastOk, now, fetchError, rootRef, title, subtit
             : down ? `Reconnecting · last update ${ago(now - lastOk)}`
             : `Live · ${ago(now - lastOk)}`}
         </span>
+        {totals && (
+          <span className={cn("num inline-flex items-center gap-2 rounded-full border border-[color:var(--line)] px-3 py-1 font-medium text-[color:var(--ink2)]", T.small)} data-testid="board-totals">
+            <span>Today <b className="text-[color:var(--good)]" title={totals.today === null ? "A CRM's figures can't be read right now" : fmtRevenue(totals.today)}>{totals.today === null ? "—" : `AED ${fmtInt(totals.today)}`}</b></span>
+            <span className="text-[color:var(--mute)]">·</span>
+            <span>{totals.monthName} <b className="text-[color:var(--money)]" title={fmtRevenue(totals.month)}>AED {fmtInt(totals.month)}</b></span>
+          </span>
+        )}
         <span className={cn("hidden text-[color:var(--mute)] md:inline", T.small)} suppressHydrationWarning>{dubaiDate(serverNow)}</span>
         <span className={cn("num hidden min-w-[5.5ch] font-semibold sm:inline", T.title)} suppressHydrationWarning>{dubaiTime(serverNow)}</span>
         <button
@@ -306,9 +325,11 @@ function CrmColumn({ crm, tv }: { crm: SalesTvCrm; tv: boolean }) {
   const body = useRef<HTMLDivElement>(null);
   const rest = crm.people.slice(3);
   useAutoScroll(body, tv, rest.length);
+  // The hidden people's figures are in the total, though not listed (the Manager TV, 2026-10-31).
+  const h = crm.hidden;
   const t = crm.people.reduce(
     (a, p) => ({ m: a.m + p.closingsMonth, d: a.d + p.closingsToday, r: a.r + (p.revenueMonth ?? 0), c: a.c + p.callsToday, k: a.k + p.connectedToday, s: a.s + p.talkSecondsToday }),
-    { m: 0, d: 0, r: 0, c: 0, k: 0, s: 0 },
+    { m: h?.closingsMonth ?? 0, d: h?.closingsToday ?? 0, r: h?.revenueMonth ?? 0, c: h?.callsToday ?? 0, k: h?.connectedToday ?? 0, s: h?.talkSecondsToday ?? 0 },
   );
   const best = bests(crm.people);
   const head = cn("text-right font-medium text-[color:var(--ink2)]", T.tiny);
@@ -361,7 +382,7 @@ function CrmColumn({ crm, tv }: { crm: SalesTvCrm; tv: boolean }) {
           </div>
 
           <div className={cn(COLS, "num border-t border-[color:var(--line)] px-[clamp(1rem,1.2vw,1.8rem)] py-[clamp(0.4rem,0.55vw,0.8rem)] font-semibold whitespace-nowrap", T.body)} data-testid={`totals-${crm.code}`}>
-            <span className={cn("col-span-2 truncate font-medium text-[color:var(--mute)]", T.small)}>Total · {crm.people.length} people</span>
+            <span className={cn("col-span-2 truncate font-medium text-[color:var(--mute)]", T.small)}>Total · {crm.people.length} people{h?.count ? ` + ${h.count} not shown` : ""}</span>
             <Num>{fmtInt(t.m)}</Num>
             <Num>{fmtInt(t.d)}</Num>
             <Num className="text-[color:var(--money)]" title={fmtRevenue(t.r)}>{fmtInt(t.r)}</Num>

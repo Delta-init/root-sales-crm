@@ -32,6 +32,10 @@ export interface SalesTvCrm {
   peopleUpdatedAt: string | null;
   liveUpdatedAt: string | null;
   people: SalesTvPerson[];
+  /** Payments collected today (Dubai day) on its people's leads, AED, the hidden ones' too; null while unknown. */
+  revenueToday?: number | null;
+  /** People not listed on this screen (the Manager TV hides dilshad, 2026-10-31) — their figures still count in the total. */
+  hidden?: { count: number; closingsMonth: number; closingsToday: number; revenueMonth: number; callsToday: number; connectedToday: number; talkSecondsToday: number };
 }
 
 export interface SalesTvBreak {
