@@ -378,6 +378,41 @@ export interface SalesTvOptions {
  * The public view carries no email anywhere, and no CRM error beyond a plain
  * sentence.
  */
+/** One CRM's card on the screen — its people as the TV shows them, today's money, anybody not listed. */
+function crmCard(code: CrmCode, s: CrmState, opts: SalesTvOptions, pub: boolean) {
+  const status = s.error ? (s.outdated ? "outdated" : "error") : s.people ? "ok" : "loading";
+  const error = !s.error ? null : s.outdated ? s.error : pub ? `${nameOf(code)} can't be reached right now.` : s.error;
+  const hide = new Set((opts.hide ?? []).map((v) => v.trim().toLowerCase()).filter(Boolean));
+  const listed = shownPeople(s, opts.withBosses === true);
+  const hiddenOnes = listed.filter((p) => hide.has(p.name.toLowerCase()) || (p.email && hide.has(p.email)));
+  const sum = (k: keyof CrmPerson) => hiddenOnes.reduce((a, p) => a + (Number(p[k]) || 0), 0);
+  // Today's money on the TV's people, the hidden ones too — unknown while the CRM's database can't be read.
+  const revenueToday = s.revenueToday && s.revenueDay === dubaiToday().day
+    ? Math.round(listed.reduce((a, p) => a + (s.revenueToday!.get(p.id) ?? 0), 0) * 100) / 100
+    : null;
+  const people = listed.filter((p) => !hiddenOnes.includes(p)).map((p) => {
+    const photoUrl = (p.email && photos.get(p.email)?.url) || null;
+    return pub ? {
+      id: p.id, name: p.name, team: p.team, closingsMonth: p.closingsMonth, closingsToday: p.closingsToday,
+      callsToday: p.callsToday, connectedToday: p.connectedToday, talkSecondsToday: p.talkSecondsToday, photoUrl,
+      revenueMonth: p.revenueMonth,
+    } : { ...p, photoUrl };
+  });
+  return {
+    code, name: nameOf(code), status, error, month: s.month,
+    peopleUpdatedAt: s.peopleAt ? new Date(s.peopleAt).toISOString() : null,
+    liveUpdatedAt: s.liveAt ? new Date(s.liveAt).toISOString() : null,
+    people,
+    revenueToday,
+    ...(hiddenOnes.length ? {
+      hidden: {
+        count: hiddenOnes.length, closingsMonth: sum("closingsMonth"), closingsToday: sum("closingsToday"), revenueMonth: sum("revenueMonth"),
+        callsToday: sum("callsToday"), connectedToday: sum("connectedToday"), talkSecondsToday: sum("talkSecondsToday"),
+      },
+    } : {}),
+  };
+}
+
 export async function salesTv(opts: SalesTvOptions = {}) {
   const now = Date.now();
   await crmNames();
@@ -388,40 +423,7 @@ export async function salesTv(opts: SalesTvOptions = {}) {
   const pub = opts.publicView === true;
   const since = validIso(opts.since) ? Date.parse(opts.since as string) : null;
 
-  const crms = SALES_TV_CRMS.map((code) => {
-    const s = state.get(code)!;
-    const status = s.error ? (s.outdated ? "outdated" : "error") : s.people ? "ok" : "loading";
-    const error = !s.error ? null : s.outdated ? s.error : pub ? `${nameOf(code)} can't be reached right now.` : s.error;
-    const hide = new Set((opts.hide ?? []).map((v) => v.trim().toLowerCase()).filter(Boolean));
-    const listed = shownPeople(s, opts.withBosses === true);
-    const hiddenOnes = listed.filter((p) => hide.has(p.name.toLowerCase()) || (p.email && hide.has(p.email)));
-    const sum = (k: keyof CrmPerson) => hiddenOnes.reduce((a, p) => a + (Number(p[k]) || 0), 0);
-    // Today's money on the TV's people, the hidden ones too — unknown while the CRM's database can't be read.
-    const revenueToday = s.revenueToday && s.revenueDay === dubaiToday().day
-      ? Math.round(listed.reduce((a, p) => a + (s.revenueToday!.get(p.id) ?? 0), 0) * 100) / 100
-      : null;
-    const people = listed.filter((p) => !hiddenOnes.includes(p)).map((p) => {
-      const photoUrl = (p.email && photos.get(p.email)?.url) || null;
-      return pub ? {
-        id: p.id, name: p.name, team: p.team, closingsMonth: p.closingsMonth, closingsToday: p.closingsToday,
-        callsToday: p.callsToday, connectedToday: p.connectedToday, talkSecondsToday: p.talkSecondsToday, photoUrl,
-        revenueMonth: p.revenueMonth,
-      } : { ...p, photoUrl };
-    });
-    return {
-      code, name: nameOf(code), status, error, month: s.month,
-      peopleUpdatedAt: s.peopleAt ? new Date(s.peopleAt).toISOString() : null,
-      liveUpdatedAt: s.liveAt ? new Date(s.liveAt).toISOString() : null,
-      people,
-      revenueToday,
-      ...(hiddenOnes.length ? {
-        hidden: {
-          count: hiddenOnes.length, closingsMonth: sum("closingsMonth"), closingsToday: sum("closingsToday"), revenueMonth: sum("revenueMonth"),
-          callsToday: sum("callsToday"), connectedToday: sum("connectedToday"), talkSecondsToday: sum("talkSecondsToday"),
-        },
-      } : {}),
-    };
-  });
+  const crms = SALES_TV_CRMS.map((code) => crmCard(code, state.get(code)!, opts, pub));
 
   const onBreak = SALES_TV_CRMS.flatMap((code) => state.get(code)!.onBreak.map((b) => {
     const photoUrl = (b.email && photos.get(b.email)?.url) || null;
@@ -442,4 +444,74 @@ export async function salesTv(opts: SalesTvOptions = {}) {
     });
 
   return { serverTime: new Date().toISOString(), crms, onBreak, closes: closeList };
+}
+
+// ── A month gone by (the user, 2026-11-01: "the October managers TV leaderboard — switch months") ─────────────────
+
+/** The first month the TVs can show: commission and these boards began in October 2026. */
+export const FIRST_TV_MONTH = "2026-10";
+const PAST_KEEP_MS = 5 * 60_000;
+
+/** This Dubai month, "2026-11". */
+export function dubaiMonthNow(): string {
+  return new Date(Date.now() + DUBAI_OFFSET_MS).toISOString().slice(0, 7);
+}
+
+/** A month the TV can show as it ended: a real month, from FIRST_TV_MONTH, before this one. */
+export function isPastTvMonth(v: unknown): v is string {
+  return typeof v === "string" && MONTH.test(v) && v >= FIRST_TV_MONTH && v < dubaiMonthNow();
+}
+
+const pastMonths = new Map<string, { at: number; states: Map<CrmCode, CrmState> | null; inflight: Promise<Map<CrmCode, CrmState>> | null }>();
+
+/** Each CRM's standings for the month, asked once and kept a few minutes — a month gone by no longer changes much. */
+async function pastStates(month: string): Promise<Map<CrmCode, CrmState>> {
+  const had = pastMonths.get(month);
+  if (had?.states && Date.now() - had.at < PAST_KEEP_MS) return had.states;
+  if (had?.inflight) return had.inflight;
+  const entry = { at: had?.at ?? 0, states: had?.states ?? null, inflight: null as Promise<Map<CrmCode, CrmState>> | null };
+  entry.inflight = (async () => {
+    const states = new Map<CrmCode, CrmState>();
+    await Promise.all(SALES_TV_CRMS.map(async (code) => {
+      const s: CrmState = {
+        code, people: null, month, leadsMonth: null, bosses: null, revenueToday: null, revenueDay: null, onBreak: [], fullAskedAt: 0, liveAskedAt: 0, peopleAt: 0, liveAt: 0,
+        error: null, outdated: false, newestClose: null, inflight: null,
+      };
+      try {
+        const target = await resolveTarget(code);
+        const data = await callTarget<CrmAnswer>(target, `/sales-tv?month=${month}`, { method: "GET", verb: "share its Sales TV" });
+        // A CRM from before the month switch answers with this month: not shown as if it were the one asked for.
+        if (str(data.month) !== month || !Array.isArray(data.people)) {
+          s.outdated = true;
+          s.error = `${nameOf(code)}'s server needs updating to show a past month.`;
+        } else {
+          s.people = cleanPeople(data.people).map((p) => ({ ...p, closingsToday: 0, callsToday: 0, connectedToday: 0, talkSecondsToday: 0 }));
+          s.peopleAt = Date.now();
+          s.leadsMonth = await leadsThisMonth(code, month);
+          s.bosses = await bossesOf(code);
+        }
+      } catch (error) {
+        s.error = error instanceof Error ? error.message : "Could not be read";
+      }
+      states.set(code, s);
+    }));
+    pastMonths.set(month, { at: Date.now(), states, inflight: null });
+    return states;
+  })().finally(() => { const e = pastMonths.get(month); if (e) e.inflight = null; });
+  pastMonths.set(month, entry);
+  return entry.inflight;
+}
+
+/** The screen for a month gone by: each CRM's standings as the month ended — no breaks, no closes, nothing of today. */
+export async function salesTvMonth(month: string, opts: SalesTvOptions = {}) {
+  await crmNames();
+  const states = await pastStates(month);
+  const pub = opts.publicView === true;
+  const crms = SALES_TV_CRMS.map((code) => crmCard(code, states.get(code)!, opts, pub));
+  return { serverTime: new Date().toISOString(), month, crms, onBreak: [] as TvBreak[], closes: [] as TvClose[] };
+}
+
+/** For the check script: forget the months asked for. */
+export function resetPastMonthsForTests(): void {
+  pastMonths.clear();
 }

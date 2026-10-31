@@ -42,7 +42,7 @@ router.get("/manager-tv", tvLimiter, async (req: Request, res: Response, next: N
     const since = typeof req.query.since === "string" ? req.query.since.slice(0, 40) : undefined;
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
     res.setHeader("Cache-Control", "no-store");
-    sendSuccess(res, "Manager TV", await managerTv({ since, publicView: true }));
+    sendSuccess(res, "Manager TV", await managerTv({ since, publicView: true, month: req.query.month }));
   } catch (error) {
     next(error);
   }

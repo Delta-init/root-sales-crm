@@ -97,10 +97,37 @@ export interface SalesTvData {
   closes: SalesTvClose[];
   /** Only on the Manager TV. */
   cs?: SalesTvCs;
+  /** The Manager TV's month switch (2026-11-01): a month gone by, as it ended — no closes, nothing of today. */
+  past?: boolean;
+  month?: string;
 }
 
-/** Asks for the screen; `since` is the previous answer's serverTime, so only new closes come back. */
-export type SalesTvFetcher = (since: string | null) => Promise<SalesTvData>;
+/**
+ * Asks for the screen; `since` is the previous answer's serverTime, so only new closes come back; `month` (YYYY-MM,
+ * the Manager TV's month switch) a month gone by instead of the live one.
+ */
+export type SalesTvFetcher = (since: string | null, month?: string | null) => Promise<SalesTvData>;
+
+/** The first month the TVs can show: commission and these boards began in October 2026. */
+export const FIRST_TV_MONTH = "2026-10";
+
+/** The months gone by the Manager TV can switch to, newest first — from FIRST_TV_MONTH to last month (Dubai). */
+export function pastTvMonths(nowMs = Date.now()): string[] {
+  const g = new Date(nowMs + 4 * 3_600_000);
+  const out: string[] = [];
+  for (let d = new Date(Date.UTC(g.getUTCFullYear(), g.getUTCMonth() - 1, 1)); ; d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1))) {
+    const m = d.toISOString().slice(0, 7);
+    if (m < FIRST_TV_MONTH) break;
+    out.push(m);
+  }
+  return out;
+}
+
+/** "2026-10" → "October 2026". */
+export function monthYearLabel(m: string): string {
+  const [y, mo] = m.split("-").map(Number) as [number, number];
+  return new Date(Date.UTC(y, mo - 1, 1)).toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+}
 
 export const fmtInt = (n: number) => Math.round(n || 0).toLocaleString("en-US");
 

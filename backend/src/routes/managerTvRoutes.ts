@@ -14,7 +14,7 @@ router.use(authenticate, requireRole("root_admin"));
 
 router.get("/", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
-    sendSuccess(res, "Manager TV", await managerTv({ since: req.query.since }));
+    sendSuccess(res, "Manager TV", await managerTv({ since: req.query.since, month: req.query.month }));
   } catch (error) {
     next(error);
   }

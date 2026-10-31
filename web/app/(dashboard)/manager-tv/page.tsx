@@ -14,14 +14,24 @@ import type { SalesTvData, SalesTvFetcher } from "@/lib/salesTv";
  * a fourth card, ranked as CS Portal's CS leaderboard ranks them (course payments collected this month).
  * Root admins only. The office TVs use the open link, /public/manager-tv, the same without any email.
  */
-const fetchSignedIn: SalesTvFetcher = async (since) => {
-  const { data } = await api.get<{ data: SalesTvData }>("/manager-tv", { params: since ? { since } : undefined });
+const fetchSignedIn: SalesTvFetcher = async (since, month) => {
+  const params = { ...(since ? { since } : {}), ...(month ? { month } : {}) };
+  const { data } = await api.get<{ data: SalesTvData }>("/manager-tv", { params: Object.keys(params).length ? params : undefined });
   return data.data;
 };
 
 export default function ManagerTvPage() {
   const [link, setLink] = useState("");
-  useEffect(() => setLink(`${window.location.origin}/public/manager-tv`), []);
+  // The month shown goes with the link (?month=), so a TV can be opened on a month gone by.
+  useEffect(() => {
+    const at = () => {
+      const month = new URLSearchParams(window.location.search).get("month");
+      setLink(`${window.location.origin}/public/manager-tv${month ? `?month=${month}` : ""}`);
+    };
+    at();
+    window.addEventListener("tv-month", at);
+    return () => window.removeEventListener("tv-month", at);
+  }, []);
 
   const copy = async () => {
     try {
@@ -54,7 +64,7 @@ export default function ManagerTvPage() {
           </Button>
         </div>
       </motion.div>
-      <SalesTvBoard fetcher={fetchSignedIn} variant="embedded" withCs panels={false} title="Manager TV" subtitle="Dubai Sales · Draw · Remote · CS team" />
+      <SalesTvBoard fetcher={fetchSignedIn} variant="embedded" withCs panels={false} months title="Manager TV" subtitle="Dubai Sales · Draw · Remote · CS team" />
     </div>
   );
 }

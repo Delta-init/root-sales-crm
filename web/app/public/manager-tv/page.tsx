@@ -9,8 +9,11 @@ import type { SalesTvData, SalesTvFetcher } from "@/lib/salesTv";
  * no sign-in. Asks the backend's GET /public/manager-tv (names, teams, counts, amounts, photos — never an email)
  * every few seconds; the backend's caches decide how often the CRMs and CS Portal are actually asked.
  */
-const fetchPublic: SalesTvFetcher = async (since) => {
-  const qs = since ? `?since=${encodeURIComponent(since)}` : "";
+const fetchPublic: SalesTvFetcher = async (since, month) => {
+  const params = new URLSearchParams();
+  if (since) params.set("since", since);
+  if (month) params.set("month", month);
+  const qs = params.size ? `?${params}` : "";
   const res = await fetch(`${API_URL}/public/manager-tv${qs}`, { cache: "no-store" });
   const body = (await res.json().catch(() => ({}))) as { data?: SalesTvData; message?: string };
   if (!res.ok || !body.data) throw new Error(body.message ?? `Root answered ${res.status}`);
@@ -18,5 +21,5 @@ const fetchPublic: SalesTvFetcher = async (since) => {
 };
 
 export default function PublicManagerTvPage() {
-  return <SalesTvBoard fetcher={fetchPublic} variant="tv" withCs panels={false} title="Manager TV" subtitle="Dubai Sales · Draw · Remote · CS team" />;
+  return <SalesTvBoard fetcher={fetchPublic} variant="tv" withCs panels={false} months title="Manager TV" subtitle="Dubai Sales · Draw · Remote · CS team" />;
 }

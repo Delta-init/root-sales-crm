@@ -1,5 +1,5 @@
 import { resolveTarget } from "../lib/targetClient.js";
-import { salesTv, type SalesTvOptions } from "./salesTvService.js";
+import { isPastTvMonth, salesTv, salesTvMonth, type SalesTvOptions } from "./salesTvService.js";
 
 /*
  * Manager TV (the user, 2026-10-23): "same as the Sales TV, only a new card for the CS, exactly like the CS
@@ -80,16 +80,16 @@ async function refreshCs(now: number): Promise<void> {
 const validIso = (v: unknown): v is string => typeof v === "string" && !Number.isNaN(Date.parse(v));
 
 /** The CS card. A public screen gets a plain sentence for an error, never Root's own. */
-function csCard(pub: boolean) {
-  const d = state.data;
-  const status = state.error ? "error" : d ? "ok" : "loading";
+function csCard(pub: boolean, from: { data: CsAnswer | null; error: string | null; at: number } = state) {
+  const d = from.data;
+  const status = from.error ? "error" : d ? "ok" : "loading";
   return {
     code: "cs",
     name: "CS team",
     status,
-    error: state.error ? (pub ? "The CS figures can't be reached right now." : state.error) : null,
+    error: from.error ? (pub ? "The CS figures can't be reached right now." : from.error) : null,
     month: d?.month ?? null,
-    updatedAt: state.at ? new Date(state.at).toISOString() : null,
+    updatedAt: from.at ? new Date(from.at).toISOString() : null,
     people: (d?.cs ?? []).map((p) => ({
       id: p.id, name: p.name, team: p.team, monthAed: p.month_aed, todayAed: p.today_aed,
       payments: p.payments, todayPayments: p.today_payments, photoUrl: p.photo ?? null,
@@ -109,8 +109,40 @@ function csCloses(since: number | null) {
     }));
 }
 
-/** The whole Manager TV: the Sales TV's answer, the CS card, and the CS payments among the closes. */
-export async function managerTv(opts: SalesTvOptions = {}) {
+/** A month gone by: CS Portal's board for it, asked once and kept a few minutes. */
+const csPast = new Map<string, { data: CsAnswer | null; error: string | null; at: number }>();
+async function csMonth(month: string): Promise<{ data: CsAnswer | null; error: string | null; at: number }> {
+  const had = csPast.get(month);
+  if (had && !had.error && Date.now() - had.at < 5 * 60_000) return had;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  let out: { data: CsAnswer | null; error: string | null; at: number };
+  try {
+    const target = await resolveTarget(CODE);
+    const res = await fetch(`${target.base}/api/public/cs-tv?location=${CS_LOCATION}&month=${month}`, { signal: controller.signal });
+    const body = (await res.json().catch(() => ({}))) as CsAnswer & { error?: string; message?: string };
+    if (!res.ok || !Array.isArray(body.cs)) throw new Error(body.error ?? body.message ?? `CS Portal answered ${res.status}`);
+    // A CS Portal from before the month switch answers with this month: not shown as if it were the one asked for.
+    if (body.month !== month) throw new Error("CS Portal's server needs updating to show a past month");
+    out = { data: { ...body, recent: [] }, error: null, at: Date.now() };
+  } catch (err) {
+    out = { data: null, error: (err as Error)?.name === "AbortError" ? "CS Portal didn't answer in time" : (err as Error)?.message || "CS Portal can't be reached", at: 0 };
+  } finally {
+    clearTimeout(timer);
+  }
+  csPast.set(month, out);
+  return out;
+}
+
+/**
+ * The whole Manager TV: the Sales TV's answer, the CS card, and the CS payments among the closes. With `month` (a
+ * month gone by, 2026-11-01: "switch months"), that month's standings as it ended — no closes, nothing of today.
+ */
+export async function managerTv(opts: SalesTvOptions & { month?: unknown } = {}) {
+  if (isPastTvMonth(opts.month)) {
+    const [sales, cs] = await Promise.all([salesTvMonth(opts.month, { ...opts, withBosses: true, hide: hidden() }), csMonth(opts.month)]);
+    return { ...sales, serverTime: new Date().toISOString(), past: true, cs: csCard(opts.publicView === true, cs) };
+  }
   // Everybody in the CRMs' tables — dilshad, the Sales Managers and the team leaders too (2026-10-23); the Sales TV
   // hides them.
   const [sales] = await Promise.all([salesTv({ ...opts, withBosses: true, hide: hidden() }), within(refreshCs(Date.now()), WAIT_MS)]);
@@ -118,10 +150,10 @@ export async function managerTv(opts: SalesTvOptions = {}) {
   const closes = [...sales.closes, ...csCloses(since)].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   // Stamped after both: a payment Root first saw while the Sales TV was answering is in this answer, so the
   // screen's next ?since= must not bring it again.
-  return { ...sales, serverTime: new Date().toISOString(), closes, cs: csCard(opts.publicView === true) };
+  return { ...sales, serverTime: new Date().toISOString(), past: false, closes, cs: csCard(opts.publicView === true) };
 }
 
 /** For the check script: forget what was asked. */
 export function resetManagerTvForTests(): void {
-  state.data = null; state.at = 0; state.askedAt = 0; state.error = null; state.inflight = null; state.seen.clear();
+  state.data = null; state.at = 0; state.askedAt = 0; state.error = null; state.inflight = null; state.seen.clear(); csPast.clear();
 }

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type R
 import { AlertTriangle, Maximize, Minimize, Trophy, Volume2, VolumeX } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
-  breakLabel, crmTag, crmTone, fmtClock, fmtInt, fmtMoney, fmtRevenue, fmtTalk, initials, monthLabel,
+  breakLabel, crmTag, crmTone, fmtClock, fmtInt, fmtMoney, fmtRevenue, fmtTalk, initials, monthLabel, monthYearLabel, pastTvMonths,
   type SalesTvBreak, type SalesTvClose, type SalesTvCrm, type SalesTvCs, type SalesTvCsPerson, type SalesTvFetcher, type SalesTvPerson,
 } from "@/lib/salesTv";
 import { setSoundPref, soundUnlocked, unlockSound, useSoundPref, useSoundUnlocked, type SaleClosed } from "@/lib/saleAnnouncement";
@@ -37,6 +37,8 @@ import { boardFont } from "./font";
  */
 
 const POLL_MS = 5000;
+/** A month gone by hardly changes: asked once a minute. */
+const PAST_POLL_MS = 60_000;
 const KEEP_CLOSES_MS = 2 * 3_600_000;
 /** A close that happened this long before the screen opened is never announced. */
 const OPEN_SLACK_MS = 60_000;
@@ -92,9 +94,11 @@ export interface SalesTvBoardProps {
   panels?: boolean;
   title?: string;
   subtitle?: string;
+  /** The Manager TV's month switch (2026-11-01): this month live, or a month gone by as it ended — in the link as ?month=. */
+  months?: boolean;
 }
 
-export function SalesTvBoard({ fetcher, variant, withCs = false, panels = true, title = "Sales TV", subtitle = "Dubai Sales · Draw · Remote" }: SalesTvBoardProps) {
+export function SalesTvBoard({ fetcher, variant, withCs = false, panels = true, title = "Sales TV", subtitle = "Dubai Sales · Draw · Remote", months = false }: SalesTvBoardProps) {
   const tv = variant === "tv";
   const [crms, setCrms] = useState<SalesTvCrm[] | null>(null);
   const [cs, setCs] = useState<SalesTvCs | null>(null);
@@ -108,6 +112,23 @@ export function SalesTvBoard({ fetcher, variant, withCs = false, panels = true, 
   const openedAt = useRef<number | null>(null);
   const seen = useRef(new Set<string>());
   const root = useRef<HTMLDivElement>(null);
+  // The month shown: null is this month, live. Read from the link once the page is in the browser.
+  const [month, setMonth] = useState<string | null>(null);
+  const [monthRead, setMonthRead] = useState(!months);
+  useEffect(() => {
+    if (!months) return;
+    const asked = new URLSearchParams(window.location.search).get("month");
+    if (asked && pastTvMonths().includes(asked)) setMonth(asked);
+    setMonthRead(true);
+  }, [months]);
+  const pickMonth = (m: string | null) => {
+    const url = new URL(window.location.href);
+    if (m) url.searchParams.set("month", m); else url.searchParams.delete("month");
+    window.history.replaceState(null, "", url.toString());
+    window.dispatchEvent(new Event("tv-month"));
+    setMonth(m);
+  };
+  const past = Boolean(month);
 
   // One second at a time, for the clock, the break timers and "updated Xs ago".
   useEffect(() => {
@@ -116,18 +137,27 @@ export function SalesTvBoard({ fetcher, variant, withCs = false, panels = true, 
   }, []);
 
   useEffect(() => {
+    if (!monthRead) return;
     let stopped = false;
     let timer = 0;
+    // Another month: a fresh screen — nothing carried over, nothing celebrated.
+    since.current = null;
+    openedAt.current = null;
+    seen.current = new Set();
+    setCrms(null);
+    setCs(null);
+    setCloses([]);
+    setOnBreak([]);
     const tick = async () => {
       try {
-        const d = await fetcher(since.current);
+        const d = await fetcher(since.current, month);
         const serverNow = Date.parse(d.serverTime);
         offset.current = serverNow - Date.now();
         const first = openedAt.current === null;
         if (first) openedAt.current = serverNow;
         const fresh = d.closes.filter((c) => !seen.current.has(c.key));
         for (const c of fresh) seen.current.add(c.key);
-        if (!first) {
+        if (!first && !d.past) {
           const from = (openedAt.current ?? serverNow) - OPEN_SLACK_MS;
           fresh.filter((c) => Date.parse(c.at) >= from).sort((a, b) => Date.parse(a.at) - Date.parse(b.at)).forEach((c) => celebrate(toSale(c)));
         }
@@ -145,14 +175,14 @@ export function SalesTvBoard({ fetcher, variant, withCs = false, panels = true, 
       } catch (e) {
         setFetchError(e instanceof Error ? e.message : "Can't reach Root");
       }
-      if (!stopped) timer = window.setTimeout(tick, POLL_MS);
+      if (!stopped) timer = window.setTimeout(tick, month ? PAST_POLL_MS : POLL_MS);
     };
     void tick();
     return () => {
       stopped = true;
       window.clearTimeout(timer);
     };
-  }, [fetcher]);
+  }, [fetcher, month, monthRead]);
 
   const serverNow = now + offset.current;
   const gap = "gap-[clamp(0.5rem,0.7vw,1.1rem)]";
@@ -161,7 +191,7 @@ export function SalesTvBoard({ fetcher, variant, withCs = false, panels = true, 
     <div ref={root} className={cn("stv relative", boardFont.className, tv ? "stv-tv flex h-[100dvh] flex-col overflow-hidden p-[clamp(0.5rem,0.7vw,1.1rem)]" : "rounded-2xl p-3 sm:p-4")}>
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
       <Header tv={tv} serverNow={serverNow} lastOk={lastOk} now={now} fetchError={fetchError} rootRef={root} title={title} subtitle={subtitle}
-        totals={withCs && crms ? boardTotals(crms, cs) : null} />
+        totals={withCs && crms ? boardTotals(crms, cs, past) : null} months={months ? { month, pick: pickMonth } : null} />
 
       <div
         className={cn(
@@ -208,17 +238,20 @@ const CS_PLACEHOLDER: SalesTvCs = {
  * The Manager TV's totals beside "Live" (the user, 2026-10-31): today's and this month's money — the three CRMs' (the
  * people not listed too) and the CS team's course payments, AED. Today is unknown while a CRM's today can't be read.
  */
-function boardTotals(crms: SalesTvCrm[], cs: SalesTvCs | null) {
+function boardTotals(crms: SalesTvCrm[], cs: SalesTvCs | null, past = false) {
   const month = crms.reduce((a, c) => a + c.people.reduce((b, p) => b + (p.revenueMonth ?? 0), 0) + (c.hidden?.revenueMonth ?? 0), 0) + (cs?.totals.monthAed ?? 0);
   const known = crms.every((c) => typeof c.revenueToday === "number") && Boolean(cs);
   const today = known ? crms.reduce((a, c) => a + (c.revenueToday ?? 0), 0) + (cs?.totals.todayAed ?? 0) : null;
-  return { today, month, monthName: monthLabel(crms.find((c) => c.month)?.month ?? cs?.month ?? null) };
+  // A month gone by has no today.
+  return { today: past ? undefined : today, month, monthName: monthLabel(crms.find((c) => c.month)?.month ?? cs?.month ?? null) };
 }
 
-function Header({ tv, serverNow, lastOk, now, fetchError, rootRef, title, subtitle, totals }: {
+function Header({ tv, serverNow, lastOk, now, fetchError, rootRef, title, subtitle, totals, months }: {
   tv: boolean; serverNow: number; lastOk: number | null; now: number; fetchError: string | null; rootRef: RefObject<HTMLDivElement>;
   title: string; subtitle: string; totals?: ReturnType<typeof boardTotals> | null;
+  months?: { month: string | null; pick: (m: string | null) => void } | null;
 }) {
+  const past = months?.month ?? null;
   const pref = useSoundPref();
   const soundOn = pref !== "off";
   const [full, setFull] = useState(false);
@@ -227,7 +260,8 @@ function Header({ tv, serverNow, lastOk, now, fetchError, rootRef, title, subtit
     document.addEventListener("fullscreenchange", on);
     return () => document.removeEventListener("fullscreenchange", on);
   }, []);
-  const stale = !lastOk || now - lastOk > 20_000;
+  // A month gone by is asked once a minute: stale only after two missed.
+  const stale = !lastOk || now - lastOk > (past ? 150_000 : 20_000);
   const down = Boolean(fetchError) || stale;
   const btn = cn("inline-flex h-[clamp(1.9rem,2vw,2.6rem)] items-center gap-1.5 rounded-full border border-[color:var(--line)] px-3.5 font-medium text-[color:var(--ink2)] hover:border-[color:var(--step-edge)] hover:text-[color:var(--ink)]", T.small);
 
@@ -250,15 +284,30 @@ function Header({ tv, serverNow, lastOk, now, fetchError, rootRef, title, subtit
           title={fetchError ?? undefined}
           data-testid="live-status"
         >
-          <span className={cn("inline-block h-2 w-2 rounded-full", down ? "bg-[color:var(--warn)]" : "stv-blink bg-[color:var(--accent)]")} />
+          <span className={cn("inline-block h-2 w-2 rounded-full", down ? "bg-[color:var(--warn)]" : past ? "bg-[color:var(--mute)]" : "stv-blink bg-[color:var(--accent)]")} />
           {!lastOk ? (fetchError ? "Can't reach Root — retrying" : "Connecting…")
             : down ? `Reconnecting · last update ${ago(now - lastOk)}`
+            : past ? `${monthYearLabel(past)} · final`
             : `Live · ${ago(now - lastOk)}`}
         </span>
+        {months && (
+          <select
+            value={months.month ?? ""}
+            onChange={(e) => months.pick(e.target.value || null)}
+            className={cn("num h-[clamp(1.9rem,2vw,2.6rem)] cursor-pointer rounded-full border border-[color:var(--line)] bg-transparent px-3 font-medium text-[color:var(--ink2)] hover:border-[color:var(--step-edge)]", T.small)}
+            aria-label="Month shown"
+            data-testid="month-switch"
+          >
+            <option value="">This month · live</option>
+            {pastTvMonths().map((m) => <option key={m} value={m}>{monthYearLabel(m)}</option>)}
+          </select>
+        )}
         {totals && (
           <span className={cn("num inline-flex items-center gap-2 rounded-full border border-[color:var(--line)] px-3 py-1 font-medium text-[color:var(--ink2)]", T.small)} data-testid="board-totals">
-            <span>Today <b className="text-[color:var(--good)]" title={totals.today === null ? "A CRM's figures can't be read right now" : fmtRevenue(totals.today)}>{totals.today === null ? "—" : `AED ${fmtInt(totals.today)}`}</b></span>
-            <span className="text-[color:var(--mute)]">·</span>
+            {totals.today !== undefined && <>
+              <span>Today <b className="text-[color:var(--good)]" title={totals.today === null ? "A CRM's figures can't be read right now" : fmtRevenue(totals.today)}>{totals.today === null ? "—" : `AED ${fmtInt(totals.today)}`}</b></span>
+              <span className="text-[color:var(--mute)]">·</span>
+            </>}
             <span>{totals.monthName} <b className="text-[color:var(--money)]" title={fmtRevenue(totals.month)}>AED {fmtInt(totals.month)}</b></span>
           </span>
         )}

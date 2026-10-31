@@ -85,7 +85,23 @@ const drawCloses: Json[] = [
   { id: "w1", closer: "Wasim", closerEmail: "wasim@draw-e2e.test", courses: ["Draw Basics"], amount: 55000, academy: "bangalore", currency: "INR", at: ago(20) },
 ];
 
+// Last month (the Manager TV's month switch, 2026-11-01).
+const MONTH_PREV = (() => { const g = new Date(Date.now() + 4 * 3_600_000); const d = new Date(Date.UTC(g.getUTCFullYear(), g.getUTCMonth() - 1, 1)); return d.toISOString().slice(0, 7); })();
+
 function crmAnswer(crm: string, url: URL) {
+  // Delta knows ?month= (that month's standings, with some today figures Root must not show); Draw is from before it
+  // and answers with this month.
+  if (crm === "delta" && url.searchParams.get("month")) {
+    return {
+      crm, generatedAt: new Date().toISOString(), onBreak: [], closes: [], month: url.searchParams.get("month"),
+      people: [
+        { id: String(DELTA_ID.asha), name: "Asha", email: "asha@delta-e2e.test", team: "Falcons", closingsMonth: 5, closingsToday: 1, revenueMonth: 20000, callsToday: 9, connectedToday: 3, talkSecondsToday: 99 },
+        { id: String(DELTA_ID.eli), name: "Eli", email: "eli@delta-e2e.test", team: "Falcons", closingsMonth: 0, closingsToday: 0, revenueMonth: 0, callsToday: 0, connectedToday: 0, talkSecondsToday: 0 },
+        { id: String(DELTA_ID.cara), name: "Cara", email: "cara@delta-e2e.test", team: "Falcons", closingsMonth: 0, closingsToday: 0, revenueMonth: 0, callsToday: 0, connectedToday: 0, talkSecondsToday: 0 },
+        { id: String(DELTA_ID.dilshad), name: "Dilshad", email: "dilshad@delta-e2e.test", team: "Falcons", closingsMonth: 3, closingsToday: 0, revenueMonth: 9000, callsToday: 0, connectedToday: 0, talkSecondsToday: 0 },
+      ],
+    };
+  }
   const live = url.searchParams.get("parts") === "live";
   const after = url.searchParams.get("after");
   const list = crm === "delta" ? deltaCloses : drawCloses;
@@ -126,6 +142,13 @@ let csDown = false;
 const csRecent: Json[] = [
   { id: "p1", cs: "Noor", team: "Falcons", aed: 3670, product: "DQMP", at: ago(15) },
 ];
+const csPastBoard = (month: string) => ({
+  location: "dubai", month, generated_at: new Date().toISOString(),
+  cs: [{ id: "c2", name: "Omar", team_id: "t2", team: "Hawks", month_aed: 15000, today_aed: 0, payments: 5, today_payments: 0, photo: null, rank: 1 }],
+  teams: [{ id: "t2", team: "Hawks", month_aed: 15000, today_aed: 0, payments: 5, cs_count: 1 }],
+  totals: { month_aed: 15000, today_aed: 0, payments: 5 },
+  recent: [],
+});
 const csBoard = () => ({
   location: "dubai", month: MONTH_NOW, generated_at: new Date().toISOString(),
   cs: [
@@ -146,7 +169,8 @@ const stand = createServer((req, res) => {
     if (url.pathname !== "/commission/api/public/cs-tv") return send(404, { error: "Not found" });
     csHits.push(url.search);
     if (csDown) return send(500, { error: "CS board exploded at 10.0.0.9" });
-    return send(200, csBoard()); // no envelope, as CS Portal's json() answers
+    const csMonth = url.searchParams.get("month");
+    return send(200, csMonth ? csPastBoard(csMonth) : csBoard()); // no envelope, as CS Portal's json() answers
   }
   if (crm === "hrms") {
     let raw = "";
@@ -391,6 +415,30 @@ async function main() {
       && ["Tom", "Sam", "Ada"].every((n) => (delta.people ?? []).some((p: Json) => p.name === n)), show(delta.people?.map((p: Json) => p.name)));
     same(`…his figures counted as hidden (${label})`, delta.hidden, { count: 1, closingsMonth: 2, closingsToday: 1, revenueMonth: 7000, callsToday: 2, connectedToday: 1, talkSecondsToday: 100 });
     check(`…today includes his AED 4,000: 7,000 (${label})`, delta.revenueToday === 7000, show(delta.revenueToday));
+  }
+
+  step("Case 7 — a month gone by (the Manager TV's month switch)");
+  csDown = false;
+  const hitsBefore = hits.length, csBefore = csHits.length;
+  const pm = await call(`/manager-tv?month=${MONTH_PREV}`, root);
+  const pmd = pm.body?.data ?? {};
+  const pDelta = crmOf(pmd, "delta");
+  check("?month=<last month>: that month, marked past, the three CRMs and the CS team", pm.status === 200 && pmd.month === MONTH_PREV && pmd.past === true && (pmd.crms ?? []).length === 3, show({ month: pmd.month, past: pmd.past }));
+  check("…Delta asked for that month", hits.slice(hitsBefore).some((h) => h.crm === "delta" && h.query.includes(`month=${MONTH_PREV}`)), show(hits.slice(hitsBefore)));
+  check("…its standings: Asha (5 closings, AED 20,000) first, then Cara and Eli (each given a lead that month) — from that month's leads, not this one's",
+    (pDelta.people ?? []).map((p: Json) => p.name).join() === "Asha,Cara,Eli" && pDelta.people?.[0]?.closingsMonth === 5 && pDelta.people?.[0]?.revenueMonth === 20000, show(pDelta.people?.map((p: Json) => [p.name, p.closingsMonth, p.revenueMonth])));
+  check("…nothing of today: every today figure 0, today's money unknown, no breaks, no closes", (pDelta.people ?? []).every((p: Json) => !p.closingsToday && !p.callsToday && !p.connectedToday && !p.talkSecondsToday)
+    && pDelta.revenueToday === null && (pmd.onBreak ?? []).length === 0 && (pmd.closes ?? []).length === 0, show({ p: pDelta.people, b: pmd.onBreak, c: pmd.closes?.length }));
+  same("…Dilshad hidden that month too, his figures counted", (({ count, closingsMonth, revenueMonth }) => ({ count, closingsMonth, revenueMonth }))(pDelta.hidden ?? {}), { count: 1, closingsMonth: 3, revenueMonth: 9000 });
+  check("…Draw, from before the switch (it answered this month): said it needs updating, not shown as that month", crmOf(pmd, "draw").status === "outdated" && /past month/.test(crmOf(pmd, "draw").error ?? "") && !(crmOf(pmd, "draw").people ?? []).length, show(crmOf(pmd, "draw")));
+  check("…the CS team that month, from CS Portal's board for it", pmd.cs?.status === "ok" && pmd.cs?.month === MONTH_PREV && pmd.cs?.totals?.monthAed === 15000 && csHits.slice(csBefore).includes(`?location=dubai&month=${MONTH_PREV}`), show({ cs: pmd.cs, hits: csHits.slice(csBefore) }));
+  const hitsMid = hits.length, csMid = csHits.length;
+  const pubPast = await call(`/public/manager-tv?month=${MONTH_PREV}`);
+  check("the open link: the same month, no email anywhere, nobody asked again (kept a few minutes)", pubPast.body?.data?.month === MONTH_PREV && !/@/.test(JSON.stringify(pubPast.body?.data ?? {}).replace(/https?:\/\/[^"]*/g, ""))
+    && hits.length === hitsMid && csHits.length === csMid, show({ h: hits.length - hitsMid, c: csHits.length - csMid }));
+  for (const [label, q] of [["this month", MONTH_NOW], ["before October 2026", "2026-09"], ["not a month", "2026-13"]] as [string, string][]) {
+    const lm = (await call(`/manager-tv?month=${q}`, root)).body?.data ?? {};
+    check(`?month= ${label}: the live board`, lm.past === false && (lm.closes ?? []).length > 0, show({ past: lm.past, month: crmOf(lm, "delta").month }));
   }
 
   step("Case 4 — root admins only for the signed-in page");
