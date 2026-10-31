@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
-import { AlertTriangle, Coins, Database, Lock, Pencil, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, CalendarClock, Coins, Database, Lock, Pencil, Plus, Trash2 } from "lucide-react";
 import { AxiosError } from "axios";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -290,6 +290,11 @@ function RootPlanSection({ code, name, tlPaid, crm, root }: { code: string; name
   const [course, setCourse] = useState<RootCommissionPlan["courses"][number] | null>(null);
   const [slab, setSlab] = useState<(typeof SLAB_ROLES)[number] | null>(null);
   const [people, setPeople] = useState(false);
+  const [applying, setApplying] = useState(false);
+  // Months these slabs can be put in force from instead: October 2026 (when pay on the slabs began) up to the month
+  // before they start, never this month or later (2026-11-01).
+  const thisMonth = new Date(Date.now() + 4 * 3_600_000).toISOString().slice(0, 7);
+  const earlier = payMonths().filter((m) => m < root.slabs.from && m < thisMonth);
   const crmCourse = new Map(crm.courses.map((c) => [c.id, c]));
   const roles = SLAB_ROLES.filter((r) => r.key !== "tl" || root.tlSlab);
   return (
@@ -395,8 +400,13 @@ function RootPlanSection({ code, name, tlPaid, crm, root }: { code: string; name
         <CardHeader className="pb-3">
           <CardTitle className="flex items-baseline justify-between gap-2 text-base">
             <span>Salary slabs</span>
-            <span className="shrink-0 text-sm font-normal text-muted-foreground">
+            <span className="flex shrink-0 items-center gap-3 text-sm font-normal text-muted-foreground">
               In force since {root.slabs.from === "2000-01" ? "the start (the CRM's built-in slabs)" : monthLabel(root.slabs.from)} · a change starts this month
+              {earlier.length > 0 && (
+                <Button size="sm" variant="outline" className="h-7" onClick={() => setApplying(true)}>
+                  <CalendarClock className="mr-1 h-3.5 w-3.5" /> Apply to an earlier month
+                </Button>
+              )}
             </span>
           </CardTitle>
         </CardHeader>
@@ -435,6 +445,7 @@ function RootPlanSection({ code, name, tlPaid, crm, root }: { code: string; name
       {course && <CourseDialog code={code} tlPaid={tlPaid} course={course} onClose={() => setCourse(null)} />}
       {slab && <SlabDialog code={code} role={slab} rows={root.slabs[slab.key]} onClose={() => setSlab(null)} />}
       {people && <PeopleDialog code={code} root={root} onClose={() => setPeople(false)} />}
+      {applying && <ApplyFromDialog code={code} name={name} from={root.slabs.from} months={earlier} onClose={() => setApplying(false)} />}
     </>
   );
 }
@@ -702,5 +713,107 @@ function CompareCard({ code, name }: { code: string; name: string }) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/* ── Today's slabs applied to an earlier month (the user, 2026-11-01: "a button to apply them to October") ──────── */
+
+interface ApplyPreview {
+  month: string;
+  from: string;
+  unchanged: number;
+  totals: { before: number; after: number };
+  people: Array<{
+    user: string;
+    name: string;
+    before: { role: string; level: string; percent: number; salary: number; payable: number; total: number } | null;
+    after: { role: string; level: string; percent: number; salary: number; payable: number; total: number } | null;
+  }>;
+}
+
+function ApplyFromDialog({ code, name, from, months, onClose }: { code: string; name: string; from: string; months: string[]; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [month, setMonth] = useState(months[0]!);
+  const preview = useQuery({
+    queryKey: ["commission-apply-from", code, month],
+    queryFn: async () => (await api.get(`/commission-plans/${code}/slabs/apply-from?month=${month}`)).data.data as ApplyPreview,
+    retry: false,
+  });
+  const apply = useMutation({
+    mutationFn: async () => (await api.post(`/commission-plans/${code}/slabs/apply-from`, { month })).data.data as CrmCommissionPlan[],
+    onSuccess: (data) => {
+      qc.setQueryData(["commission-plans"], data);
+      void qc.invalidateQueries({ queryKey: ["commission-compare"] });
+      toast.success(`Slabs in force from ${monthLabel(month)}`);
+      onClose();
+    },
+    onError: (e) => toast.error(apiErrorMessage(e, "Could not apply the slabs")),
+  });
+  const d = preview.data;
+  const pay = (v: number) => aed(v);
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Apply these slabs to an earlier month</DialogTitle>
+          <DialogDescription>
+            The slabs in force since {monthLabel(from)} are put in force from the month you choose, for {name}. That month&apos;s My Pay — and
+            finance&apos;s payable — follow at once. Payouts finance has approved already stay as approved and show as changed.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center gap-2">
+          <Label htmlFor="apply-month">From</Label>
+          <select id="apply-month" value={month} onChange={(e) => setMonth(e.target.value)} className="h-9 rounded-md border border-border bg-background px-2 text-sm">
+            {months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+          </select>
+        </div>
+        {preview.isLoading && <Skeleton className="h-32 w-full" />}
+        {preview.error && <p className="text-sm text-destructive">{apiErrorMessage(preview.error, "Could not work out the preview")}</p>}
+        {d && (
+          <div className="space-y-2">
+            <p className="text-sm">
+              {d.people.length
+                ? `${d.people.length} ${d.people.length === 1 ? "person's" : "people's"} pay for ${monthLabel(d.month)} changes; ${d.unchanged} stay the same. Total pay ${pay(d.totals.before)} → ${pay(d.totals.after)}.`
+                : `Nobody's pay for ${monthLabel(d.month)} changes.`}
+            </p>
+            {d.people.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[560px] text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                      <th className="pb-2 pr-3 font-medium">Person</th>
+                      <th className="pb-2 pr-3 font-medium">Level</th>
+                      <th className="pb-2 pr-3 text-right font-medium">Salary</th>
+                      <th className="pb-2 pr-3 text-right font-medium">Payable</th>
+                      <th className="pb-2 text-right font-medium">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.people.map((p) => (
+                      <tr key={p.user} className="border-b border-border/50 last:border-0">
+                        <td className="py-2 pr-3">
+                          <span className="font-medium">{p.name}</span>
+                          <span className="block text-[11px] text-muted-foreground">{ROLE_SHORT[p.after?.role ?? p.before?.role ?? ""] ?? ""}</span>
+                        </td>
+                        <td className="py-2 pr-3">{p.before ? `${p.before.level} ${p.before.percent}%` : "—"} → <span className="font-medium">{p.after ? `${p.after.level} ${p.after.percent}%` : "—"}</span></td>
+                        <td className="whitespace-nowrap py-2 pr-3 text-right">{p.before ? money(p.before.salary) : "—"} → {p.after ? money(p.after.salary) : "—"}</td>
+                        <td className="whitespace-nowrap py-2 pr-3 text-right">{p.before ? money(p.before.payable) : "—"} → {p.after ? money(p.after.payable) : "—"}</td>
+                        <td className="whitespace-nowrap py-2 text-right font-medium">{p.before ? money(p.before.total) : "—"} → {p.after ? money(p.after.total) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button disabled={!d || apply.isPending} onClick={() => apply.mutate()}>
+            {apply.isPending ? "Applying…" : `Apply from ${monthLabel(month)}`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

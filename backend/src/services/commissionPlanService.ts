@@ -372,6 +372,71 @@ export async function saveSlabs(code: string, role: string, rows: IPlanSlabRow[]
   return `${nameOf(portal)} · ${label} slab from ${month}: ${rows.map((r) => `${r.name} ${r.target.toLocaleString("en-US")} → ${r.salary.toLocaleString("en-US")} + ${r.percent}%`).join(", ")}`;
 }
 
+/* ── The slabs of now, applied to an earlier month (the user, 2026-11-01: "a button to apply them to October") ── */
+
+const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+const monthName = (m: string) =>
+  new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${m}-01T00:00:00Z`));
+const rowsText = (rows: IPlanSlabRow[]) => rows.map((r) => `${r.name} ${r.target.toLocaleString("en-US")} → ${r.salary.toLocaleString("en-US")} + ${r.percent}%`).join(", ");
+
+/**
+ * The slabs in force this month, made the ones in force from `month` on: every version from `month` up to the one in
+ * force now is replaced by one version at `month` with today's rows (a later one, if any, is kept). Refused for a
+ * month before commission began (October 2026), this month or later, or when today's slabs already start then or
+ * before.
+ */
+function slabsFromMonth(versions: IPlanSlabVersion[], month: string, by: string): { next: IPlanSlabVersion[]; now: IPlanSlabVersion; before: IPlanSlabVersion | null } {
+  if (!MONTH_RE.test(month)) throw fail(400, "month is YYYY-MM");
+  if (month < PAY_FROM_MONTH) throw fail(400, `Pay on the slabs starts in ${monthName(PAY_FROM_MONTH)}`);
+  const today = uaeMonth();
+  if (month >= today) throw fail(400, `${monthName(month)} is this month or later — a change made now is in force from this month already`);
+  const now = slabsInForce(versions, today);
+  if (!now) throw fail(409, "This plan has no slabs");
+  if (now.from <= month) throw fail(400, `These slabs are in force from ${now.from === BUILT_IN_FROM ? "the start" : monthName(now.from)} already`);
+  const before = slabsInForce(versions, month);
+  const moved: IPlanSlabVersion = { from: month, sales: rowsOf(now.sales), tl: rowsOf(now.tl), sm: rowsOf(now.sm), updatedAt: new Date(), updatedByEmail: by };
+  const next = [...versions.filter((v) => v.from < month || v.from > now.from), moved].sort((a, b) => (a.from < b.from ? -1 : 1));
+  return { next, now, before };
+}
+
+export interface ApplyPreviewRow {
+  user: string;
+  name: string;
+  before: { role: string; level: string; percent: number; salary: number; payable: number; total: number } | null;
+  after: { role: string; level: string; percent: number; salary: number; payable: number; total: number } | null;
+}
+
+/** What `month`'s pay would be with today's slabs in force from it — each person whose pay moves, before and after. Nothing is saved. */
+export async function previewSlabsFrom(code: string, month: string) {
+  const { plan, src } = await engineInputs(code);
+  const { next, now } = slabsFromMonth(plan.slabs, month, "");
+  const [was, will] = await Promise.all([payRows(src.conn, plan, month), payRows(src.conn, { ...plan, slabs: next }, month)]);
+  const fig = (r: EnginePayRow | undefined) =>
+    r ? { role: r.role, level: r.level.name, percent: r.percent, salary: r.salary, payable: r.commission.payable, total: r.total } : null;
+  const ids = [...new Set([...was.map((r) => r.user), ...will.map((r) => r.user)])];
+  const people: ApplyPreviewRow[] = ids
+    .map((id) => {
+      const a = was.find((r) => r.user === id), b = will.find((r) => r.user === id);
+      return { user: id, name: (b ?? a)!.name, before: fig(a), after: fig(b) };
+    })
+    .filter((p) => JSON.stringify(p.before) !== JSON.stringify(p.after));
+  const total = (rows: EnginePayRow[]) => Math.round(rows.reduce((t, r) => t + r.total, 0) * 100) / 100;
+  return { code, month, from: now.from, people, unchanged: ids.length - people.length, totals: { before: total(was), after: total(will) } };
+}
+
+/** Today's slabs made the ones in force from `month` on. The change list keeps what `month` had before. */
+export async function applySlabsFrom(code: string, month: string, by: string): Promise<string> {
+  const doc = await planDoc(code);
+  const { next, now, before } = slabsFromMonth(doc.slabs as IPlanSlabVersion[], month, by);
+  doc.slabs = next as typeof doc.slabs;
+  doc.updatedByEmail = by;
+  await doc.save();
+  const roles = slabRolesOf(doc.portal);
+  const label = { sales: "Sales Staff", tl: "Team Leader", sm: "Sales Manager" };
+  const was = roles.map((r) => `${label[r]} ${rowsText(rowsOf(before?.[r]))}`).join("; ");
+  return `${nameOf(doc.portal)} · the slabs in force from ${monthName(now.from)} now in force from ${monthName(month)} · ${monthName(month)} had: ${was}`;
+}
+
 /** The Sales Manager and the logins that earn nothing — people of the CRM, by id. */
 export async function saveSettings(code: string, input: { salesManager: string | null; excluded: string[] }, by: string): Promise<string> {
   const doc = await planDoc(code);

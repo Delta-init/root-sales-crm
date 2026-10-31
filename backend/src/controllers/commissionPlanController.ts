@@ -1,6 +1,6 @@
 import type { Response, NextFunction } from "express";
 import { z } from "zod";
-import { commissionPlans, compareMonth, saveCourse, saveSettings, saveSlabs } from "../services/commissionPlanService.js";
+import { applySlabsFrom, commissionPlans, compareMonth, previewSlabsFrom, saveCourse, saveSettings, saveSlabs } from "../services/commissionPlanService.js";
 import { validMonth } from "../services/crmCommissionService.js";
 import { record } from "../services/auditService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
@@ -89,4 +89,30 @@ export const putSlabs = save(
 export const putSettings = save(
   (b) => settingsSchema.safeParse(b),
   (req, data: z.infer<typeof settingsSchema>, by) => saveSettings(req.params.code, data, by),
+);
+
+/* GET /commission-plans/:code/slabs/apply-from?month= — what that month's pay would be with today's slabs (2026-11-01). */
+export const previewApplyFrom = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  const month = req.query.month;
+  if (!validMonth(month)) {
+    sendError(res, "month is required as YYYY-MM", 400);
+    return;
+  }
+  try {
+    sendSuccess(res, "Preview", await previewSlabsFrom(req.params.code, month));
+  } catch (error) {
+    const status = (error as { statusCode?: number }).statusCode;
+    if (status) {
+      sendError(res, (error as Error).message, status);
+      return;
+    }
+    next(error);
+  }
+};
+
+const applyFromSchema = z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "month is YYYY-MM") });
+/* POST /commission-plans/:code/slabs/apply-from { month } — today's slabs in force from that month on. */
+export const applyFrom = save(
+  (b) => applyFromSchema.safeParse(b),
+  (req, data: z.infer<typeof applyFromSchema>, by) => applySlabsFrom(req.params.code, data.month, by),
 );

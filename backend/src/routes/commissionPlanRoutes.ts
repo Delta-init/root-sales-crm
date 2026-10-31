@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { compare, plans, putCourse, putSettings, putSlabs } from "../controllers/commissionPlanController.js";
+import { applyFrom, compare, plans, previewApplyFrom, putCourse, putSettings, putSlabs } from "../controllers/commissionPlanController.js";
 import { authenticate, requireRole } from "../middleware/auth.js";
 
 const router = Router();
@@ -15,6 +15,9 @@ router.get("/", plans);
 router.get("/:code/compare", compare);
 router.put("/:code/courses/:courseId", putCourse);
 router.put("/:code/slabs/:role", putSlabs);
+// Today's slabs applied to an earlier month: a preview of whose pay moves, then the change (2026-11-01).
+router.get("/:code/slabs/apply-from", previewApplyFrom);
+router.post("/:code/slabs/apply-from", applyFrom);
 router.put("/:code/settings", putSettings);
 
 export default router;

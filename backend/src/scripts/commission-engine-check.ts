@@ -15,6 +15,8 @@
  *   Case 4  errors       no month, a bad one; a CRM with no plan in Root
  *   Case 5  permission   the CRM routes take only a CRM's own secret (x-org-secret) and give only its own; the
  *                        compare view root admins only
+ *   Case 6  apply-from   today's slabs applied to October: a preview of whose pay moves (nothing saved), then the
+ *                        change — October's My Pay follows; refused before October 2026, this month, later; root admins
  *
  * Run through scripts/commission-engine-check.sh. Scratch databases on 127.0.0.1 only.
  */
@@ -214,6 +216,35 @@ async function main() {
   check("Draw's secret gets Draw's plan, whatever it asks", asDraw?.portal === "draw", show(asDraw?.portal));
   check("the compare view: not a root admin → 403, no session → 401", (await call("GET", "/commission-plans/delta/compare?month=2026-10", member)).status === 403
     && (await call("GET", "/commission-plans/delta/compare?month=2026-10")).status === 401);
+
+  step("Case 6 — today's slabs applied to October (2026-11-01)");
+  // Case 2 changed the Sales Staff slab from this month (Base 2,500 at 10%); October still has the built-in ones.
+  let pv = await call("GET", "/commission-plans/delta/slabs/apply-from?month=2026-10", root);
+  const pr = (n: string) => pv.body?.data?.people?.find((p: Json) => p.name === n);
+  check("the preview: the Sales Staff whose October moves — Ria C 3,000 + 100% → Base 2,500 + 10%, Mo 2,000 → 2,520",
+    pv.status === 200 && pr("Ria")?.before?.level === "C" && pr("Ria")?.after?.level === "Base" && pr("Ria")?.after?.payable === 46 && pr("Mo")?.after?.total === 2520
+    && pv.body.data.people.length === 5 && pv.body.data.unchanged === 3 && pv.body.data.from === month, show(pv.body?.data));
+  check("…team leaders and the Sales Manager, their slabs the same, not listed", !pr("Lena") && !pr("Abrar"));
+  check("…nothing saved by the preview", row((await call("GET", "/service/commission/pay?month=2026-10", as("delta"))).body?.data, "Mo")?.salary === 2000);
+  check("not a root admin: no preview, no change", (await call("GET", "/commission-plans/delta/slabs/apply-from?month=2026-10", member)).status === 403
+    && (await call("POST", "/commission-plans/delta/slabs/apply-from", member, { month: "2026-10" })).status === 403);
+  for (const [label, m] of [["before October 2026", "2026-09"], ["this month", month], ["a month to come", "2099-01"], ["not a month", "2026-13"]] as const) {
+    check(`${label}: refused`, (await call("POST", "/commission-plans/delta/slabs/apply-from", root, { month: m })).status === 400
+      && (await call("GET", `/commission-plans/delta/slabs/apply-from?month=${m}`, root)).status === 400);
+  }
+  r = await call("POST", "/commission-plans/delta/slabs/apply-from", root, { month: "2026-10" });
+  const kept2 = await mongoose.connection.db!.collection("commissionplans").findOne({ portal: "delta" });
+  check("applied: one version from October with today's rows, this month's folded into it", r.status === 200
+    && kept2?.slabs?.map((v: Json) => v.from).join() === "2000-01,2026-10" && kept2.slabs[1].sales[0].salary === 2500, show(kept2?.slabs?.map((v: Json) => v.from)));
+  const octNow = (await call("GET", "/service/commission/pay?month=2026-10", as("delta"))).body?.data;
+  check("…October's My Pay follows at once: Mo 2,500 + 10% of 200 = 2,520; Lena (TL slab) as she was",
+    row(octNow, "Mo")?.total === 2520 && row(octNow, "Lena")?.total === 4242.5 && octNow?.slabsFrom === "2026-10", show(row(octNow, "Mo")));
+  const ch = r.body?.data?.find((p: Json) => p.code === "delta")?.root?.changes?.[0];
+  check("…in the change list, by whom, with what October had before", /now in force from October 2026/.test(ch?.detail ?? "") && /October 2026 had: Sales Staff Base 0 → 2,000 \+ 0%, E 10,000/.test(ch?.detail ?? "")
+    && ch.by === "root@engine-e2e.test", show(ch));
+  check("…again: in force from October already, refused", (await call("POST", "/commission-plans/delta/slabs/apply-from", root, { month: "2026-10" })).status === 400);
+  check("Banglore (no plan) → 404; Remote (plan taken away above) → 409", (await call("POST", "/commission-plans/banglore/slabs/apply-from", root, { month: "2026-10" })).status === 404
+    && (await call("POST", "/commission-plans/remote/slabs/apply-from", root, { month: "2026-10" })).status === 409);
 
   console.log(`\n${checks - failures}/${checks} checks passed`);
   crmApi.close();
