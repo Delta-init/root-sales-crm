@@ -12,6 +12,8 @@
  *                        CRM whose API is not set up says why, with no payable
  *   Case 6  rupees       each CRM's rupees-per-dirham rate (its Settings', 22.75 when unset) and each line's student, for
  *                        finance's Collected column (2026-10-31)
+ *   Case 7  full payment paid in full first (2026-10-31): a part-paid sale earns nothing, all of it waiting; a sale
+ *                        finished next month earns there, not here; an older sale finished this month earns here
  *   Case 3  errors       no month, a bad month → 400
  *   Case 4  permission   no secret, a wrong one, a CRM's secret → 401; finance switched off in the registry → 503
  *
@@ -159,6 +161,31 @@ async function main() {
   const s1 = (await deltaDb.collection("commissionsales").findOne({ studentName: "S1" }))!;
   const riaLines = delta.people?.find((p: Json) => p.name === "Ria")?.lines ?? [];
   check("each line carries its sale's student", riaLines.find((l: Json) => l.student === "S1")?.studentId === String(s1.student) && riaLines.every((l: Json) => /^[a-f0-9]{24}$/.test(l.studentId)), show(riaLines));
+
+  step("Case 7 — paid in full first (2026-10-31)");
+  const nadia = new Types.ObjectId(), dilshad = new Types.ObjectId();
+  const owing = (o: { date: string; month: string; student: string; owed: number; paid: Array<[string, number]> }) => ({
+    ...sale({ date: o.date, month: o.month, state: "counted", student: o.student, lines: [["sales", nadia, "Nadia", 230], ["sm", dilshad, "dilshad", 85]] }),
+    owedShare: o.owed, paidShare: 1 - o.owed, collections: o.paid.map(([at, share]) => ({ paidAt: new Date(at), share })),
+  });
+  await remoteDb.collection("commissionsales").insertMany([
+    owing({ date: "2026-10-10T08:00:00Z", month: "2026-10", student: "P1", owed: 0.5, paid: [["2026-10-10T00:00:00Z", 0.5]] }),            // still owing
+    owing({ date: "2026-10-12T08:00:00Z", month: "2026-10", student: "P2", owed: 0, paid: [["2026-10-12T00:00:00Z", 0.5], ["2026-11-03T00:00:00Z", 0.5]] }), // finished in November
+    owing({ date: "2026-09-25T08:00:00Z", month: "2026-09", student: "P3", owed: 0, paid: [["2026-09-25T00:00:00Z", 0.5], ["2026-10-20T00:00:00Z", 0.5]] }), // September's, finished in October
+    owing({ date: "2026-09-26T08:00:00Z", month: "2026-09", student: "P4", owed: 0.5, paid: [["2026-09-26T00:00:00Z", 0.5]] }),              // September's, still owing
+  ]);
+  const oct7 = (await ask("2026-10")).body?.data?.crms?.find((c: Json) => c.code === "remote") ?? {};
+  const nadiaOct = oct7.people?.find((p: Json) => p.name === "Nadia");
+  check("October: Nadia earns only the sale finished in October (230), the part-paid one all waiting (230)",
+    nadiaOct?.amount === 230 && nadiaOct?.waiting === 230 && nadiaOct?.sales === 2, show(nadiaOct));
+  check("…its lines: P1 earns 0, 230 waiting; P3 earns 230, paid in full 20 Oct; P2 and P4 not here",
+    JSON.stringify(nadiaOct?.lines?.map((l: Json) => [l.student, l.amount, l.waiting, (l.paidInFullAt ?? "").slice(0, 10)])) === JSON.stringify([["P3", 230, 0, "2026-10-20"], ["P1", 0, 230, ""]]), show(nadiaOct?.lines));
+  check("…the CRM: 315 earned, 315 waiting (the sales manager's too)", oct7.total === 315 && oct7.waitingTotal === 315, show({ t: oct7.total, w: oct7.waitingTotal }));
+  const nov7 = (await ask("2026-11")).body?.data?.crms?.find((c: Json) => c.code === "remote") ?? {};
+  const nadiaNov = nov7.people?.find((p: Json) => p.name === "Nadia");
+  check("November: the October sale finished on 3 Nov earns all 230 there; nothing waiting", nadiaNov?.amount === 230 && nadiaNov?.waiting === 0
+    && JSON.stringify(nadiaNov?.lines?.map((l: Json) => l.student)) === JSON.stringify(["P2"]), show(nadiaNov));
+  check("a sale with no payments followed (older ones) earns in its sale month, as before", delta.people?.find((p: Json) => p.name === "Ria")?.lines?.every((l: Json) => l.waiting === 0 && l.paidInFullAt), show(delta.people?.[0]?.lines));
 
   step("Case 3 — errors");
   check("no month: 400", (await ask(null)).status === 400);
