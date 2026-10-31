@@ -105,6 +105,20 @@ check("Delta revenue 3,500, Remote 2,400", native("delta") === 3500 && native("r
 check("Banglore revenue 1,200 (its own lead payments, nothing added)", native("banglore") === 1200, native("banglore"));
 void b;
 
+section("Remote: rupees with no enrolment (2026-10-31, the AI Academy's students)");
+// The same lead in Delta and Remote: Ben, ₹4,550, marked Closed with no enrolment.
+for (const db of [delta, remote]) {
+  await db.collection("leads").insertOne({ _id: id(), name: "L4", assignedTo: new Types.ObjectId(db === delta ? d.ben : r.ben), status: "closed", createdAt: now,
+    payments: [{ _id: id(), amount: 4550, paidAt: now, currency: "INR" }] });
+}
+const list2 = await listSalespeople({});
+const rev2 = (code: string, name: string) => list2.crms.find((c) => c.code === code)?.people.find((p) => p.name === name)?.revenue;
+check("Remote Ben 1,100 — his ₹4,550 at 45.5 = AED 100 counted", rev2("remote", "Ben") === 1100, rev2("remote", "Ben"));
+check("…Remote Ria unchanged at 1,400 (her Bangalore rupees not counted twice)", rev2("remote", "Ria") === 1400, rev2("remote", "Ria"));
+check("Delta Ben still 1,000 (only Remote counts these)", rev2("delta", "Ben") === 1000, rev2("delta", "Ben"));
+const repR2 = await salesReport("remote", {});
+check("Remote report total 2,500", repR2.revenue.total.revenue === 2500, repR2.revenue.total);
+
 console.log(`\n${checks - failures}/${checks} passed`);
 await mongoose.disconnect();
 process.exit(failures ? 1 : 0);

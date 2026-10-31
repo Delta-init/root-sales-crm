@@ -14,6 +14,9 @@ import type { CrmSource } from "./crmConnections.js";
  *     AED sums (COUNTED_PAYMENT) and counted here in AED.
  *
  * The Banglore CRM is in rupees throughout: nothing to add there.
+ *
+ *   • Remote (2026-10-31, as Remote counts it since then): any other lead's rupee payments too — the AI Academy's
+ *     students, paid in rupees with no enrolment — in AED at the same rate.
  */
 
 export const DEFAULT_INR_PER_AED = 22.75;
@@ -70,17 +73,17 @@ function paymentsInAed(rate: number, aedCashOnLead: boolean) {
 }
 
 /** A lead's rupee payments (`currency: "INR"`) in AED, finance's decision kept. */
-function rupeesInAed(rate: number) {
+function rupeesInAed(rate: number, payments = "$lead.payments", label = "Bangalore balance payment") {
   return {
     $map: {
-      input: { $filter: { input: { $ifNull: ["$lead.payments", []] }, as: "p", cond: { $eq: ["$$p.currency", "INR"] } } },
+      input: { $filter: { input: { $ifNull: [payments, []] }, as: "p", cond: { $eq: ["$$p.currency", "INR"] } } },
       as: "p",
       in: {
         $mergeObjects: [
           { $arrayToObject: { $filter: { input: { $objectToArray: "$$p" }, as: "f", cond: { $ne: ["$$f.k", "currency"] } } } },
           {
             amount: { $round: [{ $divide: [{ $ifNull: ["$$p.amount", 0] }, rate] }, 2] },
-            note: { $concat: ["Bangalore balance payment · ₹", { $toString: { $ifNull: ["$$p.amount", 0] } }, " at 1 AED = ₹", { $toString: rate }] },
+            note: { $concat: [label, " · ₹", { $toString: { $ifNull: ["$$p.amount", 0] } }, " at 1 AED = ₹", { $toString: rate }] },
           },
         ],
       },
@@ -90,8 +93,9 @@ function rupeesInAed(rate: number) {
 
 /**
  * First stage(s) of a pipeline over the CRM's leads that unwinds their payments: beside the leads, one copy of each
- * Bangalore-enrolled lead carrying only its Bangalore money in AED. Follow the $unwind with COUNTED_PAYMENT, which
- * leaves the lead's own rupee payments out. None for a CRM in rupees.
+ * Bangalore-enrolled lead carrying only its Bangalore money in AED — and in Remote one copy of every other lead with
+ * rupee payments, carrying only those, in AED. Follow the $unwind with COUNTED_PAYMENT, which leaves the lead's own
+ * rupee payments out. None for a CRM in rupees.
  */
 export async function bangaloreUnion(src: CrmSource): Promise<Document[]> {
   if (String(src.org.currency ?? "").toUpperCase() !== "AED") return [];
@@ -108,5 +112,18 @@ export async function bangaloreUnion(src: CrmSource): Promise<Document[]> {
         { $match: { "payments.0": { $exists: true } } },
       ],
     },
-  }];
+  },
+  ...(src.org.code === "remote" ? [{
+    $unionWith: {
+      coll: "leads",
+      pipeline: [
+        { $match: { "payments.currency": "INR" } },
+        { $lookup: { from: "students", localField: "_id", foreignField: "leadId", as: "_bangalore", pipeline: [{ $match: { academy: "bangalore" } }, { $limit: 1 }, { $project: { _id: 1 } }] } },
+        // A lead with a Bangalore enrolment — dropped too — is the branch above's (or, dropped, counted nowhere).
+        { $match: { _bangalore: { $size: 0 } } },
+        { $project: { activityLogs: 0, _bangalore: 0 } },
+        { $set: { payments: rupeesInAed(rate, "$payments", "Rupee payment") } },
+      ],
+    },
+  }] : [])];
 }
