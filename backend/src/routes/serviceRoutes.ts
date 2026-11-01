@@ -17,9 +17,9 @@ router.post("/crm-leads", authenticatePortalService("lms"), crmLeads);
 // its ROOT_ERP_SECRET).
 router.get("/crm-commission", authenticatePortalService("finance-hq"), crmCommissionForFinance);
 
-// HRMS asking each salesperson's salary on the CRM slabs for a month — the salary its payslips pay, loss of pay priced
-// off it (2026-11-01). HRMS proves itself with the secret Root shares with it (HRMS_SSO_SECRET, its ROOT_ERP_SECRET).
-router.get("/hrms/slab-pay", authenticatePortalService("hrms"), engine.slabPay);
+// Finance asking each salesperson's salary on the CRM slabs for a month — its payroll puts them on it, loss of pay
+// priced off it (2026-11-01). The same secret as the commission above.
+router.get("/finance/slab-pay", authenticatePortalService("finance-hq"), engine.slabPay);
 
 // Server-to-server only: a CRM backend acting for its own signed-in user.
 // Never reachable from a browser — the secret lives in the CRM's environment.

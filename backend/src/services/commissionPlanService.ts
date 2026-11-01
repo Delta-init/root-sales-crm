@@ -548,8 +548,10 @@ export interface SlabPayPerson {
   email: string;
   role: string;
   level: string;
-  /** The month's salary on the slab — what HRMS pays as this person's salary, loss of pay priced off it. */
+  /** The month's salary on the slab — what finance's payroll pays as this person's salary, loss of pay priced off it. */
   salary: number;
+  /** The CRM's currency, the salary's. */
+  currency: string;
   percent: number;
   earned: number;
   payable: number;
@@ -579,7 +581,7 @@ export async function payrollSlabs(month: string): Promise<{ month: string; peop
       for (const r of rows) {
         people.push({
           crm: plan.portal, crmName: src.org.name, userId: r.user, name: r.name, email: emails.get(r.user) ?? "", role: r.role,
-          level: r.level.name, salary: r.salary, percent: r.percent, earned: r.commission.earned, payable: r.commission.payable,
+          level: r.level.name, salary: r.salary, currency: (src.org as { currency?: string }).currency || "AED", percent: r.percent, earned: r.commission.earned, payable: r.commission.payable,
         });
       }
     } catch (e) {

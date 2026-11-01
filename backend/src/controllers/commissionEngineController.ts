@@ -71,7 +71,7 @@ export const pay = async (req: AuthenticatedRequest, res: Response, next: NextFu
   }
 };
 
-/* GET /service/hrms/slab-pay?month= — HRMS asking each salesperson's salary on the slabs, by email (2026-11-01). */
+/* GET /service/finance/slab-pay?month= — finance payroll asking each salesperson's salary on the slabs, by email (2026-11-01). */
 export const slabPay = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   const month = req.query.month;
   if (!validMonth(month)) {
