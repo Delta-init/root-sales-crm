@@ -1,3 +1,4 @@
+import { Types } from "mongoose";
 import { getSources } from "./crmConnections.js";
 import { resolveTarget, callTarget } from "../lib/targetClient.js";
 import { inrPerAed } from "./bangaloreRevenue.js";
@@ -44,6 +45,8 @@ export interface CommissionPerson {
   waiting: number;
   /** My Pay's commission payable, the level's percent and name; null when the CRM's API couldn't say. */
   payable: number | null; percent: number | null; level: string | null;
+  /** Their login's email in the CRM — what finance's payroll matches them to an employee by (2026-11-01). */
+  email?: string;
 }
 export interface CrmCommission {
   code: string; name: string; currency: string; error: string | null;
@@ -147,6 +150,12 @@ export async function crmCommission(month: string): Promise<{ month: string; crm
           byPerson.set(id, p);
         }
       }
+      // Each person's email, for finance's payroll to find their payslip by (2026-11-01).
+      const emailOf = new Map(
+        (await conn.collection("users").find({ _id: { $in: [...byPerson.keys()].filter((k) => Types.ObjectId.isValid(k)).map((k) => new Types.ObjectId(k)) } }, { projection: { email: 1 } }).toArray())
+          .map((u) => [String(u._id), String(u.email ?? "").trim().toLowerCase()]),
+      );
+      for (const p of byPerson.values()) p.email = emailOf.get(p.userId) ?? "";
       const people = [...byPerson.values()]
         .map((p) => ({ ...p, amount: Math.round(p.amount * 100) / 100, waiting: Math.round(p.waiting * 100) / 100 }))
         .sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name));

@@ -1,6 +1,6 @@
 import type { Response, NextFunction } from "express";
 import { z } from "zod";
-import { engineInputs, planForCrm } from "../services/commissionPlanService.js";
+import { engineInputs, payrollSlabs, planForCrm } from "../services/commissionPlanService.js";
 import { payRows, resolveSale, slabsOfMonth } from "../services/commissionEngine.js";
 import { validMonth } from "../services/crmCommissionService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
@@ -66,6 +66,20 @@ export const pay = async (req: AuthenticatedRequest, res: Response, next: NextFu
     const { plan: p, src } = await engineInputs(req.serviceOrg!.code);
     const { from, slabs } = slabsOfMonth(p, month);
     sendSuccess(res, "Pay", { month, slabsFrom: from, slabs, people: await payRows(src.conn, p, month) });
+  } catch (error) {
+    failed(res, next, error);
+  }
+};
+
+/* GET /service/hrms/slab-pay?month= — HRMS asking each salesperson's salary on the slabs, by email (2026-11-01). */
+export const slabPay = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  const month = req.query.month;
+  if (!validMonth(month)) {
+    sendError(res, "month is required as YYYY-MM", 400);
+    return;
+  }
+  try {
+    sendSuccess(res, "Salary on the slabs", await payrollSlabs(month));
   } catch (error) {
     failed(res, next, error);
   }

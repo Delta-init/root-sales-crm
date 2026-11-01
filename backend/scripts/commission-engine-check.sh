@@ -73,7 +73,7 @@ export BANGLORE_MONGODB_URI="mongodb://127.0.0.1:1/banglore-crm-commission-engin
 export LEAD_TRAFFIC_SHEET_KEY="" TRAFFIC_WORKER=false
 export LMS_API_URL="" LMS_SSO_SECRET=""
 export COMMISSION_API_URL="" COMMISSION_SSO_SECRET="" FINANCE_HQ_API_URL="" FINANCE_HQ_SSO_SECRET=""
-export MEDIA_ERP_API_URL="" MEDIA_ERP_SSO_SECRET="" HRMS_SSO_SECRET=""
+export MEDIA_ERP_API_URL="" MEDIA_ERP_SSO_SECRET="" HRMS_SSO_SECRET="commission-engine-e2e-hrms-secret"
 export E2E_API_PORT="$API_PORT" E2E_REPO="$REPO" E2E_WORK="$WORK"
 
 # From the scratch directory, so dotenv finds no .env to fill the gaps with.

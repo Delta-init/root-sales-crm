@@ -537,3 +537,54 @@ export async function planForCrm(code: string, month: string) {
     slabs,
   };
 }
+
+/* ── Salary on the slabs, for payroll (the user, 2026-11-01: "the salary from the slab in HRMS, LOP on it") ─────── */
+
+export interface SlabPayPerson {
+  crm: string;
+  crmName: string;
+  userId: string;
+  name: string;
+  email: string;
+  role: string;
+  level: string;
+  /** The month's salary on the slab — what HRMS pays as this person's salary, loss of pay priced off it. */
+  salary: number;
+  percent: number;
+  earned: number;
+  payable: number;
+}
+
+/**
+ * Everyone on a CRM's slabs in a month, with their email, from Root's plan and figures — every CRM whose plan is
+ * kept here (no Bangalore). A CRM that can't be read says why; the others still answer.
+ */
+export async function payrollSlabs(month: string): Promise<{ month: string; people: SlabPayPerson[]; failures: Array<{ crm: string; error: string }> }> {
+  const { sources, failures } = await getSources();
+  const plans = await CommissionPlan.find({}).lean<ICommissionPlan[]>();
+  const people: SlabPayPerson[] = [];
+  const failed = failures.filter((f) => isPortal(f.code)).map((f) => ({ crm: f.code, error: f.error }));
+  for (const plan of plans) {
+    const src = sources.find((x) => x.org.code === plan.portal);
+    if (!src) {
+      if (!failed.some((f) => f.crm === plan.portal)) failed.push({ crm: plan.portal, error: "Its database isn't configured on this server" });
+      continue;
+    }
+    try {
+      const rows = await payRows(src.conn, plan, month);
+      const emails = new Map(
+        (await src.conn.collection("users").find({ _id: { $in: rows.map((r) => new Types.ObjectId(r.user)) } }, { projection: { email: 1 }, maxTimeMS: QUERY_MS }).toArray())
+          .map((u) => [String(u._id), String(u.email ?? "").trim().toLowerCase()]),
+      );
+      for (const r of rows) {
+        people.push({
+          crm: plan.portal, crmName: src.org.name, userId: r.user, name: r.name, email: emails.get(r.user) ?? "", role: r.role,
+          level: r.level.name, salary: r.salary, percent: r.percent, earned: r.commission.earned, payable: r.commission.payable,
+        });
+      }
+    } catch (e) {
+      failed.push({ crm: plan.portal, error: e instanceof Error ? e.message : "Could not be read" });
+    }
+  }
+  return { month, people, failures: failed };
+}

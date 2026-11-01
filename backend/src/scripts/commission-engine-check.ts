@@ -90,6 +90,7 @@ async function main() {
   for (const [code, name, sortOrder] of [["delta", "Delta CRM", 1], ["banglore", "Banglore CRM", 2], ["draw", "Draw CRM", 3], ["remote", "Remote CRM", 4]] as const) {
     await Organization.create({ code, kind: "crm", name, timezone: "Asia/Dubai", currency: code === "banglore" ? "INR" : "AED", fxToBase: 1, isActive: true, sortOrder, accent: "#2563eb" });
   }
+  await Organization.create({ code: "hrms", kind: "hrms", name: "HRMS", timezone: "Asia/Dubai", currency: "AED", fxToBase: 1, isActive: true, sortOrder: 9, accent: "#2563eb" });
   await AdminUser.create({ name: "Root E2E", email: "root@engine-e2e.test", password: PASSWORD, role: "root_admin", status: "active" });
   await AdminUser.create({ name: "Member E2E", email: "member@engine-e2e.test", password: PASSWORD, role: "member", status: "active" });
   const seeded = { delta: await seedCrm(dbs.delta), draw: await seedCrm(dbs.draw), remote: await seedCrm(dbs.remote) };
@@ -216,6 +217,19 @@ async function main() {
   check("Draw's secret gets Draw's plan, whatever it asks", asDraw?.portal === "draw", show(asDraw?.portal));
   check("the compare view: not a root admin → 403, no session → 401", (await call("GET", "/commission-plans/delta/compare?month=2026-10", member)).status === 403
     && (await call("GET", "/commission-plans/delta/compare?month=2026-10")).status === 401);
+
+  step("Case 7 — HRMS asking the salary on the slabs (2026-11-01)");
+  const asHrms = { "x-portal-secret": process.env.HRMS_SSO_SECRET ?? "" };
+  let sp = await call("GET", "/service/hrms/slab-pay?month=2026-10", asHrms);
+  const spRow = (crm: string, n: string) => sp.body?.data?.people?.find((p: Json) => p.crm === crm && p.name === n);
+  check("each CRM's people on the slabs, by email: Ria (Sales CRM) C 3,000; Abrar the SM on 5,000; Draw's Lena on Sales Staff",
+    sp.status === 200 && spRow("delta", "Ria")?.salary === 3000 && spRow("delta", "Ria")?.level === "C" && spRow("delta", "Abrar")?.role === "sm"
+    && spRow("delta", "Abrar")?.salary === 5000 && spRow("draw", "Lena")?.role === "sales" && typeof spRow("delta", "Ria")?.email === "string", show(sp.body?.data?.people?.slice(0, 3)));
+  check("…the commission payable with it (Ria 460)", spRow("delta", "Ria")?.payable === 460, show(spRow("delta", "Ria")));
+  check("…a CRM with no plan in Root left out, not an error (Remote's was taken away above)", !sp.body?.data?.people?.some((p: Json) => p.crm === "remote"));
+  check("no secret, a CRM's secret, finance's: refused", (await call("GET", "/service/hrms/slab-pay?month=2026-10")).status === 401
+    && (await call("GET", "/service/hrms/slab-pay?month=2026-10", { "x-portal-secret": SECRET.delta })).status === 401);
+  check("a bad month → 400", (await call("GET", "/service/hrms/slab-pay?month=2026-13", asHrms)).status === 400);
 
   step("Case 6 — today's slabs applied to October (2026-11-01)");
   // Case 2 changed the Sales Staff slab from this month (Base 2,500 at 10%); October still has the built-in ones.
