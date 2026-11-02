@@ -6,6 +6,7 @@ import { env } from "./config/env.js";
 import { connectDB } from "./config/db.js";
 import { corsOptions, allowedOrigins } from "./config/cors.js";
 import routes from "./routes/index.js";
+import tvPublicRoutes from "./routes/tvPublicRoutes.js";
 import { verify as verifySsoToken } from "./controllers/ssoController.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
 import { startTrafficWorker } from "./services/trafficService.js";
@@ -14,6 +15,10 @@ import { startBackupWorker } from "./services/backupService.js";
 const app = express();
 
 app.set("trust proxy", 1); // behind nginx — needed for real client IPs in the audit log
+
+// The office TVs' photos and videos (2026-11-02): open to the other portals' TV pages, so ahead of helmet's
+// same-origin rules and the CORS allow-list (routes/tvPublicRoutes.ts).
+app.use("/api/v1/public/tv", tvPublicRoutes);
 
 app.use(helmet());
 app.use(cors(corsOptions));

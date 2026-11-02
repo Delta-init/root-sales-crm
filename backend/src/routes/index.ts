@@ -20,6 +20,7 @@ import backupRoutes from "./backupRoutes.js";
 import salesTvRoutes from "./salesTvRoutes.js";
 import managerTvRoutes from "./managerTvRoutes.js";
 import publicRoutes from "./publicRoutes.js";
+import tvMediaRoutes from "./tvMediaRoutes.js";
 
 const router = Router();
 
@@ -49,6 +50,8 @@ router.use("/backups", backupRoutes);
 router.use("/sales-tv", salesTvRoutes);
 router.use("/manager-tv", managerTvRoutes);
 router.use("/public", publicRoutes);
+// The office TVs' photos and videos (2026-11-02) — root admins; the TVs read theirs from /public/tv (index.ts).
+router.use("/tv-media", tvMediaRoutes);
 
 router.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

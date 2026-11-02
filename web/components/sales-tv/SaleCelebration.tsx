@@ -39,6 +39,8 @@ const SALE_EVENT = "root:sales-tv-close";
 /** Shows (and says) a close on this screen. */
 export function celebrate(sale: SaleClosed): void {
   window.dispatchEvent(new CustomEvent<SaleClosed>(SALE_EVENT, { detail: sale }));
+  // A TV in the middle of its photos and videos puts them away so the sale shows (2026-11-02, tv-overlay.js).
+  window.dispatchEvent(new Event("tv:celebrate"));
 }
 
 export function SaleCelebration() {

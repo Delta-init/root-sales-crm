@@ -1,6 +1,7 @@
 "use client";
 
 import { SalesTvBoard } from "@/components/sales-tv/SalesTvBoard";
+import { TvMediaOverlay } from "@/components/tv-media/TvMediaOverlay";
 import { API_URL } from "@/lib/axios";
 import type { SalesTvData, SalesTvFetcher } from "@/lib/salesTv";
 
@@ -19,5 +20,11 @@ const fetchPublic: SalesTvFetcher = async (since) => {
 };
 
 export default function PublicSalesTvPage() {
-  return <SalesTvBoard fetcher={fetchPublic} variant="tv" />;
+  return (
+    <>
+      <SalesTvBoard fetcher={fetchPublic} variant="tv" />
+      {/* The photos and videos chosen for this TV between the boards (2026-11-02). */}
+      <TvMediaOverlay screen="root-sales-tv" />
+    </>
+  );
 }
