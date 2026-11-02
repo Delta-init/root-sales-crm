@@ -121,14 +121,15 @@ const envSchema = z.object({
   /** Who is emailed when a portal's backup fails or cannot run. Comma separated; empty sends nothing. */
   BACKUP_ALERT_EMAIL: z.string().default(""),
   /*
-   * The office TVs' photos and videos (2026-11-02): their own R2 bucket, apart from the backups. The account and keys
-   * fall back to the backups' when not given — that works only if the backups' key may use this bucket too. The
-   * bucket needs a CORS rule letting Root's web PUT and GET (the TV media page uploads straight into it).
+   * The office TVs' photos and videos (2026-11-02): in the backups' R2 bucket under tv/ (the user, 2026-11-02: "use
+   * backup r2 for the photos and tv also") — each of these falls back to its BACKUP_R2_ twin when empty, so nothing
+   * needs setting; set them only to keep the files somewhere else. The bucket needs a CORS rule letting Root's web PUT
+   * and GET (the TV media page uploads straight into it). The backups' clean-up only deletes archives it recorded.
    */
   TV_MEDIA_R2_ACCOUNT_ID: z.string().default(""),
   TV_MEDIA_R2_ACCESS_KEY_ID: z.string().default(""),
   TV_MEDIA_R2_SECRET_ACCESS_KEY: z.string().default(""),
-  TV_MEDIA_R2_BUCKET: z.string().default("delta-tv-media"),
+  TV_MEDIA_R2_BUCKET: z.string().default(""),
   /** Set only to point somewhere other than R2 (the check's stand-in). */
   TV_MEDIA_R2_ENDPOINT: z.string().default(""),
 });

@@ -58,10 +58,11 @@ export CLIENT_URL="http://localhost:3100"
 export SMTP_HOST="" SMTP_USER="" SMTP_PASS="" SMTP_EMAIL_FROM=""
 export HRMS_API_URL="" HRMS_CLIENT_ID="" HRMS_INTEGRATION_SECRET="" HRMS_ORG_ID=""
 export LEAD_TRAFFIC_SHEET_KEY="" TRAFFIC_WORKER=false BACKUP_WORKER=false
-export BACKUP_R2_ACCOUNT_ID="" BACKUP_R2_ACCESS_KEY_ID="" BACKUP_R2_SECRET_ACCESS_KEY=""
-export TV_MEDIA_R2_ENDPOINT="http://127.0.0.1:$R2_PORT" TV_MEDIA_R2_ACCOUNT_ID=""
-export TV_MEDIA_R2_ACCESS_KEY_ID="e2e-key" TV_MEDIA_R2_SECRET_ACCESS_KEY="e2e-secret" TV_MEDIA_R2_BUCKET="delta-tv-media-e2e"
-export E2E_API_PORT="$API_PORT" E2E_R2_PORT="$R2_PORT" E2E_R2_DIR="$WORK/r2/delta-tv-media-e2e"
+# The TVs' files go in the backups' bucket with the backups' keys, as in production (2026-11-02): no TV_MEDIA_R2_*.
+export BACKUP_R2_ENDPOINT="http://127.0.0.1:$R2_PORT" BACKUP_R2_ACCOUNT_ID=""
+export BACKUP_R2_ACCESS_KEY_ID="e2e-key" BACKUP_R2_SECRET_ACCESS_KEY="e2e-secret" BACKUP_R2_BUCKET="delta-backups-tv-e2e"
+export TV_MEDIA_R2_ENDPOINT="" TV_MEDIA_R2_ACCOUNT_ID="" TV_MEDIA_R2_ACCESS_KEY_ID="" TV_MEDIA_R2_SECRET_ACCESS_KEY="" TV_MEDIA_R2_BUCKET=""
+export E2E_API_PORT="$API_PORT" E2E_R2_PORT="$R2_PORT" E2E_R2_DIR="$WORK/r2/delta-backups-tv-e2e"
 
 # From the scratch directory, so dotenv finds no .env to fill the gaps with.
 cd "$WORK/run"

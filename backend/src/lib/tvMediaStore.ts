@@ -1,9 +1,10 @@
 import { env } from "../config/env.js";
 
 /**
- * Where the office TVs' photos and videos are kept (2026-11-02): their own R2 bucket, through Bun's S3 client like the
- * backups (lib/backupStore.ts). The TV media page uploads straight into it with a signed link, so a 200 MB video never
- * passes through this server; the TVs play from it with a signed link too.
+ * Where the office TVs' photos and videos are kept (2026-11-02): the backups' R2 bucket under tv/, with the backups'
+ * account and keys, unless TV_MEDIA_R2_* say otherwise — through Bun's S3 client like the backups (lib/backupStore.ts).
+ * The TV media page uploads straight into it with a signed link, so a 200 MB video never passes through this server;
+ * the TVs play from it with a signed link too.
  */
 
 interface S3Stat { size: number }
@@ -21,15 +22,17 @@ const Ctor = (globalThis as unknown as { Bun?: { S3Client?: S3ClientCtor } }).Bu
 const account = () => env.TV_MEDIA_R2_ACCOUNT_ID || env.BACKUP_R2_ACCOUNT_ID;
 const keyId = () => env.TV_MEDIA_R2_ACCESS_KEY_ID || env.BACKUP_R2_ACCESS_KEY_ID;
 const secret = () => env.TV_MEDIA_R2_SECRET_ACCESS_KEY || env.BACKUP_R2_SECRET_ACCESS_KEY;
+const bucket = () => env.TV_MEDIA_R2_BUCKET || env.BACKUP_R2_BUCKET;
+const endpoint = () => env.TV_MEDIA_R2_ENDPOINT || env.BACKUP_R2_ENDPOINT;
 
 /** What is missing before photos and videos can be stored, named; empty when they can. */
 export function tvStoreMissing(): string[] {
   const missing: string[] = [];
   if (!Ctor) missing.push("Bun 1.2 or newer on the server (this one has no S3 client)");
-  if (!env.TV_MEDIA_R2_ENDPOINT && !account()) missing.push("TV_MEDIA_R2_ACCOUNT_ID");
-  if (!keyId()) missing.push("TV_MEDIA_R2_ACCESS_KEY_ID");
-  if (!secret()) missing.push("TV_MEDIA_R2_SECRET_ACCESS_KEY");
-  if (!env.TV_MEDIA_R2_BUCKET) missing.push("TV_MEDIA_R2_BUCKET");
+  if (!endpoint() && !account()) missing.push("BACKUP_R2_ACCOUNT_ID");
+  if (!keyId()) missing.push("BACKUP_R2_ACCESS_KEY_ID");
+  if (!secret()) missing.push("BACKUP_R2_SECRET_ACCESS_KEY");
+  if (!bucket()) missing.push("BACKUP_R2_BUCKET");
   return missing;
 }
 
@@ -40,8 +43,8 @@ const get = (): S3Client => {
   client = new Ctor({
     accessKeyId: keyId(),
     secretAccessKey: secret(),
-    bucket: env.TV_MEDIA_R2_BUCKET,
-    endpoint: env.TV_MEDIA_R2_ENDPOINT || `https://${account()}.r2.cloudflarestorage.com`,
+    bucket: bucket(),
+    endpoint: endpoint() || `https://${account()}.r2.cloudflarestorage.com`,
   });
   return client;
 };
