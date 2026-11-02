@@ -12,7 +12,8 @@
  *   by itself).
  * - A page announcing a sale fires `window.dispatchEvent(new Event("tv:celebrate"))`: the photos go at once so the
  *   celebration shows, and the board gets its full time again.
- * - A page turned on its side sets <html data-tv-rotate="90|180|270">; the photos turn with it.
+ * - A page turned on its side sets <html data-tv-rotate="90|180|270">; the photos turn with it — at once, even in the
+ *   middle of a photo or video, when the page is turned (its Rotate button or R key) while they're showing.
  * - ?tvmedia=off on a TV's link turns this off for that screen.
  * - Anything going wrong — Root unreachable, a file missing — leaves the board on screen as it always was.
  *
@@ -80,17 +81,23 @@
       el.style.height = "100%";
     };
 
-    var build = function () {
-      layer = document.createElement("div");
-      layer.setAttribute("data-tv-media", "");
-      layer.style.cssText = "position:fixed;left:0;top:0;width:100vw;height:100vh;z-index:2147483000;background:#000;overflow:hidden;cursor:none;opacity:0;transition:opacity .6s ease";
-      stage = document.createElement("div");
+    /** The photos turned the way the page is; on its side the frame swaps width and height to fill the screen. */
+    var turn = function () {
+      if (!stage) return;
       var deg = rotation();
       if (deg === 90 || deg === 270) {
         stage.style.cssText = "position:absolute;left:50%;top:50%;width:100vh;height:100vw;transform:translate(-50%,-50%) rotate(" + deg + "deg)";
       } else {
         stage.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%" + (deg ? ";transform:rotate(180deg)" : "");
       }
+    };
+
+    var build = function () {
+      layer = document.createElement("div");
+      layer.setAttribute("data-tv-media", "");
+      layer.style.cssText = "position:fixed;left:0;top:0;width:100vw;height:100vh;z-index:2147483000;background:#000;overflow:hidden;cursor:none;opacity:0;transition:opacity .6s ease";
+      stage = document.createElement("div");
+      turn();
       layer.appendChild(stage);
       document.body.appendChild(layer);
       window.requestAnimationFrame(function () { window.requestAnimationFrame(function () { if (layer) layer.style.opacity = "1"; }); });
@@ -199,6 +206,11 @@
       build();
       show(items, 0, run);
     };
+
+    // Turned while a photo or video is showing (2026-11-02, the pod board): it turns too, without waiting for the next round.
+    if (window.MutationObserver) {
+      new window.MutationObserver(turn).observe(document.documentElement, { attributes: true, attributeFilter: ["data-tv-rotate"] });
+    }
 
     window.addEventListener("tv:celebrate", function () {
       if (inBreak) endBreak();
