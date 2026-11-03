@@ -24,7 +24,7 @@ const fetchPublic: SalesTvFetcher = async (since, month) => {
 export default function PublicManagerTvPage() {
   return (
     <>
-      <SalesTvBoard fetcher={fetchPublic} variant="tv" withCs panels={false} months title="Manager TV" subtitle="Dubai Sales · Draw · Remote · CS team" />
+      <SalesTvBoard fetcher={fetchPublic} variant="tv" withCs panels={false} months compactMoney title="Manager TV" subtitle="Dubai Sales · Draw · Remote · CS team" />
       {/* The photos and videos chosen for this TV between the boards (2026-11-02). */}
       <TvMediaOverlay screen="root-manager-tv" />
     </>

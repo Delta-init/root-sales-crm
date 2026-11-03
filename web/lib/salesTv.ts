@@ -182,3 +182,17 @@ export function teamTone(team: string): string {
 
 /** Revenue on the board: the CRMs' figures are dirhams, as their close amounts are. "AED 45,500". */
 export const fmtRevenue = (n: number) => fmtMoney(n, "AED");
+
+/**
+ * Money rounded for the Manager TV (the user, 2026-11-03: "show 1k instead of the full amount, the full amount on
+ * hover"): 950, 1.3K, 42.4K, 256K, 1.25M. The full figure goes in the title beside it.
+ */
+export function fmtShort(n: number): string {
+  const v = Math.round(n || 0);
+  const a = Math.abs(v);
+  const trim = (s: string) => s.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+  if (a < 1000) return v.toLocaleString("en-US");
+  if (a < 99_950) return `${trim((v / 1000).toFixed(1))}K`;
+  if (a < 999_500) return `${Math.round(v / 1000)}K`;
+  return `${trim((v / 1_000_000).toFixed(2))}M`;
+}

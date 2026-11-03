@@ -64,7 +64,7 @@ export default function ManagerTvPage() {
           </Button>
         </div>
       </motion.div>
-      <SalesTvBoard fetcher={fetchSignedIn} variant="embedded" withCs panels={false} months title="Manager TV" subtitle="Dubai Sales · Draw · Remote · CS team" />
+      <SalesTvBoard fetcher={fetchSignedIn} variant="embedded" withCs panels={false} months compactMoney title="Manager TV" subtitle="Dubai Sales · Draw · Remote · CS team" />
     </div>
   );
 }

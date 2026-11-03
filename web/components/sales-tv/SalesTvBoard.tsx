@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { AlertTriangle, Maximize, Minimize, Trophy, Volume2, VolumeX } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
-  breakLabel, crmTag, crmTone, fmtClock, fmtInt, fmtMoney, fmtRevenue, fmtTalk, initials, monthLabel, monthYearLabel, pastTvMonths,
+  breakLabel, crmTag, crmTone, fmtClock, fmtInt, fmtMoney, fmtRevenue, fmtShort, fmtTalk, initials, monthLabel, monthYearLabel, pastTvMonths,
   type SalesTvBreak, type SalesTvClose, type SalesTvCrm, type SalesTvCs, type SalesTvCsPerson, type SalesTvFetcher, type SalesTvPerson,
 } from "@/lib/salesTv";
 import { setSoundPref, soundUnlocked, unlockSound, useSoundPref, useSoundUnlocked, type SaleClosed } from "@/lib/saleAnnouncement";
@@ -76,6 +76,18 @@ const toSale = (c: SalesTvClose): SaleClosed => ({
   id: c.key, closer: c.closer, courses: c.courses, amount: c.amount, currency: c.currency, crmName: c.crmName, crm: c.crm, at: c.at, kind: c.kind,
 });
 
+/**
+ * Money on this board: in full, or rounded — 42.4K — with the full amount on hover (the Manager TV, 2026-11-03).
+ * Counts (closings, calls, payments) are always in full.
+ */
+const CompactMoney = createContext(false);
+const useMoney = () => (useContext(CompactMoney) ? fmtShort : fmtInt);
+/** A podium's amount: "AED 42.4K" with "<what>: AED 42,445" on hover — or, in full, as the Sales TV always had it. */
+function usePodiumMoney() {
+  const compact = useContext(CompactMoney);
+  return (n: number, what: string) => (compact ? { text: `AED ${fmtShort(n)}`, title: `${what}: ${fmtRevenue(n)}` } : { text: fmtRevenue(n), title: what });
+}
+
 /** Type sizes that grow with the screen: a laptop and a 65-inch TV both read well. */
 const T = {
   tiny: "text-[clamp(0.62rem,0.66vw,0.92rem)]",
@@ -96,9 +108,13 @@ export interface SalesTvBoardProps {
   subtitle?: string;
   /** The Manager TV's month switch (2026-11-01): this month live, or a month gone by as it ended — in the link as ?month=. */
   months?: boolean;
+  /** Money rounded — 42.4K — the full amount on hover (the Manager TV, 2026-11-03). */
+  compactMoney?: boolean;
 }
 
-export function SalesTvBoard({ fetcher, variant, withCs = false, panels = true, title = "Sales TV", subtitle = "Dubai Sales · Draw · Remote", months = false }: SalesTvBoardProps) {
+export function SalesTvBoard({
+  fetcher, variant, withCs = false, panels = true, title = "Sales TV", subtitle = "Dubai Sales · Draw · Remote", months = false, compactMoney = false,
+}: SalesTvBoardProps) {
   const tv = variant === "tv";
   const [crms, setCrms] = useState<SalesTvCrm[] | null>(null);
   const [cs, setCs] = useState<SalesTvCs | null>(null);
@@ -188,6 +204,7 @@ export function SalesTvBoard({ fetcher, variant, withCs = false, panels = true, 
   const gap = "gap-[clamp(0.5rem,0.7vw,1.1rem)]";
 
   return (
+    <CompactMoney.Provider value={compactMoney}>
     <div ref={root} className={cn("stv relative", boardFont.className, tv ? "stv-tv flex h-[100dvh] flex-col overflow-hidden p-[clamp(0.5rem,0.7vw,1.1rem)]" : "rounded-2xl p-3 sm:p-4")}>
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
       <Header tv={tv} serverNow={serverNow} lastOk={lastOk} now={now} fetchError={fetchError} rootRef={root} title={title} subtitle={subtitle}
@@ -219,6 +236,7 @@ export function SalesTvBoard({ fetcher, variant, withCs = false, panels = true, 
       <SoundPrompt tv={tv} />
       <SaleCelebration />
     </div>
+    </CompactMoney.Provider>
   );
 }
 
@@ -252,6 +270,7 @@ function Header({ tv, serverNow, lastOk, now, fetchError, rootRef, title, subtit
   months?: { month: string | null; pick: (m: string | null) => void } | null;
 }) {
   const past = months?.month ?? null;
+  const money = useMoney();
   const pref = useSoundPref();
   const soundOn = pref !== "off";
   const [full, setFull] = useState(false);
@@ -305,10 +324,10 @@ function Header({ tv, serverNow, lastOk, now, fetchError, rootRef, title, subtit
         {totals && (
           <span className={cn("num inline-flex items-center gap-2 rounded-full border border-[color:var(--line)] px-3 py-1 font-medium text-[color:var(--ink2)]", T.small)} data-testid="board-totals">
             {totals.today !== undefined && <>
-              <span>Today <b className="text-[color:var(--good)]" title={totals.today === null ? "A CRM's figures can't be read right now" : fmtRevenue(totals.today)}>{totals.today === null ? "—" : `AED ${fmtInt(totals.today)}`}</b></span>
+              <span>Today <b className="text-[color:var(--good)]" title={totals.today === null ? "A CRM's figures can't be read right now" : fmtRevenue(totals.today)}>{totals.today === null ? "—" : `AED ${money(totals.today)}`}</b></span>
               <span className="text-[color:var(--mute)]">·</span>
             </>}
-            <span>{totals.monthName} <b className="text-[color:var(--money)]" title={fmtRevenue(totals.month)}>AED {fmtInt(totals.month)}</b></span>
+            <span>{totals.monthName} <b className="text-[color:var(--money)]" title={fmtRevenue(totals.month)}>AED {money(totals.month)}</b></span>
           </span>
         )}
         <span className={cn("hidden text-[color:var(--mute)] md:inline", T.small)} suppressHydrationWarning>{dubaiDate(serverNow)}</span>
@@ -372,6 +391,7 @@ function bests(people: SalesTvPerson[]) {
 
 function CrmColumn({ crm, tv }: { crm: SalesTvCrm; tv: boolean }) {
   const body = useRef<HTMLDivElement>(null);
+  const money = useMoney();
   const rest = crm.people.slice(3);
   useAutoScroll(body, tv, rest.length);
   // The hidden people's figures are in the total, though not listed (the Manager TV, 2026-10-31).
@@ -434,7 +454,7 @@ function CrmColumn({ crm, tv }: { crm: SalesTvCrm; tv: boolean }) {
             <span className={cn("col-span-2 truncate font-medium text-[color:var(--mute)]", T.small)}>Total · {crm.people.length} people{h?.count ? ` + ${h.count} not shown` : ""}</span>
             <Num>{fmtInt(t.m)}</Num>
             <Num>{fmtInt(t.d)}</Num>
-            <Num className="text-[color:var(--money)]" title={fmtRevenue(t.r)}>{fmtInt(t.r)}</Num>
+            <Num className="text-[color:var(--money)]" title={fmtRevenue(t.r)}>{money(t.r)}</Num>
             <Num>{fmtInt(t.k)}<span className="text-[color:var(--mute)]">/{fmtInt(t.c)}</span></Num>
             <Num className={WIDE}>{fmtTalk(t.s)}</Num>
           </div>
@@ -454,6 +474,7 @@ const CS_COLS = "grid grid-cols-[clamp(1.7rem,1.9vw,2.9rem)_minmax(0,1fr)_minmax
 
 function CsColumn({ cs, tv }: { cs: SalesTvCs; tv: boolean }) {
   const body = useRef<HTMLDivElement>(null);
+  const money = useMoney();
   const rest = cs.people.slice(3);
   useAutoScroll(body, tv, rest.length);
   const head = cn("text-right font-medium text-[color:var(--ink2)]", T.tiny);
@@ -513,8 +534,8 @@ function CsColumn({ cs, tv }: { cs: SalesTvCs; tv: boolean }) {
                         <span className={cn("block truncate leading-tight text-[color:var(--mute)]", T.tiny)}>{p.team || "—"}</span>
                       </span>
                     </span>
-                    <Num className={p.monthAed ? "font-semibold text-[color:var(--money)]" : zero} title={fmtRevenue(p.monthAed)}>{fmtInt(p.monthAed)}</Num>
-                    <Num className={p.todayAed ? "font-semibold text-[color:var(--good)]" : zero} title={fmtRevenue(p.todayAed)}>{fmtInt(p.todayAed)}</Num>
+                    <Num className={p.monthAed ? "font-semibold text-[color:var(--money)]" : zero} title={fmtRevenue(p.monthAed)}>{money(p.monthAed)}</Num>
+                    <Num className={p.todayAed ? "font-semibold text-[color:var(--good)]" : zero} title={fmtRevenue(p.todayAed)}>{money(p.todayAed)}</Num>
                     <Num className={p.payments ? undefined : zero}>{fmtInt(p.payments)}</Num>
                   </li>
                 ))}
@@ -524,8 +545,8 @@ function CsColumn({ cs, tv }: { cs: SalesTvCs; tv: boolean }) {
 
           <div className={cn(CS_COLS, "num border-t border-[color:var(--line)] px-[clamp(1rem,1.2vw,1.8rem)] py-[clamp(0.4rem,0.55vw,0.8rem)] font-semibold whitespace-nowrap", T.body)} data-testid="totals-cs">
             <span className={cn("col-span-2 truncate font-medium text-[color:var(--mute)]", T.small)}>Total · {cs.people.length} CSs</span>
-            <Num className="text-[color:var(--money)]" title={fmtRevenue(cs.totals.monthAed)}>{fmtInt(cs.totals.monthAed)}</Num>
-            <Num title={fmtRevenue(cs.totals.todayAed)}>{fmtInt(cs.totals.todayAed)}</Num>
+            <Num className="text-[color:var(--money)]" title={fmtRevenue(cs.totals.monthAed)}>{money(cs.totals.monthAed)}</Num>
+            <Num title={fmtRevenue(cs.totals.todayAed)}>{money(cs.totals.todayAed)}</Num>
             <Num>{fmtInt(cs.totals.payments)}</Num>
           </div>
         </>
@@ -536,6 +557,9 @@ function CsColumn({ cs, tv }: { cs: SalesTvCs; tv: boolean }) {
 
 function CsStep({ p, rank }: { p: SalesTvCsPerson; rank: number }) {
   const first = rank === 1;
+  const money = useMoney();
+  const podium = usePodiumMoney();
+  const collected = podium(p.monthAed, "Collected this month");
   // A coloured trophy only with something collected.
   const place: Place | undefined = p.monthAed > 0 ? PLACES[rank - 1] : undefined;
   return (
@@ -561,13 +585,13 @@ function CsStep({ p, rank }: { p: SalesTvCsPerson; rank: number }) {
           >
             <Trophy className="h-[55%] w-[55%]" />
           </span>
-          <p className={cn("num mt-1 whitespace-nowrap font-bold leading-none text-[color:var(--money)]", first ? "text-[clamp(1.15rem,1.45vw,2.1rem)]" : "text-[clamp(0.95rem,1.15vw,1.7rem)]")} title="Collected this month">
-            {fmtRevenue(p.monthAed)}
+          <p className={cn("num mt-1 whitespace-nowrap font-bold leading-none text-[color:var(--money)]", first ? "text-[clamp(1.15rem,1.45vw,2.1rem)]" : "text-[clamp(0.95rem,1.15vw,1.7rem)]")} title={collected.title}>
+            {collected.text}
           </p>
           <p className={cn("text-[color:var(--mute)]", T.tiny)}>collected</p>
           <div className="my-[clamp(0.25rem,0.35vw,0.5rem)] h-px w-4/5 bg-[color:var(--line)]" />
           <p className={cn("num whitespace-nowrap text-[color:var(--ink2)]", T.tiny)}>
-            <span className={p.todayAed > 0 ? "font-semibold text-[color:var(--good)]" : undefined}>{fmtInt(p.todayAed)} today</span>
+            <span className={p.todayAed > 0 ? "font-semibold text-[color:var(--good)]" : undefined} title={money === fmtShort ? `Today: ${fmtRevenue(p.todayAed)}` : undefined}>{money(p.todayAed)} today</span>
             {" · "}{fmtInt(p.payments)} {p.payments === 1 ? "payment" : "payments"}
           </p>
         </div>
@@ -597,6 +621,7 @@ function Podium({ people, code }: { people: SalesTvPerson[]; code: string }) {
 
 function Step({ p, rank }: { p: SalesTvPerson; rank: number }) {
   const first = rank === 1;
+  const revenue = usePodiumMoney()(p.revenueMonth ?? 0, "Revenue this month");
   // A coloured trophy only with something to show for it: nobody wins gold for no closings.
   const place: Place | undefined = p.closingsMonth > 0 ? PLACES[rank - 1] : undefined;
   return (
@@ -627,8 +652,8 @@ function Step({ p, rank }: { p: SalesTvPerson; rank: number }) {
           </span>
           <p className={cn("num mt-1 font-bold leading-none", first ? "text-[clamp(1.6rem,2vw,2.9rem)]" : "text-[clamp(1.3rem,1.55vw,2.25rem)]")}>{fmtInt(p.closingsMonth)}</p>
           <p className={cn("text-[color:var(--mute)]", T.tiny)}>closings</p>
-          <p className={cn("num mt-[clamp(0.2rem,0.3vw,0.45rem)] whitespace-nowrap font-bold text-[color:var(--money)]", first ? T.body : T.small)} title="Revenue this month">
-            {fmtRevenue(p.revenueMonth ?? 0)}
+          <p className={cn("num mt-[clamp(0.2rem,0.3vw,0.45rem)] whitespace-nowrap font-bold text-[color:var(--money)]", first ? T.body : T.small)} title={revenue.title}>
+            {revenue.text}
           </p>
           <div className="my-[clamp(0.25rem,0.35vw,0.5rem)] h-px w-4/5 bg-[color:var(--line)]" />
           <p className={cn("num whitespace-nowrap text-[color:var(--ink2)]", T.tiny)}>
@@ -642,6 +667,7 @@ function Step({ p, rank }: { p: SalesTvPerson; rank: number }) {
 }
 
 function PersonRow({ p, rank, best }: { p: SalesTvPerson; rank: number; best: ReturnType<typeof bests> }) {
+  const money = useMoney();
   const hot = (v: number, b: number) => (v > 0 && v === b ? { color: "var(--accent)" } : undefined);
   const zero = "text-[color:var(--mute)]";
   return (
@@ -657,7 +683,7 @@ function PersonRow({ p, rank, best }: { p: SalesTvPerson; rank: number; best: Re
       </span>
       <Num className="font-semibold">{fmtInt(p.closingsMonth)}</Num>
       <Num className={p.closingsToday > 0 ? "font-semibold text-[color:var(--good)]" : zero}>{fmtInt(p.closingsToday)}</Num>
-      <Num className={p.revenueMonth ? "font-semibold text-[color:var(--money)]" : zero} title={fmtRevenue(p.revenueMonth ?? 0)}>{fmtInt(p.revenueMonth ?? 0)}</Num>
+      <Num className={p.revenueMonth ? "font-semibold text-[color:var(--money)]" : zero} title={fmtRevenue(p.revenueMonth ?? 0)}>{money(p.revenueMonth ?? 0)}</Num>
       <Num title="Connected / total — orange: the most today in this CRM">
         <span style={hot(p.connectedToday, best.conn)} className={p.connectedToday ? undefined : zero}>{fmtInt(p.connectedToday)}</span>
         <span className={zero}>/{fmtInt(p.callsToday)}</span>
