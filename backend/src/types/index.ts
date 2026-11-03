@@ -445,6 +445,22 @@ export interface IPlanCourse {
   updatedByEmail: string;
 }
 export interface IPlanPerson { id: string; name: string }
+/**
+ * A team's own plan in a portal (the user, 2026-11-03: Team Legacy on a plan of its own, Titan and Maverick on the
+ * portal's): what a sale of a course pays each position on that team, and the team's Sales Staff and Team Leader
+ * slabs. A course with no row here, or a position with no rows in force, takes the portal's.
+ */
+export interface IPlanTeam {
+  /** The team's id in the CRM. */
+  teamId: string;
+  name: string;
+  /** The team's own amounts; `creditUsd` is not used (the MT5 credit stays the portal's). */
+  courses: IPlanCourse[];
+  /** Versions by the month they start; `sm` is never used — the Sales Manager is on the portal's slab. */
+  slabs: IPlanSlabVersion[];
+  updatedAt: Date | null;
+  updatedByEmail: string;
+}
 export interface ICommissionPlan {
   portal: PlanPortal;
   tlRule: PlanTlRule;
@@ -455,6 +471,8 @@ export interface ICommissionPlan {
   excluded: IPlanPerson[];
   courses: IPlanCourse[];
   slabs: IPlanSlabVersion[];
+  /** Teams on a plan of their own (2026-11-03); missing on a plan saved before. */
+  teams?: IPlanTeam[];
   copiedAt: Date | null;
   updatedByEmail: string;
   createdAt?: Date;

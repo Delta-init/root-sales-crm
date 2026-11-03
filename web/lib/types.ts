@@ -629,6 +629,17 @@ export interface RootCommissionPlan {
   updatedByEmail: string;
   people: PlanPerson[];
   changes: Array<{ at: string; by: string; detail: string }>;
+  /** The CRM's teams with their own plans (2026-11-03) — the Sales CRM's; null elsewhere, absent from a server before. */
+  teams?: CommissionTeamPlan[] | null;
+}
+/** A team of the CRM and its own plan: the courses it has its own amounts for, its own slabs in force this month (empty: the portal's). */
+export interface CommissionTeamPlan {
+  id: string;
+  name: string;
+  status: string;
+  inCrm: boolean;
+  courses: Array<{ id: string; name: string; sales: number; tl: number; sm: number; updatedAt: string | null; updatedByEmail: string }>;
+  slabs: { from: string | null; sales: CommissionSlabRow[]; tl: CommissionSlabRow[]; updatedAt: string | null; updatedByEmail: string };
 }
 
 // ── Salespeople: each sales CRM's people, and one person's figures ────────────

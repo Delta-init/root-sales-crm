@@ -1,6 +1,8 @@
 import type { Response, NextFunction } from "express";
 import { z } from "zod";
-import { applySlabsFrom, commissionPlans, compareMonth, previewSlabsFrom, saveCourse, saveSettings, saveSlabs } from "../services/commissionPlanService.js";
+import {
+  applySlabsFrom, clearTeamCourse, commissionPlans, compareMonth, previewSlabsFrom, saveCourse, saveSettings, saveSlabs, saveTeamCourse, saveTeamSlabs,
+} from "../services/commissionPlanService.js";
 import { validMonth } from "../services/crmCommissionService.js";
 import { record } from "../services/auditService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
@@ -85,6 +87,26 @@ export const putCourse = save(
 export const putSlabs = save(
   (b) => slabSchema.safeParse(b),
   (req, data: z.infer<typeof slabSchema>, by) => saveSlabs(req.params.code, req.params.role, data.rows, by),
+);
+/* A team on a plan of its own (2026-11-03): a course's amounts for the team, a position's slab for the team — or back
+   on the portal's. */
+const teamCourseSchema = z.object({ sales: AED, tl: AED, sm: AED });
+const nothing = z.object({}).passthrough();
+export const putTeamCourse = save(
+  (b) => teamCourseSchema.safeParse(b),
+  (req, data: z.infer<typeof teamCourseSchema>, by) => saveTeamCourse(req.params.code, req.params.teamId, req.params.courseId, data, by),
+);
+export const deleteTeamCourse = save(
+  (b) => nothing.safeParse(b ?? {}),
+  (req, _data: unknown, by) => clearTeamCourse(req.params.code, req.params.teamId, req.params.courseId, by),
+);
+export const putTeamSlabs = save(
+  (b) => slabSchema.safeParse(b),
+  (req, data: z.infer<typeof slabSchema>, by) => saveTeamSlabs(req.params.code, req.params.teamId, req.params.role, data.rows, by),
+);
+export const deleteTeamSlabs = save(
+  (b) => nothing.safeParse(b ?? {}),
+  (req, _data: unknown, by) => saveTeamSlabs(req.params.code, req.params.teamId, req.params.role, null, by),
 );
 export const putSettings = save(
   (b) => settingsSchema.safeParse(b),

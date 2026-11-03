@@ -54,6 +54,23 @@ const personSchema = new Schema(
   { _id: false }
 );
 
+/**
+ * A team on a plan of its own (the user, 2026-11-03: "the commission plan for a specific team" — Team Legacy's own,
+ * Titan and Maverick on the portal's): its own row for some courses, its own Sales Staff / Team Leader slabs from a
+ * month on. Whatever it has no row or rows for is the portal's.
+ */
+const teamPlanSchema = new Schema(
+  {
+    teamId: { type: String, required: true },
+    name: { type: String, default: "" },
+    courses: { type: [courseRowSchema], default: [] },
+    slabs: { type: [slabVersionSchema], default: [] },
+    updatedAt: { type: Date, default: null },
+    updatedByEmail: { type: String, default: "" },
+  },
+  { _id: false }
+);
+
 const commissionPlanSchema = new Schema<ICommissionPlan>(
   {
     portal: { type: String, enum: ["delta", "draw", "remote"], required: true, unique: true },
@@ -66,6 +83,7 @@ const commissionPlanSchema = new Schema<ICommissionPlan>(
     excluded: { type: [personSchema], default: [] },
     courses: { type: [courseRowSchema], default: [] },
     slabs: { type: [slabVersionSchema], default: [] },
+    teams: { type: [teamPlanSchema], default: [] },
     copiedAt: { type: Date, default: null },
     updatedByEmail: { type: String, default: "" },
   },

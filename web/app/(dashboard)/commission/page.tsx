@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
-import { AlertTriangle, CalendarClock, Coins, Database, Lock, Pencil, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, CalendarClock, Coins, Database, Lock, Pencil, Plus, Trash2, Undo2, Users } from "lucide-react";
 import { AxiosError } from "axios";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api, apiErrorMessage } from "@/lib/axios";
-import type { CommissionCompare, CommissionSlabRow, CrmCommissionPlan, RootCommissionPlan } from "@/lib/types";
+import type { CommissionCompare, CommissionSlabRow, CommissionTeamPlan, CrmCommissionPlan, RootCommissionPlan } from "@/lib/types";
 
 /**
  * Commission plans. Each sales CRM's own plan, read only (the user, 2026-10-09), and — since 2026-11-01 ("one plan,
@@ -265,12 +265,12 @@ const SELECT = "h-9 w-full rounded-md border border-border bg-background px-2 te
 const when = (iso: string | null) =>
   iso ? new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dubai" }).format(new Date(iso)) : "";
 
-/** A save: PUT, then the plans as they now stand. */
+/** A save: PUT (or DELETE, putting a team back on the portal's plan), then the plans as they now stand. */
 function useSave(code: string, done: () => void) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ path, body }: { path: string; body: unknown }) =>
-      (await api.put(`/commission-plans/${code}/${path}`, body)).data.data as Plans,
+    mutationFn: async ({ path, body, remove }: { path: string; body?: unknown; remove?: boolean }) =>
+      (remove ? await api.delete(`/commission-plans/${code}/${path}`) : await api.put(`/commission-plans/${code}/${path}`, body)).data.data as Plans,
     onSuccess: (data) => {
       qc.setQueryData(["commission-plans"], data);
       toast.success("Commission plan saved");
@@ -424,6 +424,8 @@ function RootPlanSection({ code, name, tlPaid, crm, root }: { code: string; name
         </CardContent>
       </Card>
 
+      {!!root.teams?.length && <TeamPlansCard code={code} tlPaid={tlPaid} root={root} />}
+
       <CompareCard code={code} name={name} />
 
       {root.changes.length > 0 && (
@@ -488,7 +490,12 @@ function CourseDialog({ code, tlPaid, course, onClose }: { code: string; tlPaid:
   );
 }
 
-function SlabDialog({ code, role, rows, onClose }: { code: string; role: (typeof SLAB_ROLES)[number]; rows: CommissionSlabRow[]; onClose: () => void }) {
+function SlabDialog({ code, role, rows, onClose, path, title }: {
+  code: string; role: (typeof SLAB_ROLES)[number]; rows: CommissionSlabRow[]; onClose: () => void;
+  /** Where it saves: the portal's slab, or a team's own (2026-11-03). */
+  path?: string;
+  title?: string;
+}) {
   const [list, setList] = useState(rows.map((r) => ({ name: r.name, target: String(r.target), salary: String(r.salary), percent: String(r.percent) })));
   const save = useSave(code, onClose);
   const parsed = list.map((r) => ({ name: r.name.trim(), target: Number(r.target), salary: Number(r.salary), percent: Number(r.percent) }));
@@ -503,7 +510,7 @@ function SlabDialog({ code, role, rows, onClose }: { code: string; role: (typeof
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{role.label} slab</DialogTitle>
+          <DialogTitle>{title ?? `${role.label} slab`}</DialogTitle>
           <DialogDescription>
             The month&apos;s sales reach a level; the level pays its salary and that percent of the commission earned. The change is in force from this month (UAE); past months keep their slabs.
           </DialogDescription>
@@ -528,8 +535,164 @@ function SlabDialog({ code, role, rows, onClose }: { code: string; role: (typeof
         {problem && <p className="text-sm text-destructive">{problem}</p>}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button disabled={!!problem || save.isPending} onClick={() => save.mutate({ path: `slabs/${role.key}`, body: { rows: parsed } })}>
+          <Button disabled={!!problem || save.isPending} onClick={() => save.mutate({ path: path ?? `slabs/${role.key}`, body: { rows: parsed } })}>
             {save.isPending ? "Saving…" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ── A team on a plan of its own (the user, 2026-11-03: Team Legacy on its own, Titan and Maverick on the portal's) ── */
+
+const hasOwnPlan = (t: CommissionTeamPlan) => t.courses.length > 0 || t.slabs.sales.length > 0 || t.slabs.tl.length > 0;
+
+function TeamPlansCard({ code, tlPaid, root }: { code: string; tlPaid: boolean; root: RootCommissionPlan }) {
+  const teams = root.teams ?? [];
+  const [pick, setPick] = useState(() => (teams.find(hasOwnPlan) ?? teams.find((t) => t.status === "active") ?? teams[0])?.id ?? "");
+  const team = teams.find((t) => t.id === pick) ?? teams[0];
+  const [course, setCourse] = useState<RootCommissionPlan["courses"][number] | null>(null);
+  const [slab, setSlab] = useState<(typeof SLAB_ROLES)[number] | null>(null);
+  const undo = useSave(code, () => {});
+  if (!team) return null;
+  const own = new Map(team.courses.map((c) => [c.id, c]));
+  // A team's own slabs: Sales Staff, and Team Leader where the portal has a TL slab — the Sales Manager is the portal's.
+  const roles = SLAB_ROLES.filter((r) => r.key === "sales" || (r.key === "tl" && root.tlSlab));
+  const base = `teams/${team.id}`;
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
+          <span className="flex items-center gap-2"><Users className="h-4 w-4 text-primary" /> Team plans</span>
+          <select aria-label="Team" value={team.id} onChange={(e) => setPick(e.target.value)} className="h-9 rounded-md border border-border bg-background px-2 text-sm font-normal">
+            {teams.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}{hasOwnPlan(t) ? " · own plan" : ""}{t.status && t.status !== "active" ? " (inactive)" : ""}{!t.inCrm ? " (no longer in the CRM)" : ""}
+              </option>
+            ))}
+          </select>
+        </CardTitle>
+        <p className="text-sm text-muted-foreground">
+          A team can have its own amounts per course and its own Sales Staff{root.tlSlab ? " and Team Leader" : ""} slabs. Anything not set for it — and every
+          team without a plan of its own — uses the plan above. Amounts count for sales from then on; a slab from this month.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[620px] text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                <th className="pb-2 pr-3 font-medium">Course — {team.name}</th>
+                <th className="pb-2 pr-3 text-right font-medium">Sales Staff</th>
+                {tlPaid && <th className="pb-2 pr-3 text-right font-medium">Team Leader</th>}
+                <th className="pb-2 pr-3 text-right font-medium">Sales Manager</th>
+                <th className="pb-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {root.courses.map((c) => {
+                const mine = own.get(c.id);
+                const shown = mine ?? c;
+                const tone = mine ? "font-medium" : "text-muted-foreground";
+                return (
+                  <tr key={c.id} className="border-b border-border/50 last:border-0">
+                    <td className="py-2.5 pr-3">
+                      <span className="font-medium">{c.name}</span>
+                      {mine ? <Badge className="ml-2">Team&apos;s own</Badge> : <span className="ml-2 text-xs text-muted-foreground">all teams&apos;</span>}
+                      {mine?.updatedAt && <span className="block text-[11px] text-muted-foreground">changed {when(mine.updatedAt)} by {mine.updatedByEmail}</span>}
+                    </td>
+                    <td className={`whitespace-nowrap py-2.5 pr-3 text-right ${tone}`}>{aed(shown.sales)}</td>
+                    {tlPaid && <td className={`whitespace-nowrap py-2.5 pr-3 text-right ${tone}`}>{aed(shown.tl)}</td>}
+                    <td className={`whitespace-nowrap py-2.5 pr-3 text-right ${tone}`}>{aed(shown.sm)}</td>
+                    <td className="whitespace-nowrap py-2.5 text-right">
+                      <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setCourse(c)} aria-label={`Set ${team.name}'s amounts for ${c.name}`}><Pencil className="h-3.5 w-3.5" /></Button>
+                      {mine && (
+                        <Button size="sm" variant="ghost" className="h-7 px-2" disabled={undo.isPending} aria-label={`${c.name}: back on all teams' amounts`} title="Back on all teams' amounts"
+                          onClick={() => undo.mutate({ path: `${base}/courses/${c.id}`, remove: true })}><Undo2 className="h-3.5 w-3.5" /></Button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          {roles.map((r) => {
+            const mine = team.slabs[r.key as "sales" | "tl"];
+            return (
+              <div key={r.key}>
+                {mine.length ? (
+                  <>
+                    <SlabTable label={`${r.label} — ${team.name}'s own${team.slabs.from ? ` from ${monthLabel(team.slabs.from)}` : ""}`} rows={mine} onEdit={() => setSlab(r)} />
+                    <Button size="sm" variant="ghost" className="mt-1 h-7 px-2 text-xs" disabled={undo.isPending}
+                      onClick={() => undo.mutate({ path: `${base}/slabs/${r.key}`, remove: true })}>
+                      <Undo2 className="mr-1 h-3.5 w-3.5" /> Back on all teams&apos; slab from this month
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <div className="opacity-70"><SlabTable label={`${r.label} — all teams'`} rows={root.slabs[r.key]} /></div>
+                    <Button size="sm" variant="outline" className="mt-2 h-7" onClick={() => setSlab(r)}>
+                      <Plus className="mr-1 h-3.5 w-3.5" /> Give {team.name} its own {r.label} slab
+                    </Button>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+
+      {course && <TeamCourseDialog code={code} tlPaid={tlPaid} team={team} course={course} own={own.get(course.id) ?? null} onClose={() => setCourse(null)} />}
+      {slab && (
+        <SlabDialog code={code} role={slab} onClose={() => setSlab(null)} path={`${base}/slabs/${slab.key}`} title={`${team.name} — ${slab.label} slab`}
+          rows={team.slabs[slab.key as "sales" | "tl"].length ? team.slabs[slab.key as "sales" | "tl"] : root.slabs[slab.key]} />
+      )}
+    </Card>
+  );
+}
+
+function TeamCourseDialog({ code, tlPaid, team, course, own, onClose }: {
+  code: string; tlPaid: boolean; team: CommissionTeamPlan; course: RootCommissionPlan["courses"][number];
+  own: CommissionTeamPlan["courses"][number] | null; onClose: () => void;
+}) {
+  const start = own ?? course;
+  const [form, setForm] = useState({ sales: String(start.sales), tl: String(start.tl), sm: String(start.sm) });
+  const save = useSave(code, onClose);
+  const fields: Array<{ key: keyof typeof form; label: string }> = [
+    { key: "sales", label: "Sales Staff (AED)" },
+    ...(tlPaid ? [{ key: "tl" as const, label: "Team Leader (AED)" }] : []),
+    { key: "sm", label: "Sales Manager (AED)" },
+  ];
+  const values = Object.fromEntries(Object.entries(form).map(([k, v]) => [k, Number(v)])) as Record<keyof typeof form, number>;
+  const bad = Object.values(values).some((n) => !Number.isFinite(n) || n < 0);
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{course.name} — {team.name}</DialogTitle>
+          <DialogDescription>
+            What a sale of this course pays each position when it is {team.name}&apos;s. Other teams keep all teams&apos; amounts ({aed(course.sales)}
+            {tlPaid ? ` / ${aed(course.tl)}` : ""} / {aed(course.sm)}). Sales already counted keep theirs.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {fields.map((f) => (
+            <div key={f.key} className="space-y-1.5">
+              <Label htmlFor={`team-${f.key}`}>{f.label}</Label>
+              <Input id={`team-${f.key}`} inputMode="decimal" value={form[f.key]} onChange={(e) => setForm((s) => ({ ...s, [f.key]: e.target.value }))} />
+            </div>
+          ))}
+        </div>
+        {bad && <p className="text-sm text-destructive">Amounts are numbers, 0 or more.</p>}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button disabled={bad || save.isPending}
+            onClick={() => save.mutate({ path: `teams/${team.id}/courses/${course.id}`, body: { ...values, tl: tlPaid ? values.tl : 0 } })}>
+            {save.isPending ? "Saving…" : `Save for ${team.name}`}
           </Button>
         </DialogFooter>
       </DialogContent>

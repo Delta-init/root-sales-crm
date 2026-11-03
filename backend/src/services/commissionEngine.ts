@@ -1,6 +1,6 @@
 import { Types, type Connection } from "mongoose";
 import { BUILT_IN, slabsInForce } from "./commissionPlanService.js";
-import type { ICommissionPlan, IPlanSlabRow, PlanSlabRole } from "../types/index.js";
+import type { ICommissionPlan, IPlanSlabRow, IPlanTeam, PlanSlabRole } from "../types/index.js";
 
 /*
  * The one commission logic, worked out in Root from Root's plan (the user, 2026-11-01: "one function used by every
@@ -10,9 +10,11 @@ import type { ICommissionPlan, IPlanSlabRow, PlanSlabRole } from "../types/index
  *   - who earns what on a sale: nobody when the closer is a login that earns nothing; the sale's team (its own, else
  *     the closer's one active team) must have exactly one leader and a Sales Manager must be set; the team-leader
  *     rule (paid; never; nothing on a team the Sales Manager leads) and whether a team leader closing in their own
- *     team is paid the TL line too; the amounts from the course's row;
+ *     team is paid the TL line too; the amounts from the course's row — the sale's team's own row where that team is
+ *     on a plan of its own (2026-11-03), else the portal's;
  *   - My Pay for a month: the Sales Manager on the SM slab, a team leader on the TL slab where the portal has one
- *     (else on Sales Staff's, on their own closes), everyone else on Sales Staff's; the target is the money received
+ *     (else on Sales Staff's, on their own closes), everyone else on Sales Staff's — a team's own slab for its leader
+ *     and its people where the team has one in force (2026-11-03); the target is the money received
  *     in the month on finance-approved sales they count (the payments in AED where the CRM records them, else the fee
  *     times the share received); the level the highest reached; pay = salary + commission earned in the month (paid
  *     in full first) × the level's percent.
@@ -69,10 +71,20 @@ export interface Resolved {
 
 type TeamDoc = { _id: Types.ObjectId; name?: string; status?: string; leaders?: unknown[]; members?: unknown[] };
 
-/** A course's row in the plan; zeros for one nobody has set. */
-export function courseRow(plan: ICommissionPlan, courseId: string) {
+/** A team's own plan in the portal, if it has one (2026-11-03). */
+export function teamPlanOf(plan: ICommissionPlan, teamId: string): IPlanTeam | null {
+  return teamId ? (plan.teams ?? []).find((t) => t.teamId === teamId) ?? null : null;
+}
+
+/**
+ * A course's row in the plan; zeros for one nobody has set. On a team with its own row for the course, that row's
+ * amounts (2026-11-03) — the MT5 credit stays the portal's, as it is the student's, not commission.
+ */
+export function courseRow(plan: ICommissionPlan, courseId: string, teamId = "") {
   const r = plan.courses.find((c) => c.courseId === courseId);
-  return { sales: positive(r?.sales), tl: positive(r?.tl), sm: positive(r?.sm), creditUsd: positive(r?.creditUsd) };
+  const base = { sales: positive(r?.sales), tl: positive(r?.tl), sm: positive(r?.sm), creditUsd: positive(r?.creditUsd) };
+  const own = teamPlanOf(plan, teamId)?.courses.find((c) => c.courseId === courseId);
+  return own ? { sales: positive(own.sales), tl: positive(own.tl), sm: positive(own.sm), creditUsd: base.creditUsd } : base;
 }
 
 /** Names of the CRM's people, read once each. */
@@ -121,13 +133,14 @@ export async function resolveSale(
   },
   names: Names = new Names(db),
 ): Promise<Resolved> {
-  const row = input.amounts
+  // The amounts on the sale's team: its own row where it has one (2026-11-03), so worked out once the team is known.
+  const rowOn = (teamId: string) => input.amounts
     ? { sales: positive(input.amounts.sales), tl: positive(input.amounts.tl), sm: positive(input.amounts.sm), creditUsd: positive(input.amounts.creditUsd) }
     : input.courses?.length
-      ? input.courses.map((c) => courseRow(plan, idOf(c))).reduce((t, r) => ({ sales: t.sales + r.sales, tl: t.tl + r.tl, sm: t.sm + r.sm, creditUsd: t.creditUsd + r.creditUsd }), { sales: 0, tl: 0, sm: 0, creditUsd: 0 })
-      : courseRow(plan, idOf(input.course));
+      ? input.courses.map((c) => courseRow(plan, idOf(c), teamId)).reduce((t, r) => ({ sales: t.sales + r.sales, tl: t.tl + r.tl, sm: t.sm + r.sm, creditUsd: t.creditUsd + r.creditUsd }), { sales: 0, tl: 0, sm: 0, creditUsd: 0 })
+      : courseRow(plan, idOf(input.course), teamId);
   const rules = rulesOf(plan);
-  const none = { team: null, teamName: "", lines: [] as EngineLine[], plan: row };
+  const none = { team: null, teamName: "", lines: [] as EngineLine[], plan: rowOn("") };
   const closer = idOf(input.closer);
   if (!closer || !Types.ObjectId.isValid(closer)) return { ...none, state: "waiting", reason: "Nobody is set as the closer" };
   const closerName = await names.of(closer);
@@ -135,6 +148,7 @@ export async function resolveSale(
   if (excluded.has(closer)) return { ...none, state: "excluded", reason: `Closed under ${closerName}, a login that earns no commission` };
 
   const { team, reason } = await teamFor(db, idOf(input.team), closer, closerName);
+  const row = rowOn(team ? String(team._id) : "");
   const line = async (role: PlanSlabRole, user: string, amount: number, note?: string): Promise<EngineLine> => ({
     role, user, userName: await names.of(user), amount, ...(note ? { note } : {}),
   });
@@ -213,6 +227,8 @@ export interface EnginePayRow {
   name: string;
   role: PlanSlabRole;
   teams: string[];
+  /** The team whose own slab they are on this month (2026-11-03); null on the portal's. */
+  slabTeam: string | null;
   sales: { count: number; value: number; fee: number };
   awaitingFinance: { count: number; value: number };
   level: Level;
@@ -234,15 +250,25 @@ export function levelOf(rows: IPlanSlabRow[], value: number): { level: Level; ne
   return { level, next: n ? { ...n, index: j, more: round2(n.target - value) } : null };
 }
 
-/** The slabs of a month from the plan: the version in force, each position's rows. */
-export function slabsOfMonth(plan: ICommissionPlan, month: string): { from: string; slabs: Record<PlanSlabRole, IPlanSlabRow[]> } {
+/**
+ * The slabs of a month from the plan: the version in force, each position's rows. For a team on a plan of its own
+ * (2026-11-03), its own Sales Staff and Team Leader rows where it has them in force that month; `own` says which.
+ */
+export function slabsOfMonth(
+  plan: ICommissionPlan, month: string, teamId = "",
+): { from: string; slabs: Record<PlanSlabRole, IPlanSlabRow[]>; own: PlanSlabRole[] } {
   const v = slabsInForce(plan.slabs, month);
+  const t = slabsInForce(teamPlanOf(plan, teamId)?.slabs ?? [], month);
   const built = BUILT_IN[plan.portal].slabs;
+  const copy = (list: IPlanSlabRow[] | undefined) => (list ?? []).map((x) => ({ name: x.name, target: x.target, salary: x.salary, percent: x.percent }));
+  const own: PlanSlabRole[] = [];
   const rows = (role: PlanSlabRole) => {
-    const r = (v?.[role] ?? []).map((x) => ({ name: x.name, target: x.target, salary: x.salary, percent: x.percent }));
+    const mine = role === "sm" ? [] : copy(t?.[role]);
+    if (mine.length) { own.push(role); return mine; }
+    const r = copy(v?.[role]);
     return r.length ? r : built[role].map((x) => ({ ...x }));
   };
-  return { from: v?.from ?? "", slabs: { sales: rows("sales"), tl: rows("tl"), sm: rows("sm") } };
+  return { from: v?.from ?? "", slabs: { sales: rows("sales"), tl: rows("tl"), sm: rows("sm") }, own };
 }
 
 type Fact = {
@@ -254,7 +280,12 @@ type Fact = {
 export async function payRows(db: Connection, plan: ICommissionPlan, month: string): Promise<EnginePayRow[]> {
   if (month < PAY_FROM_MONTH) return [];
   const rules = rulesOf(plan);
-  const { slabs } = slabsOfMonth(plan, month);
+  // Each team's slabs, the portal's under "" (2026-11-03: a team can be on slabs of its own).
+  const slabsOn = new Map<string, ReturnType<typeof slabsOfMonth>>();
+  const slabsOf = (teamId: string) => {
+    if (!slabsOn.has(teamId)) slabsOn.set(teamId, slabsOfMonth(plan, month, teamId));
+    return slabsOn.get(teamId)!;
+  };
   const sm = plan.salesManager?.id ?? "";
   const excluded = new Set(plan.excluded.map((p) => p.id));
   const { from, to } = monthRange(month);
@@ -327,11 +358,17 @@ export async function payRows(db: Connection, plan: ICommissionPlan, month: stri
     const balance = round2(facts.reduce((t, f) => t + f.lines.filter((l) => l.user === user).reduce((x, l) => x + l.balance, 0), 0));
     if (u.status !== "active" && !mine.length && !earned) continue;
     const value = round2(approved.reduce((t, f) => t + f.collected, 0));
-    const { level, next } = levelOf(slabs[role], value);
+    // Their team's slab where it has its own: the team a leader leads, the one a salesperson is in — only when that
+    // is one team; the Sales Manager, and anyone in two, on the portal's.
+    const theirs = role === "sm" ? [] : role === "tl" ? led.filter((t) => t.status === "active") : active.filter((t) => inTeam(t, user));
+    const slabTeam = theirs.length === 1 ? theirs[0]! : null;
+    const onSlabs = slabsOf(slabTeam ? String(slabTeam._id) : "");
+    const { level, next } = levelOf(onSlabs.slabs[role], value);
     const payable = round2((earned * level.percent) / 100);
     rows.push({
       user, name: String(u.name ?? ""), role,
       teams: role === "tl" ? led.filter((t) => t.status === "active").map((t) => String(t.name ?? "")) : [],
+      slabTeam: slabTeam && onSlabs.own.includes(role) ? String(slabTeam.name ?? "") : null,
       sales: { count: approved.length, value, fee: round2(approved.reduce((t, f) => t + f.fee, 0)) },
       awaitingFinance: { count: awaiting.length, value: round2(awaiting.reduce((t, f) => t + f.fee, 0)) },
       level, next, salary: level.salary, percent: level.percent,

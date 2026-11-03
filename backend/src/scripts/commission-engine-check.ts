@@ -17,6 +17,9 @@
  *                        compare view root admins only
  *   Case 6  apply-from   today's slabs applied to October: a preview of whose pay moves (nothing saved), then the
  *                        change — October's My Pay follows; refused before October 2026, this month, later; root admins
+ *   Case 8  team plans   a team on a plan of its own in the Sales CRM (2026-11-03): its course amounts on its sales
+ *                        (others on the portal's), its Sales Staff / TL slabs from this month (past months as they
+ *                        were, someone in two teams and the SM on the portal's), back on the portal's, refusals
  *
  * Run through scripts/commission-engine-check.sh. Scratch databases on 127.0.0.1 only.
  */
@@ -262,6 +265,65 @@ async function main() {
   check("…again: in force from October already, refused", (await call("POST", "/commission-plans/delta/slabs/apply-from", root, { month: "2026-10" })).status === 400);
   check("Banglore (no plan) → 404; Remote (plan taken away above) → 409", (await call("POST", "/commission-plans/banglore/slabs/apply-from", root, { month: "2026-10" })).status === 404
     && (await call("POST", "/commission-plans/remote/slabs/apply-from", root, { month: "2026-10" })).status === 409);
+
+  step("Case 8 — a team on a plan of its own (the Sales CRM, 2026-11-03)");
+  const team = `/commission-plans/delta/teams/${D.teams.titans}`;
+  put = await call("PUT", `${team}/courses/${D.courses.mbt}`, root, { sales: 300, tl: 120, sm: 150 });
+  r = await resolve("delta", { closer: String(D.users.mo), team: String(D.teams.titans), course: String(D.courses.mbt) });
+  check("Titans' own MBT amounts on a Titans sale: 300 / Tom 120 / Abrar 150, the MT5 credit the portal's",
+    put.status === 200 && lines(r) === "sales:Mo:300 tl:Tom:120 sm:Abrar:150" && r.plan.creditUsd === 500, show(r));
+  r = await resolve("delta", { closer: String(D.users.ria), team: String(D.teams.glad), course: String(D.courses.mbt) });
+  check("…a Gladiators sale stays on the portal's 230 / 85 / 100", lines(r) === "sales:Ria:230 tl:Lena:85 sm:Abrar:100", show(r));
+  r = await resolve("delta", { closer: String(D.users.mo), team: String(D.teams.titans), course: String(D.courses.dwt) });
+  check("…a course Titans have no row for: the portal's (DWT 500 / 200 / 300)", lines(r) === "sales:Mo:500 tl:Tom:200 sm:Abrar:300", show(r));
+  r = await resolve("delta", { closer: String(D.users.mo), team: null, course: String(D.courses.mbt) });
+  check("…no team on the sale: Mo's one team's, so Titans'", lines(r) === "sales:Mo:300 tl:Tom:120 sm:Abrar:150" && r.teamName === "Titans", show(r));
+  r = await resolve("delta", { closer: String(D.users.mo), team: String(D.teams.titans), course: String(D.courses.mbt), amounts: { sales: 200, tl: 70, sm: 90 } });
+  check("…a held sale still settles at the amounts it was held at", lines(r) === "sales:Mo:200 tl:Tom:70 sm:Abrar:90", show(r));
+  let views = put.body?.data;
+  const titansView = views?.find((p: Json) => p.code === "delta")?.root?.teams?.find((t: Json) => t.name === "Titans");
+  check("the page lists the Sales CRM's teams, Titans with its MBT row; Draw has no team plans",
+    titansView?.courses?.[0]?.sales === 300 && titansView.courses.length === 1 && views.find((p: Json) => p.code === "delta").root.teams.length === 5
+    && views.find((p: Json) => p.code === "draw")?.root?.teams === null, show(titansView));
+  check("…in the change list as this team's", /Titans · MBT: the portal's AED 230 \/ AED 85 \/ AED 100 → AED 300 \/ AED 120 \/ AED 150 \(sales \/ TL \/ SM, this team only\)/
+    .test(views?.find((p: Json) => p.code === "delta")?.root?.changes?.[0]?.detail ?? ""), show(views?.find((p: Json) => p.code === "delta")?.root?.changes?.[0]));
+
+  put = await call("PUT", `${team}/slabs/sales`, root, { rows: [{ name: "Base", target: 0, salary: 3000, percent: 100 }] });
+  const tlPut = await call("PUT", `${team}/slabs/tl`, root, { rows: [{ name: "Base", target: 0, salary: 6000, percent: 75 }, { name: "Top", target: 50000, salary: 9000, percent: 100 }] });
+  let now = (await call("GET", `/service/commission/pay?month=${month}`, as("delta"))).body?.data;
+  check(`Titans' own Sales Staff slab from ${month}: Mo on 3,000 + 100%, on Titans' slab`,
+    put.status === 200 && row(now, "Mo")?.salary === 3000 && row(now, "Mo")?.percent === 100 && row(now, "Mo")?.slabTeam === "Titans", show(row(now, "Mo")));
+  check("…Tom on Titans' TL slab (6,000 + 75%, next Top at 50,000); Lena on the portal's TL slab",
+    tlPut.status === 200 && row(now, "Tom")?.salary === 6000 && row(now, "Tom")?.next?.name === "Top" && row(now, "Lena")?.salary === 4000 && row(now, "Lena")?.slabTeam === null, show([row(now, "Tom"), row(now, "Lena")]));
+  check("…Zed, in Titans and Spartans, and Ria (Gladiators) on the portal's Sales Staff slab; the SM on his",
+    row(now, "Zed")?.salary === 2500 && row(now, "Zed")?.slabTeam === null && row(now, "Ria")?.salary === 2500 && row(now, "Abrar")?.salary === 5000, show([row(now, "Zed"), row(now, "Ria")]));
+  const oct = (await call("GET", "/service/commission/pay?month=2026-10", as("delta"))).body?.data;
+  check("…October as it was: Mo 2,520, Tom on the portal's TL slab", row(oct, "Mo")?.total === 2520 && row(oct, "Tom")?.salary === 4000 && row(oct, "Mo")?.slabTeam === null, show([row(oct, "Mo"), row(oct, "Tom")]));
+  sp = await call("GET", `/service/finance/slab-pay?month=${month}`, asFinance);
+  check("…finance's payroll pull follows: Mo 3,000, Tom 6,000", spRow("delta", "Mo")?.salary === 3000 && spRow("delta", "Tom")?.salary === 6000, show([spRow("delta", "Mo"), spRow("delta", "Tom")]));
+  check("a team's own Sales Manager slab: refused", (await call("PUT", `${team}/slabs/sm`, root, { rows: [{ name: "Base", target: 0, salary: 1, percent: 1 }] })).status === 400);
+  check("a slab with no base row at 0: refused", (await call("PUT", `${team}/slabs/sales`, root, { rows: [{ name: "Base", target: 10, salary: 1, percent: 1 }] })).status === 400);
+
+  r = await call("DELETE", `${team}/slabs/sales`, root);
+  now = (await call("GET", `/service/commission/pay?month=${month}`, as("delta"))).body?.data;
+  check("Titans' Sales Staff back on the portal's slab from this month: Mo 2,500; Tom still on Titans' TL slab",
+    r.status === 200 && row(now, "Mo")?.salary === 2500 && row(now, "Mo")?.slabTeam === null && row(now, "Tom")?.salary === 6000, show([row(now, "Mo"), row(now, "Tom")]));
+  check("…again: on the portal's already → 404", (await call("DELETE", `${team}/slabs/sales`, root)).status === 404);
+  r = await call("DELETE", `${team}/courses/${D.courses.mbt}`, root);
+  const back = await resolve("delta", { closer: String(D.users.mo), team: String(D.teams.titans), course: String(D.courses.mbt) });
+  check("Titans' MBT back on the portal's amounts: 230 / 85 / 100", r.status === 200 && lines(back) === "sales:Mo:230 tl:Tom:85 sm:Abrar:100", show(back));
+  check("…again: no row of its own → 404", (await call("DELETE", `${team}/courses/${D.courses.mbt}`, root)).status === 404);
+  check("a team the CRM doesn't have → 404; a course it doesn't have → 404",
+    (await call("PUT", `/commission-plans/delta/teams/${new Types.ObjectId()}/courses/${D.courses.mbt}`, root, { sales: 1, tl: 1, sm: 1 })).status === 404
+    && (await call("PUT", `${team}/courses/${new Types.ObjectId()}`, root, { sales: 1, tl: 1, sm: 1 })).status === 404);
+  check("Draw's teams can't have a plan of their own → 400", (await call("PUT", `/commission-plans/draw/teams/${W.teams.titans}/courses/${W.courses.mbt}`, root, { sales: 1, tl: 0, sm: 1 })).status === 400);
+  check("a negative amount → 400; not a root admin → 403",
+    (await call("PUT", `${team}/courses/${D.courses.mbt}`, root, { sales: -1, tl: 1, sm: 1 })).status === 400
+    && (await call("PUT", `${team}/courses/${D.courses.mbt}`, member, { sales: 1, tl: 1, sm: 1 })).status === 403);
+  views = (await call("GET", "/commission-plans", root)).body?.data;
+  const titansAfter = views?.find((p: Json) => p.code === "delta")?.root?.teams?.find((t: Json) => t.name === "Titans");
+  check("…the page: Titans with no course rows, its own TL slab still in force", titansAfter?.courses?.length === 0 && titansAfter.slabs.tl.length === 2
+    && titansAfter.slabs.sales.length === 0 && titansAfter.slabs.from === month, show(titansAfter));
 
   console.log(`\n${checks - failures}/${checks} checks passed`);
   crmApi.close();

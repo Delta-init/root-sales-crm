@@ -5,7 +5,7 @@ import { AuditLog } from "../models/AuditLog.js";
 import { compareSales, payRows, slabsOfMonth, PAY_FROM_MONTH, type EnginePayRow, type SaleCompare } from "./commissionEngine.js";
 import { payOf } from "./crmCommissionService.js";
 import type {
-  ICommissionPlan, IPlanCourse, IPlanPerson, IPlanSlabRow, IPlanSlabVersion, PlanPortal, PlanSlabRole, PlanTlRule,
+  ICommissionPlan, IPlanCourse, IPlanPerson, IPlanSlabRow, IPlanSlabVersion, IPlanTeam, PlanPortal, PlanSlabRole, PlanTlRule,
 } from "../types/index.js";
 
 /*
@@ -40,6 +40,18 @@ export interface SlabRow {
   salary: number;
   percent: number;
 }
+/**
+ * A team of the CRM and its own plan, if any (2026-11-03): the courses it has its own row for, and its own Sales
+ * Staff / Team Leader rows in force this month (empty: the portal's).
+ */
+export interface TeamPlanView {
+  id: string;
+  name: string;
+  status: string;
+  inCrm: boolean;
+  courses: Array<{ id: string; name: string; sales: number; tl: number; sm: number; updatedAt: string | null; updatedByEmail: string }>;
+  slabs: { from: string | null; sales: SlabRow[]; tl: SlabRow[]; updatedAt: string | null; updatedByEmail: string };
+}
 /** Root's plan for a portal, as the page shows it: this month's slabs, every CRM course with its row (or none yet). */
 export interface RootPlanView {
   tlSlab: boolean;
@@ -54,6 +66,8 @@ export interface RootPlanView {
   people: IPlanPerson[];
   /** The latest changes made here. */
   changes: Array<{ at: string; by: string; detail: string }>;
+  /** The CRM's teams with their own plans, where a portal's teams can have them (2026-11-03); null elsewhere. */
+  teams: TeamPlanView[] | null;
 }
 export interface CrmPlan {
   code: string;
@@ -116,6 +130,10 @@ export const BUILT_IN: Record<PlanPortal, { tlSlab: boolean; tlPaidOnOwnClose: b
 };
 /** The month the built-in slabs are dated from in Root: before any saved version. */
 export const BUILT_IN_FROM = "2000-01";
+/** The portals whose teams can be put on a plan of their own (the user, 2026-11-03: the Sales CRM's). */
+export const TEAM_PLAN_PORTALS: PlanPortal[] = ["delta"];
+/** A team's own slabs: Sales Staff, and Team Leader where the portal has a TL slab — never the Sales Manager's. */
+export const teamSlabRolesOf = (portal: PlanPortal): PlanSlabRole[] => slabRolesOf(portal).filter((r) => r !== "sm");
 const SLAB_KEYS: PlanSlabRole[] = ["sales", "tl", "sm"];
 export const isPortal = (code: string): code is PlanPortal => code in BUILT_IN;
 export const slabRolesOf = (portal: PlanPortal): PlanSlabRole[] => (BUILT_IN[portal].tlSlab ? SLAB_KEYS : ["sales", "sm"]);
@@ -262,8 +280,30 @@ async function rootView(src: CrmSource | null, doc: ICommissionPlan): Promise<Ro
       set: true, inCrm: !src, updatedAt: iso(r.updatedAt), updatedByEmail: r.updatedByEmail,
     });
   }
-  const now = slabsInForce(doc.slabs, uaeMonth());
+  const month = uaeMonth();
+  const now = slabsInForce(doc.slabs, month);
   const changes = await AuditLog.find({ action: "commission_plan_changed", org: doc.portal }).sort({ createdAt: -1 }).limit(15).lean();
+  let teams: TeamPlanView[] | null = null;
+  if (TEAM_PLAN_PORTALS.includes(doc.portal)) {
+    const crmTeams = src
+      ? await src.conn.collection("teams").find({}, { projection: { name: 1, status: 1 }, maxTimeMS: QUERY_MS }).sort({ status: 1, name: 1 }).toArray()
+      : [];
+    const own = new Map((doc.teams ?? []).map((t) => [t.teamId, t]));
+    const view = (id: string, name: string, status: string, inCrm: boolean): TeamPlanView => {
+      const t = own.get(id);
+      const v = slabsInForce(t?.slabs ?? [], month);
+      return {
+        id, name, status, inCrm,
+        courses: (t?.courses ?? []).map((c) => ({
+          id: c.courseId, name: c.name, sales: c.sales, tl: c.tl, sm: c.sm, updatedAt: iso(c.updatedAt), updatedByEmail: c.updatedByEmail,
+        })),
+        slabs: { from: v?.from ?? null, sales: rowsOf(v?.sales), tl: rowsOf(v?.tl), updatedAt: iso(v?.updatedAt), updatedByEmail: v?.updatedByEmail ?? "" },
+      };
+    };
+    teams = crmTeams.map((t) => view(String(t._id), String(t.name ?? ""), String(t.status ?? ""), true));
+    // A team on its own plan that the CRM no longer has stays listed, so what it had can be seen.
+    for (const t of doc.teams ?? []) if (!crmTeams.some((c) => String(c._id) === t.teamId)) teams.push(view(t.teamId, t.name, "", !src));
+  }
   return {
     tlSlab: doc.tlSlab,
     courses,
@@ -278,6 +318,7 @@ async function rootView(src: CrmSource | null, doc: ICommissionPlan): Promise<Ro
     updatedByEmail: doc.updatedByEmail,
     people,
     changes: changes.map((c) => ({ at: iso((c as { createdAt?: Date }).createdAt) ?? "", by: c.adminEmail, detail: c.detail })),
+    teams,
   };
 }
 
@@ -435,6 +476,103 @@ export async function applySlabsFrom(code: string, month: string, by: string): P
   const label = { sales: "Sales Staff", tl: "Team Leader", sm: "Sales Manager" };
   const was = roles.map((r) => `${label[r]} ${rowsText(rowsOf(before?.[r]))}`).join("; ");
   return `${nameOf(doc.portal)} · the slabs in force from ${monthName(now.from)} now in force from ${monthName(month)} · ${monthName(month)} had: ${was}`;
+}
+
+/* ── A team on a plan of its own (the user, 2026-11-03: "Team Legacy new, Titan and Maverick as now") ──────────── */
+
+const ROLE_LABEL: Record<PlanSlabRole, string> = { sales: "Sales Staff", tl: "Team Leader", sm: "Sales Manager" };
+
+/** The team's own plan in the portal's plan, made if it has none yet — the team checked against the CRM first. */
+async function teamPlanIn(doc: Awaited<ReturnType<typeof planDoc>>, teamId: string, make: boolean): Promise<IPlanTeam> {
+  if (!TEAM_PLAN_PORTALS.includes(doc.portal)) throw fail(400, `${nameOf(doc.portal)}'s teams are all on its one plan`);
+  const teams = (doc.teams ?? []) as IPlanTeam[];
+  const kept = teams.find((t) => t.teamId === teamId);
+  if (kept) return kept;
+  if (!make) throw fail(404, "That team has no plan of its own");
+  const src = await sourceOf(doc.portal);
+  if (!src) throw fail(503, `${nameOf(doc.portal)} can't be reached to check the team — try again`);
+  if (!Types.ObjectId.isValid(teamId)) throw fail(404, "Team not found in the CRM");
+  const team = await src.conn.collection("teams").findOne({ _id: new Types.ObjectId(teamId) }, { projection: { name: 1 }, maxTimeMS: QUERY_MS });
+  if (!team) throw fail(404, "Team not found in the CRM");
+  doc.teams = [...teams, { teamId, name: String(team.name ?? ""), courses: [], slabs: [], updatedAt: null, updatedByEmail: "" }] as typeof doc.teams;
+  return (doc.teams as IPlanTeam[]).find((t) => t.teamId === teamId)!;
+}
+
+/** A course's name: its row in the portal's plan, else the CRM's course (which must exist). */
+async function courseName(doc: Awaited<ReturnType<typeof planDoc>>, courseId: string): Promise<string> {
+  const row = doc.courses.find((c) => c.courseId === courseId);
+  if (row) return row.name;
+  const src = await sourceOf(doc.portal);
+  if (!src || !Types.ObjectId.isValid(courseId)) throw fail(404, "Course not found in the CRM");
+  const course = await src.conn.collection("courses").findOne({ _id: new Types.ObjectId(courseId) }, { projection: { name: 1 }, maxTimeMS: QUERY_MS });
+  if (!course) throw fail(404, "Course not found in the CRM");
+  return String(course.name ?? "");
+}
+
+/** What a sale of a course pays each position on one team, in place of the portal's. Only for sales counted from now on. */
+export async function saveTeamCourse(
+  code: string, teamId: string, courseId: string, input: { sales: number; tl: number; sm: number }, by: string,
+): Promise<string> {
+  const doc = await planDoc(code);
+  if (doc.tlRule === "never" && input.tl > 0) throw fail(400, `${nameOf(doc.portal)} pays team leaders nothing on a sale`);
+  const team = await teamPlanIn(doc, teamId, true);
+  const name = await courseName(doc, courseId);
+  const row = team.courses.find((c) => c.courseId === courseId);
+  const base = doc.courses.find((c) => c.courseId === courseId);
+  const fig = (r: { sales: number; tl: number; sm: number }) => `${aedOf(r.sales)} / ${aedOf(r.tl)} / ${aedOf(r.sm)}`;
+  const before = row ? fig(row) : base ? `the portal's ${fig(base)}` : "not set";
+  const next: IPlanCourse = { courseId, name, ...input, creditUsd: 0, updatedAt: new Date(), updatedByEmail: by };
+  team.courses = row ? team.courses.map((c) => (c.courseId === courseId ? next : c)) : [...team.courses, next];
+  team.updatedAt = new Date();
+  team.updatedByEmail = by;
+  doc.markModified("teams");
+  doc.updatedByEmail = by;
+  await doc.save();
+  return `${nameOf(doc.portal)} · ${team.name} · ${name}: ${before} → ${fig(input)} (sales / TL / SM, this team only)`;
+}
+
+/** A course back on the portal's amounts for one team. */
+export async function clearTeamCourse(code: string, teamId: string, courseId: string, by: string): Promise<string> {
+  const doc = await planDoc(code);
+  const team = await teamPlanIn(doc, teamId, false);
+  const row = team.courses.find((c) => c.courseId === courseId);
+  if (!row) throw fail(404, "This team has no amounts of its own for that course");
+  team.courses = team.courses.filter((c) => c.courseId !== courseId);
+  team.updatedAt = new Date();
+  team.updatedByEmail = by;
+  doc.markModified("teams");
+  doc.updatedByEmail = by;
+  await doc.save();
+  return `${nameOf(doc.portal)} · ${team.name} · ${row.name}: back on the portal's amounts (was ${aedOf(row.sales)} / ${aedOf(row.tl)} / ${aedOf(row.sm)})`;
+}
+
+/**
+ * One position's slab for one team, from this month (UAE) on — or, with `rows` null, that position back on the
+ * portal's slab from this month. The team's other position is carried as it stands; past months keep theirs.
+ */
+export async function saveTeamSlabs(code: string, teamId: string, role: string, rows: IPlanSlabRow[] | null, by: string): Promise<string> {
+  const doc = await planDoc(code);
+  if (!(teamSlabRolesOf(doc.portal) as string[]).includes(role)) throw fail(400, `A team has no ${role} slab of its own in ${nameOf(doc.portal)}`);
+  if (rows) {
+    const problem = slabProblem(rows);
+    if (problem) throw fail(400, problem);
+  }
+  const team = await teamPlanIn(doc, teamId, !!rows);
+  const month = uaeMonth();
+  const now = slabsInForce(team.slabs, month);
+  const r = role as PlanSlabRole;
+  if (!rows && !rowsOf(now?.[r]).length) throw fail(404, `${team.name} is on the portal's ${ROLE_LABEL[r]} slab already`);
+  const next: IPlanSlabVersion = { from: month, sales: rowsOf(now?.sales), tl: rowsOf(now?.tl), sm: [], updatedAt: new Date(), updatedByEmail: by };
+  next[r] = rows ? rowsOf(rows) : [];
+  team.slabs = [...team.slabs.filter((v) => v.from !== month), next].sort((a, b) => (a.from < b.from ? -1 : 1));
+  team.updatedAt = new Date();
+  team.updatedByEmail = by;
+  doc.markModified("teams");
+  doc.updatedByEmail = by;
+  await doc.save();
+  return rows
+    ? `${nameOf(doc.portal)} · ${team.name} · ${ROLE_LABEL[r]} slab from ${month}: ${rowsText(rows)} (this team only)`
+    : `${nameOf(doc.portal)} · ${team.name} · ${ROLE_LABEL[r]}: back on the portal's slab from ${month}`;
 }
 
 /** The Sales Manager and the logins that earn nothing — people of the CRM, by id. */
