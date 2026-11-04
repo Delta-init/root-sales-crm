@@ -8,7 +8,7 @@
  */
 import type { LucideIcon } from "lucide-react";
 import {
-  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, DatabaseBackup, FileBarChart, Headset, Images, Inbox, LayoutGrid, Phone, MonitorPlay, Shuffle, Tv, Users2,
+  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, DatabaseBackup, FileBarChart, Gift, Headset, Images, Inbox, LayoutGrid, Phone, MonitorPlay, Shuffle, Tv, Users2,
   WalletCards,
 } from "lucide-react";
 
@@ -67,6 +67,8 @@ export const NAV: NavItem[] = [
       { href: "/tv-media", label: "TV photos & videos", icon: Images, rootOnly: true },
       // Everyone in the sales CRMs, each with their own page (2026-10-11).
       { href: "/salespeople", label: "Salespeople", icon: Users2, rootOnly: true },
+      // Gifts for reaching the month's target in the sales CRMs: targets, the shelf, the gifts chosen (2026-11-04).
+      { href: "/rewards", label: "Gift rewards", icon: Gift, rootOnly: true },
       // CS Portal's CSEs: students, deposits, commission and what waits on each (2026-10-11) — in Sales since 2026-10-17.
       { href: "/cses", label: "CSEs", icon: Headset, rootOnly: true },
       // Every portal's 3CX calls and their recordings (2026-10-14).

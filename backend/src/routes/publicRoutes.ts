@@ -3,6 +3,7 @@ import rateLimit from "express-rate-limit";
 import { salesTv } from "../services/salesTvService.js";
 import { managerTv } from "../services/managerTvService.js";
 import { sendSuccess } from "../utils/response.js";
+import { giftPhoto } from "../services/rewardsService.js";
 
 /*
  * Open to anybody with the link — no sign-in (2026-10-20). Only what an office
@@ -43,6 +44,22 @@ router.get("/manager-tv", tvLimiter, async (req: Request, res: Response, next: N
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
     res.setHeader("Cache-Control", "no-store");
     sendSuccess(res, "Manager TV", await managerTv({ since, publicView: true, month: req.query.month }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// The gift rewards' photos (2026-11-04): open, since an <img> sends no sign-in — the Rewards page shows them, and each
+// CRM's API passes them on to its pop-up. Only a gift's photo, by its id; versioned in the link, so kept a day.
+router.get("/rewards/photos/:id", tvLimiter, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const p = await giftPhoto(String(req.params.id));
+    if (!p) { res.status(404).end(); return; }
+    res.setHeader("Content-Type", p.type);
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    // Another site's page shows it: helmet's same-origin default would refuse that.
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    res.end(p.photo);
   } catch (error) {
     next(error);
   }

@@ -22,6 +22,7 @@ import managerTvRoutes from "./managerTvRoutes.js";
 import publicRoutes from "./publicRoutes.js";
 import tvMediaRoutes from "./tvMediaRoutes.js";
 import walletRoutes from "./walletRoutes.js";
+import rewardRoutes from "./rewardRoutes.js";
 
 const router = Router();
 
@@ -55,6 +56,8 @@ router.use("/public", publicRoutes);
 router.use("/tv-media", tvMediaRoutes);
 // My Wallet, from the HRMS (2026-11-04) — everyone signed in, their own only.
 router.use("/wallet", walletRoutes);
+// The sales CRMs' gift rewards: targets, gifts and the gifts chosen (2026-11-04) — root admins.
+router.use("/rewards", rewardRoutes);
 
 router.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

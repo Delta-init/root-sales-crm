@@ -4,6 +4,10 @@ import { crmLeads } from "../controllers/crmLeadsController.js";
 import { crmCommissionForFinance } from "../controllers/crmCommissionController.js";
 import * as engine from "../controllers/commissionEngineController.js";
 import { authenticateOrgService, authenticatePortalService } from "../middleware/orgServiceAuth.js";
+import { serviceClaim, serviceRewards } from "../services/rewardsService.js";
+import { sendSuccess } from "../utils/response.js";
+import type { AuthenticatedRequest } from "../types/index.js";
+import type { NextFunction, Response } from "express";
 
 const router = Router();
 
@@ -33,5 +37,23 @@ router.put("/tracker/me", saveMine);
 router.get("/commission/plan", engine.plan);
 router.post("/commission/resolve", engine.resolve);
 router.get("/commission/pay", engine.pay);
+
+// A sales CRM's gift rewards (2026-11-04): the targets, the gifts on the shelf and this person's gift this month;
+// and a gift chosen there. The CRM counts what its people closed; Root holds it to the targets kept here.
+router.get("/rewards", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = typeof req.query.userId === "string" ? req.query.userId : undefined;
+    sendSuccess(res, "Gift rewards", await serviceRewards(req.serviceOrg!.code, userId));
+  } catch (error) {
+    next(error);
+  }
+});
+router.post("/rewards/claims", async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    sendSuccess(res, "Gift chosen", await serviceClaim(req.serviceOrg!.code, req.body ?? {}), 201);
+  } catch (error) {
+    next(error);
+  }
+});
 
 export default router;
