@@ -22,6 +22,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/axios";
 import { cn, timeIn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
+import { WalletCard } from "@/components/wallet/WalletCard";
 import type { Organization, TargetKind } from "@/lib/types";
 
 const containerVariants = {
@@ -149,6 +150,9 @@ export default function DashboardPage() {
             : `Open any of the ${orgs?.length ?? ""} systems below, or review the CRMs together in the group report.`.replace("  ", " ")}
         </p>
       </motion.div>
+
+      {/* First in the row: this month's pay from the HRMS — earned, deducted, paid (2026-11-04). */}
+      <WalletCard />
 
       {/* Organisations */}
       {isLoading && (

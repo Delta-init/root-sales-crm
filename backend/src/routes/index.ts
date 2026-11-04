@@ -21,6 +21,7 @@ import salesTvRoutes from "./salesTvRoutes.js";
 import managerTvRoutes from "./managerTvRoutes.js";
 import publicRoutes from "./publicRoutes.js";
 import tvMediaRoutes from "./tvMediaRoutes.js";
+import walletRoutes from "./walletRoutes.js";
 
 const router = Router();
 
@@ -52,6 +53,8 @@ router.use("/manager-tv", managerTvRoutes);
 router.use("/public", publicRoutes);
 // The office TVs' photos and videos (2026-11-02) — root admins; the TVs read theirs from /public/tv (index.ts).
 router.use("/tv-media", tvMediaRoutes);
+// My Wallet, from the HRMS (2026-11-04) — everyone signed in, their own only.
+router.use("/wallet", walletRoutes);
 
 router.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

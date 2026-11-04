@@ -9,6 +9,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, DatabaseBackup, FileBarChart, Headset, Images, Inbox, LayoutGrid, Phone, MonitorPlay, Shuffle, Tv, Users2,
+  WalletCards,
 } from "lucide-react";
 
 export interface NavLink {
@@ -92,6 +93,8 @@ export const NAV: NavItem[] = [
      people doing the work do, and Media ERP decides who may actually do
      either. */
   { href: "/tasks", label: "Tasks", icon: ClipboardCheck },
+  // Everybody's own pay from the HRMS — a day at a time, deductions and why, commission, what finance paid (2026-11-04).
+  { href: "/wallet", label: "My Wallet", icon: WalletCards },
   /*
    * Registry and Role map are not in the navigation.
    *

@@ -207,3 +207,36 @@ export async function workModes(people: { email: string; name?: string }[]): Pro
   const body = await signedCall<WorkModeRow[]>("POST", "/api/v1/integrations/directory/work-modes", { people: people.slice(0, 300) });
   return body.data ?? [];
 }
+
+/** The HRMS may ask finance, and finance the CRMs, before it answers a wallet. */
+const WALLET_TIMEOUT_MS = 30_000;
+
+/**
+ * Somebody's wallet, by the email they sign in with (My Wallet, 2026-11-04): salary a day at a time, what came off
+ * and why, commission, what finance paid. Unlike the directory reads above, the HRMS's own refusal is passed on as it
+ * is — "No HRMS employee has this email." is the thing to show — with its status; only a 5xx or no answer is a 502.
+ */
+export async function walletByEmail(email: string, month?: string): Promise<unknown> {
+  if (!hrmsSigningConfigured()) throw httpError("Root isn't linked to the HRMS yet, so there is no wallet to show.", 503);
+  const qs = new URLSearchParams({ email, ...(month ? { month } : {}) }).toString();
+  const signedPath = `/api/v1/integrations/wallet?${qs}`;
+  const baseUrl = env.HRMS_API_URL.replace(/\/+$/, "").replace(/\/api\/v1$/, "");
+  const timestamp = String(Date.now());
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const canonical = ["GET", signedPath, timestamp, nonce, crypto.createHash("sha256").update("").digest("hex")].join("\n");
+  const signature = crypto.createHmac("sha256", env.HRMS_INTEGRATION_SECRET).update(canonical).digest("hex");
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}${signedPath}`, {
+      headers: { "X-Delta-Client": env.HRMS_CLIENT_ID, "X-Delta-Timestamp": timestamp, "X-Delta-Nonce": nonce, "X-Delta-Signature": signature },
+      signal: AbortSignal.timeout(WALLET_TIMEOUT_MS),
+    });
+  } catch {
+    throw httpError("HRMS could not be reached — try again in a moment", 502);
+  }
+  const body = (await res.json().catch(() => null)) as { data?: unknown; message?: unknown } | null;
+  if (res.status === 401) throw httpError("HRMS refused the portal's credentials", 502);
+  if (res.status >= 500 || !body) throw httpError(`HRMS isn't answering right now (${res.status})`, 502);
+  if (!res.ok) throw httpError(typeof body.message === "string" && body.message ? body.message : `HRMS refused this (${res.status})`, res.status);
+  return body.data;
+}
