@@ -57,10 +57,11 @@ export const TV_TEAM_NAMES: Record<CrmCode, string> = { delta: "Team Cartel", dr
 /** Remote's people outside Team Avengers (AI Academy, Digital, CMA …): their own card, opened by its arrow. */
 export const TV_REMOTE_OTHERS_NAME = "Remote others";
 /**
- * Which of Remote's teams are Team Avengers: SALES_TV_REMOTE_TEAMS (team names, comma-separated) — else the team(s)
- * a Super Admin leads (dilshad's).
+ * Which of Remote's teams are Team Avengers, by name: SALES_TV_REMOTE_TEAMS (comma-separated), else "REMOTE TEAM" —
+ * dilshad's (the user, 2026-11-06: "remote team only"; other teams are led by Super Admins too, so leadership can't
+ * tell). Any case or spacing.
  */
-const remoteTeamsSetting = () => (process.env.SALES_TV_REMOTE_TEAMS ?? "").split(",").map((v) => v.trim().toLowerCase()).filter(Boolean);
+const remoteTeamsSetting = () => (process.env.SALES_TV_REMOTE_TEAMS || "REMOTE TEAM").split(",").map((v) => v.trim().toLowerCase().replace(/\s+/g, " ")).filter(Boolean);
 
 // ── What a CRM answers (its services/salesTvService.ts) ─────────────────────
 
@@ -259,14 +260,7 @@ async function bossesOf(code: CrmCode): Promise<{ bosses: Set<string>; avengerId
     for (const t of teams) for (const l of (t.leaders as unknown[] | undefined) ?? []) ids.add(String(l));
     for (const c of settings) if (c.salesManager) ids.add(String(c.salesManager));
     for (const a of admins) ids.add(String(a._id));
-    // Team Avengers (2026-11-06): the teams SALES_TV_REMOTE_TEAMS names, else the ones a Super Admin leads (dilshad's)
-    // — and everybody in them, leaders and members.
-    const adminIds = new Set(admins.map((a) => String(a._id)));
-    const named = new Set(remoteTeamsSetting());
-    const chosen = teams.filter((t) => named.size
-      ? named.has(str(t.name).toLowerCase())
-      : ((t.leaders as unknown[] | undefined) ?? []).some((l) => adminIds.has(String(l))));
-    const avengerIds = new Set(chosen.flatMap((t) => [...((t.leaders as unknown[] | undefined) ?? []), ...((t.members as unknown[] | undefined) ?? [])].map(String)));
+    const avengerIds = avengersOf(teams as never, new Set(admins.map((a) => String(a._id))), remoteTeamsSetting());
     return { bosses: ids, avengerIds };
   } catch {
     return null;
@@ -447,6 +441,21 @@ function crmCard(code: CrmCode, s: CrmState, opts: SalesTvOptions, pub: boolean)
       },
     } : {}),
   };
+}
+
+/**
+ * Team Avengers' people, by CRM user id (2026-11-06): everybody in the team(s) named — REMOTE TEAM — leaders and
+ * members; only if no team has that name, the ones a Super Admin leads.
+ */
+export function avengersOf(
+  teams: Array<{ name?: unknown; leaders?: unknown[]; members?: unknown[] }>,
+  adminIds: Set<string>,
+  names: string[],
+): Set<string> {
+  const named = new Set(names);
+  const byName = teams.filter((t) => named.has(str(t.name).toLowerCase().replace(/\s+/g, " ")));
+  const chosen = byName.length ? byName : teams.filter((t) => (t.leaders ?? []).some((l) => adminIds.has(String(l))));
+  return new Set(chosen.flatMap((t) => [...(t.leaders ?? []), ...(t.members ?? [])].map(String)));
 }
 
 /**

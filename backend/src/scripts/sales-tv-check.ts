@@ -423,7 +423,17 @@ async function main() {
   }
   check("…the Sales TV sends no hidden rows", !("hiddenPeople" in crmOf(sNow, "delta")), show(crmOf(sNow, "delta").hiddenPeople ?? null));
   {
-    const { othersOf } = await import("../services/salesTvService");
+    const { othersOf, avengersOf } = await import("../services/salesTvService");
+    // As in the Remote CRM: Super Admins lead other teams too (abshar's AI Academy), so the team is chosen by name.
+    const teamsLikeRemote = [
+      { name: "AI Academy", leaders: ["abshar"], members: ["muhammed", "nusra"] },
+      { name: "REMOTE  team", leaders: ["dilshad"], members: ["nusra", "fidha"] },
+      { name: "CMA", leaders: ["tl1"], members: ["m1"] },
+    ];
+    same("Team Avengers: everybody in REMOTE TEAM (any case or spacing), leaders and members — not the other Super-Admin-led teams",
+      [...avengersOf(teamsLikeRemote, new Set(["abshar", "dilshad"]), ["remote team"])].sort(), ["dilshad", "fidha", "nusra"]);
+    same("…no team of that name: the Super-Admin-led ones",
+      [...avengersOf(teamsLikeRemote, new Set(["abshar"]), ["nope"])].sort(), ["abshar", "muhammed", "nusra"]);
     // By membership, not the team name a person is shown with: "c" is in REMOTE TEAM too, though shown as AI Academy
     // (the first of her teams by name) — 2026-11-06, Nusra.
     const ppl = [{ id: "a", team: "REMOTE TEAM" }, { id: "b", team: "AI Academy" }, { id: "c", team: "AI Academy" }, { id: "d", team: "" }, { id: "e", team: "CMA" }];
