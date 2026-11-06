@@ -3,7 +3,7 @@ import type { Metadata, Viewport } from "next";
 /** The open Sales TV link for the office screens — no sign-in, not for search engines. */
 export const metadata: Metadata = {
   title: "Sales TV — Delta",
-  description: "Dubai Sales, Draw and Remote: closings, calls and who is on a break — live.",
+  description: "Team Cartel, Team Syndicate and Team Avengers: closings, calls and who is on a break — live.",
   robots: { index: false, follow: false, nocache: true, googleBot: { index: false, follow: false } },
 };
 

@@ -50,7 +50,7 @@ export default function ManagerTvPage() {
             <MonitorPlay className="h-6 w-6 text-primary" /> Manager TV
           </h2>
           <p className="mt-1 text-muted-foreground">
-            Dubai Sales, Draw, Remote and the CS team live — everyone, team leaders and Sales Managers too: closings and revenue, the CSs' course payments, calls, and every close and CS payment announced. Open the public link on an office TV — no sign-in, no emails.
+            Team Cartel (Dubai Sales), Team Syndicate (Draw), Team Avengers (Remote) and Team Mafia (CS) live — everyone, team leaders and Sales Managers too: closings and revenue, the CSs' course payments, calls, and every close and CS payment announced. Open the public link on an office TV — no sign-in, no emails.
           </p>
         </div>
         <div className="flex gap-2">
@@ -64,7 +64,7 @@ export default function ManagerTvPage() {
           </Button>
         </div>
       </motion.div>
-      <SalesTvBoard fetcher={fetchSignedIn} variant="embedded" withCs panels={false} months compactMoney title="Manager TV" subtitle="Dubai Sales · Draw · Remote · CS team" />
+      <SalesTvBoard fetcher={fetchSignedIn} variant="embedded" withCs panels={false} months compactMoney title="Manager TV" subtitle="Team Cartel · Team Syndicate · Team Avengers · Team Mafia" />
     </div>
   );
 }

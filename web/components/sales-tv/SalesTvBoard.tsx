@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
-import { AlertTriangle, Maximize, Minimize, Trophy, Volume2, VolumeX } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Eye, EyeOff, Maximize, Minimize, Trophy, Volume2, VolumeX } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   breakLabel, crmTag, crmTone, fmtClock, fmtInt, fmtMoney, fmtRevenue, fmtShort, fmtTalk, initials, monthLabel, monthYearLabel, pastTvMonths,
@@ -129,7 +129,7 @@ export interface SalesTvBoardProps {
 }
 
 export function SalesTvBoard({
-  fetcher, variant, withCs = false, panels = true, title = "Sales TV", subtitle = "Dubai Sales · Draw · Remote", months = false, compactMoney = false,
+  fetcher, variant, withCs = false, panels = true, title = "Sales TV", subtitle = "Team Cartel · Team Syndicate · Team Avengers", months = false, compactMoney = false,
 }: SalesTvBoardProps) {
   const tv = variant === "tv";
   const [crms, setCrms] = useState<SalesTvCrm[] | null>(null);
@@ -146,6 +146,9 @@ export function SalesTvBoard({
   const root = useRef<HTMLDivElement>(null);
   // The month shown: null is this month, live. Read from the link once the page is in the browser.
   const [month, setMonth] = useState<string | null>(null);
+  // The other-teams card and the hidden people's rows — off until asked for, on this screen only (2026-11-06).
+  const [showOthers, setShowOthers] = useState(false);
+  const [showHidden, setShowHidden] = useState(false);
   const [monthRead, setMonthRead] = useState(!months);
   useEffect(() => {
     if (!months) return;
@@ -219,6 +222,20 @@ export function SalesTvBoard({
   const serverNow = now + offset.current;
   const gap = "gap-[clamp(0.5rem,0.7vw,1.1rem)]";
 
+  // Remote's people outside Team Avengers (AI Academy, Digital, CMA …) make a card of their own, shown only once the
+  // arrow on Team Avengers is pressed (the user, 2026-11-06); the header's totals still count everybody.
+  const cards = (crms ?? PLACEHOLDER).flatMap((crm): Array<{ crm: SalesTvCrm; others?: { count: number } }> => {
+    const ids = new Set(crm.split?.otherIds ?? []);
+    if (!ids.size) return [{ crm }];
+    const main = { ...crm, people: crm.people.filter((p) => !ids.has(p.id)) };
+    const rest: SalesTvCrm = {
+      ...crm, code: `${crm.code}_others`, name: crm.split!.otherName, people: crm.people.filter((p) => ids.has(p.id)),
+      hidden: undefined, hiddenPeople: undefined, split: undefined, revenueToday: undefined,
+    };
+    return showOthers ? [{ crm: main, others: { count: ids.size } }, { crm: rest }] : [{ crm: main, others: { count: ids.size } }];
+  });
+  const columns = String(Math.min(5, Math.max(3, cards.length + (withCs ? 1 : 0)))) as "3" | "4" | "5";
+
   return (
     <CompactMoney.Provider value={compactMoney}>
     <div ref={root} className={cn("stv relative", boardFont.className, tv ? "stv-tv flex h-[100dvh] flex-col overflow-hidden p-[clamp(0.5rem,0.7vw,1.1rem)]" : "rounded-2xl p-3 sm:p-4")}>
@@ -230,19 +247,23 @@ export function SalesTvBoard({
         className={cn(
           "mt-[clamp(0.5rem,0.7vw,1.1rem)] grid", gap,
           tv
-            ? cn("min-h-0 flex-1 grid-cols-1 auto-rows-max overflow-y-auto lg:auto-rows-[minmax(0,1fr)] lg:overflow-hidden",
-              withCs
-                ? panels ? "lg:grid-cols-[repeat(4,minmax(0,1fr))_minmax(14rem,0.5fr)]" : "lg:grid-cols-4"
-                : panels ? "lg:grid-cols-[repeat(3,minmax(0,1fr))_minmax(15rem,0.62fr)]" : "lg:grid-cols-3")
-            : withCs ? "grid-cols-1 lg:grid-cols-2 2xl:grid-cols-4" : "grid-cols-1 lg:grid-cols-3",
+            ? cn("min-h-0 flex-1 grid-cols-1 auto-rows-max overflow-y-auto lg:auto-rows-[minmax(0,1fr)] lg:overflow-hidden", (panels ? GRID_TV_PANELS : GRID_TV)[columns])
+            : GRID_PAGE[columns],
         )}
       >
-        {(crms ?? PLACEHOLDER).map((crm) => (
-          <CrmColumn key={crm.code} crm={crm} tv={tv} />
+        {cards.map(({ crm, others }) => (
+          <CrmColumn
+            key={crm.code}
+            crm={crm}
+            tv={tv}
+            others={others ? { count: others.count, open: showOthers, toggle: () => setShowOthers((o) => !o) } : undefined}
+            showHidden={showHidden}
+            onToggleHidden={() => setShowHidden((v) => !v)}
+          />
         ))}
         {withCs && <CsColumn cs={cs ?? CS_PLACEHOLDER} tv={tv} />}
         {panels && (
-          <aside className={cn("flex min-h-0 flex-col", gap, !tv && (withCs ? "lg:col-span-2 2xl:col-span-4 lg:grid lg:grid-cols-2" : "lg:col-span-3 lg:grid lg:grid-cols-2"))}>
+          <aside className={cn("flex min-h-0 flex-col", gap, !tv && "col-span-full lg:grid lg:grid-cols-2")}>
             <BreakPanel people={onBreak} serverNow={serverNow} tv={tv} />
             <RecentCloses closes={closes} tv={tv} />
           </aside>
@@ -257,13 +278,27 @@ export function SalesTvBoard({
 }
 
 const PLACEHOLDER: SalesTvCrm[] = [
-  { code: "delta", name: "Dubai Sales", status: "loading", error: null, month: null, peopleUpdatedAt: null, liveUpdatedAt: null, people: [] },
-  { code: "draw", name: "Draw", status: "loading", error: null, month: null, peopleUpdatedAt: null, liveUpdatedAt: null, people: [] },
-  { code: "remote", name: "Remote", status: "loading", error: null, month: null, peopleUpdatedAt: null, liveUpdatedAt: null, people: [] },
+  { code: "delta", name: "Team Cartel", status: "loading", error: null, month: null, peopleUpdatedAt: null, liveUpdatedAt: null, people: [] },
+  { code: "draw", name: "Team Syndicate", status: "loading", error: null, month: null, peopleUpdatedAt: null, liveUpdatedAt: null, people: [] },
+  { code: "remote", name: "Team Avengers", status: "loading", error: null, month: null, peopleUpdatedAt: null, liveUpdatedAt: null, people: [] },
 ];
 
+/* The board's columns: the CRM cards, the CS card on the Manager TV, and Remote's other teams when opened — written
+   out whole so Tailwind keeps every one. */
+const GRID_TV: Record<"3" | "4" | "5", string> = { "3": "lg:grid-cols-3", "4": "lg:grid-cols-4", "5": "lg:grid-cols-5" };
+const GRID_TV_PANELS: Record<"3" | "4" | "5", string> = {
+  "3": "lg:grid-cols-[repeat(3,minmax(0,1fr))_minmax(15rem,0.62fr)]",
+  "4": "lg:grid-cols-[repeat(4,minmax(0,1fr))_minmax(14rem,0.5fr)]",
+  "5": "lg:grid-cols-[repeat(5,minmax(0,1fr))_minmax(13rem,0.45fr)]",
+};
+const GRID_PAGE: Record<"3" | "4" | "5", string> = {
+  "3": "grid-cols-1 lg:grid-cols-3",
+  "4": "grid-cols-1 lg:grid-cols-2 2xl:grid-cols-4",
+  "5": "grid-cols-1 lg:grid-cols-2 2xl:grid-cols-5",
+};
+
 const CS_PLACEHOLDER: SalesTvCs = {
-  code: "cs", name: "CS team", status: "loading", error: null, month: null, updatedAt: null, people: [], teams: [], totals: { monthAed: 0, todayAed: 0, payments: 0 },
+  code: "cs", name: "Team Mafia", status: "loading", error: null, month: null, updatedAt: null, people: [], teams: [], totals: { monthAed: 0, todayAed: 0, payments: 0 },
 };
 
 // ── Header ─────────────────────────────────────────────────────────────────────
@@ -396,6 +431,11 @@ const COLS = "grid grid-cols-[clamp(1.7rem,1.9vw,2.9rem)_minmax(0,1fr)_repeat(2,
 /** The talk-time column: only where it fits. */
 const WIDE = "hidden min-[1500px]:block";
 
+/** The board's order, as the server ranks (salesTvService byStanding): revenue, then closings, then calls, then name. */
+function byStanding(a: SalesTvPerson, b: SalesTvPerson): number {
+  return (b.revenueMonth ?? 0) - (a.revenueMonth ?? 0) || b.closingsMonth - a.closingsMonth || b.callsToday - a.callsToday || a.name.localeCompare(b.name);
+}
+
 /** The most connected calls and talk time today in this CRM (0 when nobody has any yet). */
 function bests(people: SalesTvPerson[]) {
   return people.reduce(
@@ -404,11 +444,21 @@ function bests(people: SalesTvPerson[]) {
   );
 }
 
-function CrmColumn({ crm, tv }: { crm: SalesTvCrm; tv: boolean }) {
+function CrmColumn({ crm: given, tv, others, showHidden = false, onToggleHidden }: {
+  crm: SalesTvCrm; tv: boolean;
+  /** Team Avengers: the arrow that opens Remote's other teams (2026-11-06). */
+  others?: { count: number; open: boolean; toggle: () => void };
+  /** The Manager TV's hidden people (dilshad), listed — their rows sent as `hiddenPeople`, off until asked for. */
+  showHidden?: boolean;
+  onToggleHidden?: () => void;
+}) {
+  const hiddenRows = given.hiddenPeople ?? [];
+  const listing = showHidden && hiddenRows.length > 0;
+  // Listed, they are counted as rows; not listed, their figures are still in the total (the Manager TV, 2026-10-31).
+  const crm: SalesTvCrm = listing ? { ...given, people: [...given.people, ...hiddenRows].sort(byStanding), hidden: undefined } : given;
   const body = useRef<HTMLDivElement>(null);
   const rest = crm.people.slice(3);
   useAutoScroll(body, tv, rest.length);
-  // The hidden people's figures are in the total, though not listed (the Manager TV, 2026-10-31).
   const h = crm.hidden;
   const t = crm.people.reduce(
     (a, p) => ({ m: a.m + p.closingsMonth, d: a.d + p.closingsToday, r: a.r + (p.revenueMonth ?? 0), c: a.c + p.callsToday, k: a.k + p.connectedToday, s: a.s + p.talkSecondsToday }),
@@ -429,6 +479,37 @@ function CrmColumn({ crm, tv }: { crm: SalesTvCrm; tv: boolean }) {
           {monthLabel(crm.month)}
         </span>
       </div>
+
+      {/* Team Avengers' buttons (2026-11-06), under its name so the name is never cut short. */}
+      {((hiddenRows.length > 0 && onToggleHidden) || others) && (
+        <div className="flex flex-wrap items-center gap-1.5 px-[clamp(0.8rem,1vw,1.4rem)] pt-1.5">
+          {hiddenRows.length > 0 && onToggleHidden && (
+            <button
+              type="button"
+              onClick={onToggleHidden}
+              className={cn("inline-flex shrink-0 items-center gap-1 rounded-full border border-[color:var(--line)] px-2.5 py-0.5 text-[color:var(--mute)] hover:text-[color:var(--ink)]", T.small)}
+              title={listing ? "Hide them again — their figures stay in the total" : "List them in this card"}
+              data-testid={`toggle-hidden-${given.code}`}
+            >
+              {listing ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+              {listing ? "Hide" : "Show"} {hiddenRows.map((p) => p.name.split(/\s+/)[0]).join(", ")}
+            </button>
+          )}
+          {others && (
+            <button
+              type="button"
+              onClick={others.toggle}
+              className={cn("ml-auto inline-flex shrink-0 items-center gap-0.5 rounded-full border border-[color:var(--line)] px-2 py-0.5 text-[color:var(--mute)] hover:text-[color:var(--ink)]", T.small)}
+              title={others.open ? "Close the other teams' card" : `Remote's other teams — ${others.count} people`}
+              aria-expanded={others.open}
+              data-testid={`toggle-others-${given.code}`}
+            >
+              {others.open ? "Close other teams" : `Other teams · ${others.count}`}
+              {others.open ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </button>
+          )}
+        </div>
+      )}
 
       {crm.error && (
         <p className={cn("mx-[clamp(0.8rem,1vw,1.4rem)] mt-2 flex items-start gap-1.5 rounded-lg border border-[color:var(--warn)] px-2.5 py-1.5 text-[color:var(--warn)]", T.small)} data-testid={`crm-error-${crm.code}`}>

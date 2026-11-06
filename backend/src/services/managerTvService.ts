@@ -85,7 +85,8 @@ function csCard(pub: boolean, from: { data: CsAnswer | null; error: string | nul
   const status = from.error ? "error" : d ? "ok" : "loading";
   return {
     code: "cs",
-    name: "CS team",
+    // The CS team on the Manager TV (the user, 2026-11-06).
+    name: "Team Mafia",
     status,
     error: from.error ? (pub ? "The CS figures can't be reached right now." : from.error) : null,
     month: d?.month ?? null,
@@ -104,7 +105,7 @@ function csCloses(since: number | null) {
   return [...state.seen.values()]
     .filter((s) => since === null || Date.parse(s.seenAt) > since)
     .map(({ p, seenAt }) => ({
-      key: `cs:${p.id}`, id: p.id, crm: "cs", crmName: "CS team", closer: p.cs, courses: p.product ? [p.product] : [],
+      key: `cs:${p.id}`, id: p.id, crm: "cs", crmName: "Team Mafia", closer: p.cs, courses: p.product ? [p.product] : [],
       amount: p.aed, academy: "dubai" as const, currency: "AED" as const, at: p.at, seenAt, kind: "cs_payment" as const,
     }));
 }

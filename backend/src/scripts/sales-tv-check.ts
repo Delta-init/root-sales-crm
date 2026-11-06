@@ -263,7 +263,8 @@ async function main() {
   let r = await call("/sales-tv", root);
   const d = r.body?.data ?? {};
   check("200 with serverTime", r.status === 200 && typeof d.serverTime === "string", show(r.body));
-  same("three CRMs in order, with names from the registry", (d.crms ?? []).map((c: Json) => [c.code, c.name]), [["delta", "Dubai Sales"], ["draw", "Draw CRM"], ["remote", "Remote CRM"]]);
+  // The TVs' own names since 2026-11-06, not the registry's.
+  same("three CRMs in order, by their TV names", (d.crms ?? []).map((c: Json) => [c.code, c.name]), [["delta", "Team Cartel"], ["draw", "Team Syndicate"], ["remote", "Team Avengers"]]);
   const crmOf = (data: Json, code: string) => (data.crms ?? []).find((c: Json) => c.code === code) ?? {};
   same("Delta's people working this month, as the CRM sent them (Cara: nothing; Eli: last month's lead only — hidden)",
     crmOf(d, "delta").people?.map((p: Json) => [p.name, p.team, p.closingsMonth, p.closingsToday, p.callsToday, p.connectedToday, p.talkSecondsToday]),
@@ -273,10 +274,10 @@ async function main() {
   check("the signed-in answer keeps emails", crmOf(d, "delta").people?.[0]?.email === "asha@delta-e2e.test");
   same("closes of both CRMs, newest first, older than 2 h left out", (d.closes ?? []).map((c: Json) => c.key), ["delta:d2", "draw:w1", "delta:d1"]);
   const w1 = (d.closes ?? []).find((c: Json) => c.key === "draw:w1");
-  check("a close: CRM code and name, closer, courses, amount and currency", w1?.crm === "draw" && w1.crmName === "Draw CRM" && w1.closer === "Wasim"
+  check("a close: CRM code and name, closer, courses, amount and currency", w1?.crm === "draw" && w1.crmName === "Team Syndicate" && w1.closer === "Wasim"
     && w1.courses[0] === "Draw Basics" && w1.amount === 55000 && w1.currency === "INR" && !("student" in w1), show(w1));
   same("on a break: both CRMs, longest first, with CRM and team", (d.onBreak ?? []).map((b: Json) => [b.name, b.crm, b.crmName, b.team, b.kind]),
-    [["Bina", "delta", "Dubai Sales", "Falcons", "lunch"], ["Zed", "draw", "Draw CRM", "Tigers", null]]);
+    [["Bina", "delta", "Team Cartel", "Falcons", "lunch"], ["Zed", "draw", "Team Syndicate", "Tigers", null]]);
   same("photos from HRMS: Bina's link, Zed has none (initials)", (d.onBreak ?? []).map((b: Json) => b.photoUrl), ["https://hrms-e2e.test/photos/bina.jpg?sig=abc", null]);
   check("HRMS asked once, signed, for the people on a break and in the tables (each once)", hrmsHits.length === 1 && hrmsHits[0].signed
     && hrmsHits[0].emails.sort().join() === "ada@delta-e2e.test,asha@delta-e2e.test,bina@delta-e2e.test,dev@delta-e2e.test,dilshad@delta-e2e.test,sam@delta-e2e.test,tom@delta-e2e.test,wasim@draw-e2e.test,yan@draw-e2e.test,zed@draw-e2e.test", show(hrmsHits));
@@ -292,7 +293,7 @@ async function main() {
 
   step("Case 3 — errors: Remote's old server");
   const remote = crmOf(d, "remote");
-  check("Remote: outdated, its server needs updating; the others unaffected", remote.status === "outdated" && /Remote CRM's server needs updating/.test(remote.error ?? "") && (remote.people ?? []).length === 0, show(remote));
+  check("Remote: outdated, its server needs updating; the others unaffected", remote.status === "outdated" && /Team Avengers's server needs updating/.test(remote.error ?? "") && (remote.people ?? []).length === 0, show(remote));
 
   step("Case 2 — the cache");
   const before = hits.length;
@@ -338,7 +339,7 @@ async function main() {
   check("…Delta carries on", crmOf(r.body?.data ?? {}, "delta").status === "ok");
   r = await call("/public/sales-tv");
   draw = crmOf(r.body?.data ?? {}, "draw");
-  check("open: a plain sentence, not the CRM's own words", draw.status === "error" && draw.error === "Draw CRM can't be reached right now." && !/10\.0\.0\.7/.test(r.text), show(draw));
+  check("open: a plain sentence, not the CRM's own words", draw.status === "error" && draw.error === "Team Syndicate can't be reached right now." && !/10\.0\.0\.7/.test(r.text), show(draw));
   drawDown = false;
 
   step("Case 2 — the people again only after 30 s");
@@ -371,7 +372,7 @@ async function main() {
     const [, rev, clo, calls] = salesOrder[i - 1];
     return rev > r[1] || (rev === r[1] && (clo > r[2] || (clo === r[2] && calls >= r[3])));
   }), show(salesOrder));
-  check("…and the CS team card, as CS Portal ranks it", md.cs?.status === "ok" && md.cs?.name === "CS team" && (md.cs?.people ?? []).map((p: Json) => p.name).join() === "Noor,Omar,Priya", show(md.cs));
+  check("…and the CS team card, as CS Portal ranks it", md.cs?.status === "ok" && md.cs?.name === "Team Mafia" && (md.cs?.people ?? []).map((p: Json) => p.name).join() === "Noor,Omar,Priya", show(md.cs));
   same("…Noor's month, today, payments and HRMS photo", (({ monthAed, todayAed, payments, todayPayments, photoUrl, team }) => ({ monthAed, todayAed, payments, todayPayments, photoUrl, team }))(md.cs?.people?.[0] ?? {}),
     { monthAed: 12000, todayAed: 3670, payments: 4, todayPayments: 1, photoUrl: "https://hrms-e2e.test/photos/noor.jpg", team: "Falcons" });
   same("…the totals", md.cs?.totals, { monthAed: 21000, todayAed: 3670, payments: 7 });
@@ -415,6 +416,18 @@ async function main() {
       && ["Tom", "Sam", "Ada"].every((n) => (delta.people ?? []).some((p: Json) => p.name === n)), show(delta.people?.map((p: Json) => p.name)));
     same(`…his figures counted as hidden (${label})`, delta.hidden, { count: 1, closingsMonth: 2, closingsToday: 1, revenueMonth: 7000, callsToday: 2, connectedToday: 1, talkSecondsToday: 100 });
     check(`…today includes his AED 4,000: 7,000 (${label})`, delta.revenueToday === 7000, show(delta.revenueToday));
+    // His row, for the card's "Show dilshad" button (2026-11-06) — never an email on the open link.
+    const hp = (delta.hiddenPeople ?? []) as Json[];
+    check(`…his row sent for the button: his figures${label === "the open link" ? ", no email" : ""} (${label})`, hp.length === 1 && hp[0].name === "Dilshad" && hp[0].revenueMonth === 7000 && hp[0].closingsMonth === 2
+      && (label === "the open link" ? !("email" in hp[0]) : true), show(hp));
+  }
+  check("…the Sales TV sends no hidden rows", !("hiddenPeople" in crmOf(sNow, "delta")), show(crmOf(sNow, "delta").hiddenPeople ?? null));
+  {
+    const { othersOf } = await import("../services/salesTvService");
+    const ppl = [{ id: "a", team: "REMOTE TEAM" }, { id: "b", team: "AI Academy" }, { id: "c", team: " remote team " }, { id: "d", team: "" }, { id: "e", team: "CMA" }];
+    same("Team Avengers: the others are everybody outside the Super Admin's team(s), any case or spacing; no team counts as other",
+      othersOf(ppl, new Set(["remote team"])), ["b", "d", "e"]);
+    same("…teams unknown or empty: nobody split off (the card stays Remote's whole list)", [othersOf(ppl, null), othersOf(ppl, new Set())], [[], []]);
   }
 
   step("Case 7 — a month gone by (the Manager TV's month switch)");

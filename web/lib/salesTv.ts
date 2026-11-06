@@ -36,6 +36,10 @@ export interface SalesTvCrm {
   revenueToday?: number | null;
   /** People not listed on this screen (the Manager TV hides dilshad, 2026-10-31) — their figures still count in the total. */
   hidden?: { count: number; closingsMonth: number; closingsToday: number; revenueMonth: number; callsToday: number; connectedToday: number; talkSecondsToday: number };
+  /** Those people's rows, for the card's "Show …" button (the Manager TV, 2026-11-06). */
+  hiddenPeople?: SalesTvPerson[];
+  /** Remote's people outside Team Avengers (2026-11-06): a card of their own, opened by the arrow on Team Avengers. */
+  split?: { otherIds: string[]; otherName: string };
 }
 
 export interface SalesTvBreak {
@@ -164,11 +168,11 @@ export function monthLabel(m: string | null): string {
 }
 
 /** Each CRM's colour on the board: the stripe on its table and its tag on breaks and closes. */
-const CRM_TONE: Record<string, string> = { delta: "#2f6bff", draw: "#9b5cff", remote: "#00b3a4", cs: "#e85d9a" };
+const CRM_TONE: Record<string, string> = { delta: "#2f6bff", draw: "#9b5cff", remote: "#00b3a4", remote_others: "#00b3a4", cs: "#e85d9a" };
 export const crmTone = (crm: string | undefined) => (crm && CRM_TONE[crm]) || "#6b7280";
 
-/** The short tag a CRM goes by on the board: "SALES", "DRAW", "REMOTE". */
-const CRM_TAG: Record<string, string> = { delta: "Sales", draw: "Draw", remote: "Remote", cs: "CS" };
+/** The short tag a CRM goes by on the board — its team's name (2026-11-06): Cartel, Syndicate, Avengers, Mafia. */
+const CRM_TAG: Record<string, string> = { delta: "Cartel", draw: "Syndicate", remote: "Avengers", cs: "Mafia" };
 export const crmTag = (crm: string, name: string) => CRM_TAG[crm] ?? name;
 
 /** A team's colour stripe, like a team's livery on a timing tower — the same team, the same colour, every time. */
