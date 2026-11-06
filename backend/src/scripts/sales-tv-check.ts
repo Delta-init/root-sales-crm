@@ -424,9 +424,11 @@ async function main() {
   check("…the Sales TV sends no hidden rows", !("hiddenPeople" in crmOf(sNow, "delta")), show(crmOf(sNow, "delta").hiddenPeople ?? null));
   {
     const { othersOf } = await import("../services/salesTvService");
-    const ppl = [{ id: "a", team: "REMOTE TEAM" }, { id: "b", team: "AI Academy" }, { id: "c", team: " remote team " }, { id: "d", team: "" }, { id: "e", team: "CMA" }];
-    same("Team Avengers: the others are everybody outside the Super Admin's team(s), any case or spacing; no team counts as other",
-      othersOf(ppl, new Set(["remote team"])), ["b", "d", "e"]);
+    // By membership, not the team name a person is shown with: "c" is in REMOTE TEAM too, though shown as AI Academy
+    // (the first of her teams by name) — 2026-11-06, Nusra.
+    const ppl = [{ id: "a", team: "REMOTE TEAM" }, { id: "b", team: "AI Academy" }, { id: "c", team: "AI Academy" }, { id: "d", team: "" }, { id: "e", team: "CMA" }];
+    same("Team Avengers: the others are everybody not a member or leader of the Super Admin's team(s) — whatever team they're shown with",
+      othersOf(ppl, new Set(["a", "c"])), ["b", "d", "e"]);
     same("…teams unknown or empty: nobody split off (the card stays Remote's whole list)", [othersOf(ppl, null), othersOf(ppl, new Set())], [[], []]);
   }
 

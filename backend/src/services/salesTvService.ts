@@ -87,8 +87,12 @@ interface CrmState {
   /** Its team leaders, Sales Manager and Super Admins, by CRM user id — hidden on the Sales TV, shown on the
       Manager TV (the user, 2026-10-23). Null while unknown: then nobody is hidden. */
   bosses: Set<string> | null;
-  /** The teams a Super Admin leads, by name, lowercased — Remote's Team Avengers (2026-11-06). Null while unknown. */
-  adminTeams: Set<string> | null;
+  /**
+   * Team Avengers' people, by CRM user id: the leaders and members of the team(s) a Super Admin leads (or the ones
+   * SALES_TV_REMOTE_TEAMS names) — by membership, not the one team name a person is shown with (2026-11-06: somebody
+   * in two teams carries the first by name, so REMOTE TEAM's members were read as another team's). Null while unknown.
+   */
+  avengerIds: Set<string> | null;
   /** Payments collected today (Dubai day) on the leads each person holds, AED, by CRM user id — the Manager TV's
       "Today" (2026-10-31); null while unknown. `revenueDay` is the day it is for. */
   revenueToday: Map<string, number> | null;
@@ -110,7 +114,7 @@ interface CrmState {
 
 const state = new Map<CrmCode, CrmState>(
   SALES_TV_CRMS.map((code) => [code, {
-    code, people: null, month: null, leadsMonth: null, bosses: null, adminTeams: null, revenueToday: null, revenueDay: null, onBreak: [], fullAskedAt: 0, liveAskedAt: 0, peopleAt: 0, liveAt: 0,
+    code, people: null, month: null, leadsMonth: null, bosses: null, avengerIds: null, revenueToday: null, revenueDay: null, onBreak: [], fullAskedAt: 0, liveAskedAt: 0, peopleAt: 0, liveAt: 0,
     error: null, outdated: false, newestClose: null, inflight: null,
   }]),
 );
@@ -236,7 +240,7 @@ async function revenueTodayBy(code: CrmCode, range: { from: Date; to: Date }): P
  * manager and the team leaders"): the leaders of the CRM's active teams, its Sales Manager (commission settings)
  * and its Super Admins — from the CRM's database; null when it can't be read.
  */
-async function bossesOf(code: CrmCode): Promise<{ bosses: Set<string>; adminTeams: Set<string> } | null> {
+async function bossesOf(code: CrmCode): Promise<{ bosses: Set<string>; avengerIds: Set<string> } | null> {
   try {
     const { sources } = await getSources();
     const src = sources.find((x) => x.org.code === code);
@@ -244,7 +248,7 @@ async function bossesOf(code: CrmCode): Promise<{ bosses: Set<string>; adminTeam
     const db = src.conn;
     const opts = { maxTimeMS: LEADS_QUERY_MS };
     const [teams, settings, roles] = await Promise.all([
-      db.collection("teams").find({ status: { $ne: "inactive" } }, { projection: { leaders: 1, name: 1 }, ...opts }).toArray(),
+      db.collection("teams").find({ status: { $ne: "inactive" } }, { projection: { leaders: 1, members: 1, name: 1 }, ...opts }).toArray(),
       db.collection("commissionsettings").find({}, { projection: { salesManager: 1 }, ...opts }).toArray(),
       db.collection("roles").find({ isSystemRole: true, roleName: "Super Admin" }, { projection: { _id: 1 }, ...opts }).toArray(),
     ]);
@@ -255,12 +259,15 @@ async function bossesOf(code: CrmCode): Promise<{ bosses: Set<string>; adminTeam
     for (const t of teams) for (const l of (t.leaders as unknown[] | undefined) ?? []) ids.add(String(l));
     for (const c of settings) if (c.salesManager) ids.add(String(c.salesManager));
     for (const a of admins) ids.add(String(a._id));
-    // The teams a Super Admin leads — Remote's Team Avengers, dilshad's (2026-11-06).
+    // Team Avengers (2026-11-06): the teams SALES_TV_REMOTE_TEAMS names, else the ones a Super Admin leads (dilshad's)
+    // — and everybody in them, leaders and members.
     const adminIds = new Set(admins.map((a) => String(a._id)));
-    const adminTeams = new Set(teams
-      .filter((t) => ((t.leaders as unknown[] | undefined) ?? []).some((l) => adminIds.has(String(l))))
-      .map((t) => str(t.name).toLowerCase()).filter(Boolean));
-    return { bosses: ids, adminTeams };
+    const named = new Set(remoteTeamsSetting());
+    const chosen = teams.filter((t) => named.size
+      ? named.has(str(t.name).toLowerCase())
+      : ((t.leaders as unknown[] | undefined) ?? []).some((l) => adminIds.has(String(l))));
+    const avengerIds = new Set(chosen.flatMap((t) => [...((t.leaders as unknown[] | undefined) ?? []), ...((t.members as unknown[] | undefined) ?? [])].map(String)));
+    return { bosses: ids, avengerIds };
   } catch {
     return null;
   }
@@ -320,7 +327,7 @@ function refreshCrm(code: CrmCode, now: number): Promise<void> {
         // Unreadable this time: the last counts stand (none yet → nobody hidden).
         s.leadsMonth = (await leadsThisMonth(code, s.month)) ?? s.leadsMonth;
         const b = await bossesOf(code);
-        if (b) { s.bosses = b.bosses; s.adminTeams = b.adminTeams; }
+        if (b) { s.bosses = b.bosses; s.avengerIds = b.avengerIds; }
         // Unreadable this time: the last figure stands for the same day, else it is unknown.
         const today = dubaiToday();
         const money = await revenueTodayBy(code, today);
@@ -422,7 +429,7 @@ function crmCard(code: CrmCode, s: CrmState, opts: SalesTvOptions, pub: boolean)
   const people = listed.filter((p) => !hiddenOnes.includes(p)).map(row);
   // Remote: who is not in Team Avengers — their own card behind an arrow (2026-11-06).
   const otherIds = code === "remote"
-    ? othersOf(listed.filter((p) => !hiddenOnes.includes(p)), remoteTeamsSetting().length ? new Set(remoteTeamsSetting()) : s.adminTeams)
+    ? othersOf(listed.filter((p) => !hiddenOnes.includes(p)), s.avengerIds)
     : [];
   return {
     code, name: nameOf(code), status, error, month: s.month,
@@ -443,12 +450,12 @@ function crmCard(code: CrmCode, s: CrmState, opts: SalesTvOptions, pub: boolean)
 }
 
 /**
- * Of Remote's people, the ones outside Team Avengers (`teams`, lowercased names): their ids. Nobody while the teams
- * are unknown or empty — then the card is Remote's whole list, as before.
+ * Of Remote's people, the ones outside Team Avengers (`members`: its people's CRM user ids): their ids. Nobody while
+ * its people are unknown or none — then the card is Remote's whole list, as before.
  */
-export function othersOf(people: Array<{ id: string; team: string }>, teams: Set<string> | null): string[] {
-  if (!teams || teams.size === 0) return [];
-  return people.filter((p) => !teams.has(p.team.trim().toLowerCase())).map((p) => p.id);
+export function othersOf(people: Array<{ id: string }>, members: Set<string> | null): string[] {
+  if (!members || members.size === 0) return [];
+  return people.filter((p) => !members.has(p.id)).map((p) => p.id);
 }
 
 export async function salesTv(opts: SalesTvOptions = {}) {
@@ -512,7 +519,7 @@ async function pastStates(month: string): Promise<Map<CrmCode, CrmState>> {
     const states = new Map<CrmCode, CrmState>();
     await Promise.all(SALES_TV_CRMS.map(async (code) => {
       const s: CrmState = {
-        code, people: null, month, leadsMonth: null, bosses: null, adminTeams: null, revenueToday: null, revenueDay: null, onBreak: [], fullAskedAt: 0, liveAskedAt: 0, peopleAt: 0, liveAt: 0,
+        code, people: null, month, leadsMonth: null, bosses: null, avengerIds: null, revenueToday: null, revenueDay: null, onBreak: [], fullAskedAt: 0, liveAskedAt: 0, peopleAt: 0, liveAt: 0,
         error: null, outdated: false, newestClose: null, inflight: null,
       };
       try {
@@ -528,7 +535,7 @@ async function pastStates(month: string): Promise<Map<CrmCode, CrmState>> {
           s.leadsMonth = await leadsThisMonth(code, month);
           const b = await bossesOf(code);
           s.bosses = b?.bosses ?? null;
-          s.adminTeams = b?.adminTeams ?? null;
+          s.avengerIds = b?.avengerIds ?? null;
         }
       } catch (error) {
         s.error = error instanceof Error ? error.message : "Could not be read";
