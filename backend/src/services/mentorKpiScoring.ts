@@ -21,7 +21,7 @@ import {
  */
 
 export type KpiStatus =
-  | "scored" | "monitoring" | "not_available" | "source_down" | "not_matched" | "not_enough" | "no_target" | "no_role";
+  | "scored" | "monitoring" | "not_available" | "source_down" | "not_matched" | "not_enough" | "no_target" | "no_role" | "left_out";
 
 export const STATUS_LABELS: Record<KpiStatus, string> = {
   scored: "Scored",
@@ -32,7 +32,11 @@ export const STATUS_LABELS: Record<KpiStatus, string> = {
   not_enough: "Not enough data",
   no_target: "No target",
   no_role: "No CS Portal role",
+  left_out: "Left out by a correction",
 };
+
+/** An approved correction to a frozen month (2026-11-09): the right value, or leave this KPI out for the mentor. */
+export interface Adjustment { action: "set_value" | "leave_out"; value: number | null; reason: string }
 
 export interface SourceState { available: boolean; message?: string }
 export type SourceQuality = "complete" | "not_matched" | "unavailable";
@@ -43,6 +47,8 @@ export interface KpiResult {
   value: number | null; sample: number; sampleOf: string; minSample: number;
   target: number | null; targetFrom: "role" | "mentor" | null; effectiveTarget: number | null;
   score: number | null; status: KpiStatus; note: string;
+  /** What an approved correction changed: the value the systems sent (`was`), and why. */
+  corrected: { action: Adjustment["action"]; reason: string; was: number | null } | null;
 }
 export interface SubResult { key: string; name: string; weight: number; share: number; score: number | null; kpis: KpiResult[] }
 export interface CategoryResult { key: string; name: string; weight: number; share: number; score: number | null; subs: SubResult[] }
@@ -117,6 +123,8 @@ export interface ScoreContext {
   sources: Record<KpiSource, SourceState>;
   /** Fraction of the month gone (1 when finished). */
   elapsed: number;
+  /** Approved corrections, by mentor address then metric — only ever for a frozen month. */
+  adjust?: Map<string, Map<string, Adjustment>>;
 }
 
 const weighted = (items: { weight: number; score: number | null }[]): number | null => {
@@ -163,18 +171,30 @@ export function scoreMentor(row: FeedRow, ctx: ScoreContext): MentorResult {
         const target = own ? own.value : typeof roleTarget === "number" ? roleTarget : null;
         const targetFrom = own ? "mentor" : target != null ? "role" : null;
         const out = (patch: Partial<KpiResult> & { status: KpiStatus }): KpiResult => ({
-          ...base, value: null, sample: 0, target, targetFrom, effectiveTarget: null, score: null, note: m?.note ?? "", ...patch,
+          ...base, value: null, sample: 0, target, targetFrom, effectiveTarget: null, score: null, note: m?.note ?? "", corrected: null, ...patch,
         });
         if (k.mode === "scored" && share > 0) planned += share;
 
         if (!m || !m.available || !m.read) return out({ status: "not_available" });
-        if (!ctx.sources[m.source].available) return out({ status: "source_down", note: ctx.sources[m.source].message ?? `${SOURCE_LABELS[m.source]} didn't answer` });
-        if (quality[m.source] === "not_matched") return out({ status: "not_matched", note: `Not found in ${SOURCE_LABELS[m.source]} by their address` });
-        const reading = m.read(row);
-        if (!reading) return out({ status: "not_available" });
+        const sourceOk = ctx.sources[m.source].available && quality[m.source] !== "not_matched";
+        const original = sourceOk ? m.read(row) : null;
+        // A correction wins over what the systems sent: the right value (enough to judge — a person checked it), or out.
+        const fix = ctx.adjust?.get(email)?.get(k.metric) ?? null;
+        const corrected = fix ? { action: fix.action, reason: fix.reason, was: original ? round1(original.value) : null } : null;
+        if (fix?.action === "leave_out") {
+          return out({ status: "left_out", corrected, value: original ? round1(original.value) : null, sample: original?.sample ?? 0, note: `Left out by a correction: ${fix.reason}` });
+        }
+        const reading = fix?.action === "set_value" && fix.value != null
+          ? { value: fix.value, sample: Math.max(original?.sample ?? 0, m.minSample) }
+          : original;
+        if (!reading) {
+          if (!ctx.sources[m.source].available) return out({ status: "source_down", note: ctx.sources[m.source].message ?? `${SOURCE_LABELS[m.source]} didn't answer` });
+          if (quality[m.source] === "not_matched") return out({ status: "not_matched", note: `Not found in ${SOURCE_LABELS[m.source]} by their address` });
+          return out({ status: "not_available" });
+        }
         const value = round1(reading.value);
         const effective = target == null ? null : round1(m.kind === "count" ? target * ctx.elapsed * working : target);
-        const read = { value, sample: reading.sample, effectiveTarget: effective };
+        const read = { value, sample: reading.sample, effectiveTarget: effective, corrected };
         if (reading.sample < m.minSample) return out({ ...read, status: "not_enough", note: `Fewer than ${m.minSample} ${m.sampleOf}` });
         if (k.mode === "monitoring") return out({ ...read, status: "monitoring" });
         if (!role && !own) return out({ ...read, status: "no_role" });

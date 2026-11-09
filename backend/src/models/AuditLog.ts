@@ -54,6 +54,9 @@ const auditLogSchema = new Schema<IAuditLog>(
         // The mentor KPI plan: a draft changed, a version approved (2026-11-09).
         "mentor_kpi_plan_changed",
         "mentor_kpi_plan_approved",
+        "mentor_kpi_frozen",
+        "mentor_kpi_correction_raised",
+        "mentor_kpi_correction_decided",
         "traffic_rules_changed",
         "traffic_lead_retried",
         "traffic_access_changed",

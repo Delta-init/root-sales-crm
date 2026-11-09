@@ -44,7 +44,19 @@ export interface PlansOverview {
 
 export interface SourceState { available: boolean; message?: string }
 export type SourceQuality = "complete" | "not_matched" | "unavailable";
-export type KpiStatus = "scored" | "monitoring" | "not_available" | "source_down" | "not_matched" | "not_enough" | "no_target" | "no_role";
+export type KpiStatus = "scored" | "monitoring" | "not_available" | "source_down" | "not_matched" | "not_enough" | "no_target" | "no_role" | "left_out";
+
+/** A frozen month's version (2026-11-09). */
+export interface SnapshotRef { version: number; frozenAt: string; frozenBy: string; reason: string }
+export interface SnapshotVersion extends SnapshotRef { current: boolean; corrections: number; plan: string }
+export interface Correction {
+  id: string; month: string; email: string; name: string; metric: string; metricName: string;
+  action: "set_value" | "leave_out"; value: number | null;
+  was: { value: number | null; score: number | null; status: string; version: number };
+  reason: string; evidence: string; status: "pending" | "approved" | "rejected";
+  raisedBy: { source: "root" | "cs_portal"; email: string; name: string }; raisedAt: string;
+  decidedBy: string; decidedAt: string | null; decisionNote: string; version: number | null;
+}
 
 export interface PlanRef { id: string; from: string; approvedBy: string; approvedAt: string | null }
 
@@ -62,6 +74,9 @@ export interface ScoresAnswer {
   categories: { key: string; name: string; share: number }[];
   statusLabels: Record<KpiStatus, string>;
   mentors: ScoresRow[];
+  snapshot: SnapshotRef | null;
+  freezable: boolean;
+  pendingCorrections: number;
 }
 
 export interface KpiResult {
@@ -69,6 +84,7 @@ export interface KpiResult {
   mode: KpiMode; weight: number; share: number; value: number | null; sample: number; sampleOf: string; minSample: number;
   target: number | null; targetFrom: "role" | "mentor" | null; effectiveTarget: number | null;
   score: number | null; status: KpiStatus; note: string;
+  corrected: { action: "set_value" | "leave_out"; reason: string; was: number | null } | null;
 }
 export interface MentorDetail {
   month: string; plan: PlanRef; elapsed: number; to: string | null;
@@ -80,7 +96,9 @@ export interface MentorDetail {
     categories: { key: string; name: string; weight: number; share: number; score: number | null;
       subs: { key: string; name: string; weight: number; share: number; score: number | null; kpis: KpiResult[] }[] }[];
   };
-  trend: { month: string; score: number | null; coverage: number; plan: string | null }[];
+  trend: { month: string; score: number | null; coverage: number; plan: string | null; frozen?: boolean }[];
+  snapshot: SnapshotRef | null;
+  corrections: Correction[];
 }
 
 /* ── Helpers ───────────────────────────────────────────────────────────────────────────────────────────────────── */
@@ -142,3 +160,6 @@ export function planShares(categories: PlanCategory[]) {
   });
 }
 export const pct1 = (v: number) => `${(Math.round(v * 10) / 10).toFixed(1)}%`;
+
+export const dubaiWhen = (iso: string | null) =>
+  iso ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)) : "—";

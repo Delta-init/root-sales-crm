@@ -1,13 +1,15 @@
 import { Types } from "mongoose";
 import { MentorKpiPlan, type IMentorKpiPlan } from "../models/MentorKpiPlan.js";
+import { MentorKpiSnapshot, type IMentorKpiSnapshot } from "../models/MentorKpiSnapshot.js";
+import { MentorKpiCorrection, type IMentorKpiCorrection } from "../models/MentorKpiCorrection.js";
 import { mentorReport } from "./cseService.js";
 import {
-  DEFAULT_CATEGORIES, KPI_ROLES, METRICS, ROLE_LABELS, SOURCE_LABELS, emptyTargets,
+  DEFAULT_CATEGORIES, KPI_ROLES, METRICS, METRIC_BY_KEY, ROLE_LABELS, SOURCE_LABELS, emptyTargets,
   type FeedRow, type KpiSource, type MentorTarget, type PlanCategory, type RoleTargets,
 } from "./mentorKpiMetrics.js";
 import {
   STATUS_LABELS, monthElapsed, planMetrics, planProblems, planShares, scoreMentor, targetsFromHistory,
-  type MentorResult, type SourceState,
+  type Adjustment, type MentorResult, type SourceState,
 } from "./mentorKpiScoring.js";
 
 /*
@@ -49,18 +51,28 @@ interface Feed { rows: FeedRow[]; sources: Record<KpiSource, SourceState>; to: s
 const cache = new Map<string, Feed>();
 const inFlight = new Map<string, Promise<Feed>>();
 
-/** A finished month is kept 6 hours, the current one 10 minutes. */
-const fresh = (f: Feed, month: string) => Date.now() - f.at < (month < currentMonth() ? 6 * 3_600_000 : 10 * 60_000);
+/** When a Dubai month ends, as an instant. */
+const monthEnds = (month: string) => {
+  const [y, m] = month.split("-").map(Number);
+  return Date.UTC(y!, m!, 1) - 4 * 3_600_000;
+};
+
+/**
+ * The current month is kept 10 minutes; a finished one 6 hours — but only a copy read after it ended (one read on its
+ * last day misses that evening).
+ */
+const fresh = (f: Feed, month: string) =>
+  month < currentMonth() ? f.at >= monthEnds(month) && Date.now() - f.at < 6 * 3_600_000 : Date.now() - f.at < 10 * 60_000;
 
 export function forgetFeeds() {
   cache.clear();
 }
 
-async function feed(month: string): Promise<Feed> {
+async function feed(month: string, force = false): Promise<Feed> {
   const hit = cache.get(month);
-  if (hit && fresh(hit, month)) return hit;
+  if (hit && !force && fresh(hit, month)) return hit;
   const running = inFlight.get(month);
-  if (running) return running;
+  if (running && !force) return running;
   const today = dubaiToday();
   const to = month === today.slice(0, 7) ? today : lastDay(month);
   const p = (async () => {
@@ -233,47 +245,90 @@ export async function discardDraft() {
   return { from: d.from };
 }
 
-/* ── Scores ────────────────────────────────────────────────────────────────────────────────────────────────────── */
+/* ── Scores: live for the current month, frozen for a finished one ─────────────────────────────────────────────── */
 
 const checkMonth = (month: string) => {
   if (month < FIRST_MONTH) throw httpError(`Scores start from ${FIRST_MONTH}`, 400);
   if (month > currentMonth()) throw httpError("That month hasn't started", 400);
 };
 
-async function scoreMonth(month: string) {
-  checkMonth(month);
-  const plan = await planFor(month);
-  if (!plan) return { month, plan: null, mentors: [] as MentorResult[], sources: null, elapsed: 0, to: null };
-  const f = await feed(month);
-  const elapsed = monthElapsed(month, dubaiToday());
-  const ctx = {
-    categories: plan.categories,
-    targets: { ...emptyTargets(), ...(plan.targets ?? {}) },
-    overrides: plan.overrides ?? [],
-    sources: f.sources,
-    elapsed,
-  };
-  const mentors = f.rows.map((r) => scoreMentor(r, ctx)).sort(
-    (a, b) => (b.score ?? -1) - (a.score ?? -1) || b.coverage - a.coverage || a.name.localeCompare(b.name),
-  );
-  return { month, plan, mentors, sources: f.sources, elapsed, to: f.to };
+interface PlanLike { _id?: unknown; id?: string; from: string; approvedBy?: { email?: string } | string | null; approvedAt?: Date | string | null; categories: PlanCategory[]; targets: RoleTargets; overrides: MentorTarget[] }
+const planRef = (p: PlanLike) => ({
+  id: String(p.id ?? p._id), from: p.from,
+  approvedBy: typeof p.approvedBy === "string" ? p.approvedBy : p.approvedBy?.email ?? "",
+  approvedAt: p.approvedAt ?? null,
+});
+const contextOf = (plan: PlanLike, sources: Record<KpiSource, SourceState>, elapsed: number, adjust?: Map<string, Map<string, Adjustment>>) => ({
+  categories: plan.categories,
+  targets: { ...emptyTargets(), ...(plan.targets ?? {}) },
+  overrides: plan.overrides ?? [],
+  sources,
+  elapsed,
+  adjust,
+});
+const rank = (mentors: MentorResult[]) =>
+  mentors.sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || b.coverage - a.coverage || a.name.localeCompare(b.name));
+
+interface MonthView {
+  month: string;
+  plan: (ReturnType<typeof planRef> & { categories: PlanCategory[] }) | null;
+  mentors: MentorResult[];
+  sources: Record<KpiSource, SourceState> | null;
+  elapsed: number;
+  to: string | null;
+  snapshot: { version: number; frozenAt: Date; frozenBy: string; reason: string } | null;
+  freezable: boolean;
 }
 
-const planSummary = (p: IMentorKpiPlan) => ({
-  id: String(p._id), from: p.from, approvedBy: p.approvedBy?.email ?? "", approvedAt: p.approvedAt,
-});
+/** Worked out now from CS Portal's report, with the plan approved for the month. */
+async function liveMonth(month: string, force = false): Promise<MonthView> {
+  const plan = await planFor(month);
+  if (!plan) return { month, plan: null, mentors: [], sources: null, elapsed: 0, to: null, snapshot: null, freezable: false };
+  const f = await feed(month, force);
+  const elapsed = monthElapsed(month, dubaiToday());
+  const mentors = rank(f.rows.map((r) => scoreMentor(r, contextOf(plan, f.sources, elapsed))));
+  return {
+    month, plan: { ...planRef(plan), categories: plan.categories }, mentors, sources: f.sources, elapsed, to: f.to,
+    snapshot: null, freezable: month < currentMonth(),
+  };
+}
+
+const currentSnapshot = (month: string) =>
+  MentorKpiSnapshot.findOne({ month, current: true }).lean<IMentorKpiSnapshot>();
+
+/** A month as it stands: its frozen version once there is one, else live. */
+async function monthView(month: string): Promise<MonthView> {
+  checkMonth(month);
+  const snap = await currentSnapshot(month);
+  if (!snap) return liveMonth(month);
+  const plan = snap.plan as PlanLike & { id: string };
+  return {
+    month,
+    plan: { ...planRef(plan), categories: plan.categories },
+    mentors: snap.mentors as MentorResult[],
+    sources: snap.sources as Record<KpiSource, SourceState>,
+    elapsed: 1,
+    to: lastDay(month),
+    snapshot: { version: snap.version, frozenAt: snap.createdAt, frozenBy: snap.frozenBy, reason: snap.reason },
+    freezable: false,
+  };
+}
 
 /** Every mentor's month: the ranking, each with their total, coverage and the systems that knew them. */
 export async function scores(month: string) {
-  const s = await scoreMonth(month);
-  if (!s.plan) return { month, plan: null, mentors: [], sources: null, elapsed: 0, to: null, categories: [], statusLabels: STATUS_LABELS };
+  const s = await monthView(month);
+  const pending = await MentorKpiCorrection.countDocuments({ month, status: "pending" });
+  if (!s.plan) return { month, plan: null, mentors: [], sources: null, elapsed: 0, to: null, categories: [], statusLabels: STATUS_LABELS, snapshot: null, freezable: false, pendingCorrections: pending };
   const shares = planShares(s.plan.categories);
   return {
     month,
-    plan: planSummary(s.plan),
+    plan: { id: s.plan.id, from: s.plan.from, approvedBy: s.plan.approvedBy, approvedAt: s.plan.approvedAt },
     elapsed: Math.round(s.elapsed * 100),
     to: s.to,
     sources: s.sources,
+    snapshot: s.snapshot,
+    freezable: s.freezable,
+    pendingCorrections: pending,
     categories: s.plan.categories.map((c, i) => ({ key: c.key, name: c.name, share: shares[i]!.share })),
     statusLabels: STATUS_LABELS,
     mentors: s.mentors.map((m, i) => ({
@@ -285,10 +340,17 @@ export async function scores(month: string) {
   };
 }
 
-/** One mentor: every KPI against its target, and their last three months. */
+const correctionDTO = (c: IMentorKpiCorrection) => ({
+  id: String(c._id), month: c.month, email: c.email, name: c.name, metric: c.metric, metricName: c.metricName,
+  action: c.action, value: c.value, was: c.was, reason: c.reason, evidence: c.evidence, status: c.status,
+  raisedBy: c.raisedBy, raisedAt: c.createdAt, decidedBy: c.decidedBy, decidedAt: c.decidedAt, decisionNote: c.decisionNote,
+  version: c.version,
+});
+
+/** One mentor: every KPI against its target, their last three months, and the corrections asked for this month. */
 export async function mentorScores(email: string, month: string) {
   const who = email.trim().toLowerCase();
-  const s = await scoreMonth(month);
+  const s = await monthView(month);
   if (!s.plan) throw httpError("No approved plan covers that month", 404);
   const mine = s.mentors.find((m) => m.email === who);
   if (!mine) throw httpError("No such mentor in CS Portal's mentor report for that month", 404);
@@ -296,16 +358,187 @@ export async function mentorScores(email: string, month: string) {
   for (const m of [addMonths(month, -2), addMonths(month, -1)]) {
     if (m < FIRST_MONTH) continue;
     try {
-      const other = await scoreMonth(m);
+      const other = await monthView(m);
       const r = other.mentors.find((x) => x.email === who);
-      trend.push({ month: m, score: r?.score ?? null, coverage: r?.coverage ?? 0, plan: other.plan ? other.plan.from : null });
+      trend.push({ month: m, score: r?.score ?? null, coverage: r?.coverage ?? 0, plan: other.plan ? other.plan.from : null, frozen: !!other.snapshot });
     } catch {
-      trend.push({ month: m, score: null, coverage: 0, plan: null });
+      trend.push({ month: m, score: null, coverage: 0, plan: null, frozen: false });
     }
   }
-  trend.push({ month, score: mine.score, coverage: mine.coverage, plan: s.plan.from });
+  trend.push({ month, score: mine.score, coverage: mine.coverage, plan: s.plan.from, frozen: !!s.snapshot });
+  const corrections = await MentorKpiCorrection.find({ month, email: who }).sort({ createdAt: -1 }).lean<IMentorKpiCorrection[]>();
   return {
-    month, plan: planSummary(s.plan), elapsed: Math.round(s.elapsed * 100), to: s.to, sources: s.sources,
-    statusLabels: STATUS_LABELS, mentor: mine, trend,
+    month, plan: { id: s.plan.id, from: s.plan.from, approvedBy: s.plan.approvedBy, approvedAt: s.plan.approvedAt },
+    elapsed: Math.round(s.elapsed * 100), to: s.to, sources: s.sources, snapshot: s.snapshot,
+    statusLabels: STATUS_LABELS, mentor: mine, trend, corrections: corrections.map(correctionDTO),
   };
+}
+
+/* ── Freezing a finished month ─────────────────────────────────────────────────────────────────────────────────── */
+
+const versionDTO = (v: IMentorKpiSnapshot) => ({
+  version: v.version, current: v.current, frozenAt: v.createdAt, frozenBy: v.frozenBy, reason: v.reason,
+  corrections: v.corrections.length, plan: (v.plan as { from: string }).from,
+});
+
+export async function snapshots(month: string) {
+  checkMonth(month);
+  const list = await MentorKpiSnapshot.find({ month }).select("-rows -mentors").sort({ version: -1 }).lean<IMentorKpiSnapshot[]>();
+  return list.map(versionDTO);
+}
+
+/**
+ * Freeze a finished month as version 1: CS Portal's report read again, then scored with the plan approved for it.
+ * Automatic on the 1st (`by` "automatic"), or a root admin's "Freeze now". Refused if it already has a version.
+ */
+export async function freezeMonth(month: string, by: string, opts: { requireAllSources?: boolean } = {}) {
+  checkMonth(month);
+  if (month >= currentMonth()) throw httpError("Only a finished month can be frozen", 400);
+  if (await MentorKpiSnapshot.exists({ month })) throw httpError(`${month} is already frozen — a figure changes only through a correction`, 409);
+  const plan = await planFor(month);
+  if (!plan) throw httpError("No approved plan covers that month", 404);
+  const f = await feed(month, true);
+  const down = (Object.keys(f.sources) as KpiSource[]).filter((k) => !f.sources[k].available);
+  if (opts.requireAllSources && down.length) {
+    throw httpError(`Not frozen yet: ${down.map((k) => SOURCE_LABELS[k]).join(" and ")} didn't answer`, 503);
+  }
+  const mentors = rank(f.rows.map((r) => scoreMentor(r, contextOf(plan, f.sources, 1))));
+  try {
+    const snap = await MentorKpiSnapshot.create({
+      month, version: 1, current: true,
+      plan: { id: String(plan._id), from: plan.from, approvedBy: plan.approvedBy?.email ?? "", approvedAt: plan.approvedAt, categories: plan.categories, targets: plan.targets, overrides: plan.overrides },
+      sources: f.sources, rows: f.rows, mentors, corrections: [], frozenBy: by,
+      reason: by === "automatic" ? "Frozen on the 1st" : "Frozen by hand",
+    });
+    return versionDTO(snap.toObject() as IMentorKpiSnapshot);
+  } catch (error) {
+    if ((error as { code?: number }).code === 11000) throw httpError(`${month} is already frozen`, 409);
+    throw error;
+  }
+}
+
+/**
+ * On the 1st (from 03:00 Dubai, after the backups), last month is frozen — once every system answers, or on the 4th
+ * whatever answered then. Checked every 30 minutes, so a server that was down on the 1st catches up. One process:
+ * MENTOR_KPI_WORKER=false on any other. The unique version keeps two from freezing it twice.
+ */
+export async function autoFreeze(at = new Date()): Promise<string> {
+  const dubai = new Date(at.getTime() + 4 * 3_600_000);
+  if (dubai.getUTCDate() === 1 && dubai.getUTCHours() < 3) return "too early";
+  const month = addMonths(currentMonth(), -1);
+  if (month < FIRST_MONTH) return "nothing to freeze";
+  if (await MentorKpiSnapshot.exists({ month })) return "already frozen";
+  if (!(await planFor(month))) return "no plan";
+  const v = await freezeMonth(month, "automatic", { requireAllSources: dubai.getUTCDate() < 4 });
+  return `${month} frozen as version ${v.version}`;
+}
+
+export function startMentorKpiWorker() {
+  if (process.env.MENTOR_KPI_WORKER === "false") return;
+  const tick = async () => {
+    try {
+      const out = await autoFreeze();
+      if (/frozen as/.test(out)) console.log(`📊 mentor KPIs: ${out}`);
+    } catch (e) {
+      const status = (e as { statusCode?: number }).statusCode;
+      if (status !== 409) console.error("📊 mentor KPIs: freezing last month failed —", e instanceof Error ? e.message : e);
+    }
+  };
+  setTimeout(tick, 60_000).unref?.();
+  setInterval(tick, 30 * 60_000).unref?.();
+}
+
+/* ── Corrections ───────────────────────────────────────────────────────────────────────────────────────────────── */
+
+export async function listCorrections(q: { status?: string; month?: string }) {
+  const filter: Record<string, unknown> = {};
+  if (q.status === "pending") filter.status = "pending";
+  else if (q.status === "decided") filter.status = { $in: ["approved", "rejected"] };
+  if (q.month && validKpiMonth(q.month)) filter.month = q.month;
+  const rows = await MentorKpiCorrection.find(filter).sort({ createdAt: -1 }).limit(300).lean<IMentorKpiCorrection[]>();
+  return rows.map(correctionDTO);
+}
+
+/** Ask for a correction to a frozen month: one mentor, one KPI, the right value or leave it out — with why. */
+export async function raiseCorrection(
+  by: { source: "root" | "cs_portal"; email: string; name: string },
+  body: { month: string; email: string; metric: string; action: "set_value" | "leave_out"; value?: number | null; reason: string; evidence?: string },
+) {
+  const snap = await currentSnapshot(body.month);
+  if (!snap) throw httpError("Only a frozen month can be corrected — this month's figures still move with the systems", 409);
+  const who = body.email.trim().toLowerCase();
+  const mentor = (snap.mentors as MentorResult[]).find((m) => m.email === who);
+  if (!mentor) throw httpError("No such mentor in that month", 404);
+  const kpi = mentor.categories.flatMap((c) => c.subs.flatMap((s) => s.kpis)).find((k) => k.metric === body.metric);
+  if (!kpi) throw httpError("That KPI isn't in the month's plan for them", 404);
+  const m = METRIC_BY_KEY.get(body.metric);
+  if (!m?.available) throw httpError(`${m?.name ?? body.metric} isn't measured yet — nothing to correct`, 400);
+  if (body.action === "set_value" && (typeof body.value !== "number" || !Number.isFinite(body.value) || body.value < 0)) {
+    throw httpError("Give the right value (0 or more)", 400);
+  }
+  if (!body.reason.trim()) throw httpError("Say why", 400);
+  try {
+    const c = await MentorKpiCorrection.create({
+      month: body.month, email: who, name: mentor.name, metric: body.metric, metricName: m.name,
+      action: body.action, value: body.action === "set_value" ? body.value : null,
+      was: { value: kpi.value, score: kpi.score, status: kpi.status, version: snap.version },
+      reason: body.reason.trim(), evidence: (body.evidence ?? "").trim(), raisedBy: by,
+    });
+    return correctionDTO(c.toObject() as IMentorKpiCorrection);
+  } catch (error) {
+    if ((error as { code?: number }).code === 11000) throw httpError(`There is already an open correction for ${m.name} for them in ${body.month}`, 409);
+    throw error;
+  }
+}
+
+/**
+ * Approve: the month's next version — the frozen inputs re-scored with every approved correction for the month,
+ * this one included. The version before is kept, marked replaced.
+ */
+export async function approveCorrection(id: string, by: string, note: string) {
+  const c = await MentorKpiCorrection.findById(id);
+  if (!c) throw httpError("No such correction", 404);
+  if (c.status !== "pending") throw httpError(`It was already ${c.status}`, 409);
+  const snap = await currentSnapshot(c.month);
+  if (!snap) throw httpError("The month isn't frozen", 409);
+  const approved = await MentorKpiCorrection.find({ month: c.month, status: "approved" }).sort({ decidedAt: 1 }).lean<IMentorKpiCorrection[]>();
+  const adjust = new Map<string, Map<string, Adjustment>>();
+  for (const x of [...approved, c.toObject() as IMentorKpiCorrection]) {
+    const mine = adjust.get(x.email) ?? new Map<string, Adjustment>();
+    mine.set(x.metric, { action: x.action, value: x.value, reason: x.reason });
+    adjust.set(x.email, mine);
+  }
+  const plan = snap.plan as PlanLike;
+  const sources = snap.sources as Record<KpiSource, SourceState>;
+  const mentors = rank((snap.rows as FeedRow[]).map((r) => scoreMentor(r, contextOf(plan, sources, 1, adjust))));
+  const version = snap.version + 1;
+  // Claim the version first (unique month + version): two approvals at once can't both make version N.
+  const next = await MentorKpiSnapshot.create({
+    month: c.month, version, current: false, plan: snap.plan, sources: snap.sources, rows: snap.rows, mentors,
+    corrections: [...approved.map((x) => x._id), c._id], frozenBy: by,
+    reason: `Correction: ${c.name} — ${c.metricName} (${c.action === "leave_out" ? "left out" : `set to ${c.value}`})`,
+  }).catch((error) => {
+    if ((error as { code?: number }).code === 11000) throw httpError("Another correction was approved at the same moment — try again", 409);
+    throw error;
+  });
+  await MentorKpiSnapshot.updateMany({ month: c.month, _id: { $ne: next._id } }, { $set: { current: false } });
+  await MentorKpiSnapshot.updateOne({ _id: next._id }, { $set: { current: true } });
+  c.status = "approved";
+  c.decidedBy = by;
+  c.decidedAt = new Date();
+  c.decisionNote = note.trim();
+  c.version = version;
+  await c.save();
+  return correctionDTO(c.toObject() as IMentorKpiCorrection);
+}
+
+export async function rejectCorrection(id: string, by: string, note: string) {
+  if (!note.trim()) throw httpError("Say why it's rejected", 400);
+  const c = await MentorKpiCorrection.findOneAndUpdate(
+    { _id: id, status: "pending" },
+    { $set: { status: "rejected", decidedBy: by, decidedAt: new Date(), decisionNote: note.trim() } },
+    { new: true },
+  ).lean<IMentorKpiCorrection>();
+  if (!c) throw httpError("No such open correction", 404);
+  return correctionDTO(c);
 }

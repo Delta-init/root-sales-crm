@@ -11,6 +11,9 @@
  *   Case 4  scores       a month scored with the version in force for it, ranking, sources, one mentor with a trend;
  *                        a newer version from the same month replaces the older; a month before any plan has none
  *   Case 5  permission   no session → 401, an admin who is not a root admin → 403
+ *   Case 6  frozen       last month frozen on the 1st (after 03:00, every system answering), once; it no longer moves;
+ *                        a correction (the right value, or leave it out) asked, approved → the next version re-scored
+ *                        from the frozen inputs, or rejected with a reason; every version kept; all recorded
  *
  * Run through scripts/mentor-kpi-check.sh. Scratch database on 127.0.0.1 only; CS Portal is a fake served here.
  */
@@ -296,6 +299,68 @@ async function main() {
   res = await call("GET", `/mentor-kpis/scores?month=${M4}`, root);
   const b2 = res.body.data.mentors?.find((m: Json) => m.email === "bilal@kpi-e2e.test");
   check("the LMS down: its KPIs left out, the HRMS ones still score", res.body.data.sources?.lms?.available === false && b2?.quality.lms === "unavailable" && b2.score === 100 && b2.coverage === 40, show(b2));
+
+  step("Case 6 — a finished month frozen, and corrections");
+  res = await call("GET", `/mentor-kpis/scores?month=${M1}`, root);
+  check("last month before it is frozen: live, and it can be frozen", res.body.data.snapshot === null && res.body.data.freezable === true, show({ s: res.body.data.snapshot, f: res.body.data.freezable }));
+  const { autoFreeze } = await import("../services/mentorKpiService.js");
+  const first = new Date(`${MONTH}-01T00:00:00+04:00`);
+  check("on the 1st before 03:00 Dubai: not yet", (await autoFreeze(new Date(first.getTime() + 2 * 3_600_000))) === "too early");
+  let outcome = "";
+  try { outcome = await autoFreeze(new Date(first.getTime() + 5 * 3_600_000)); } catch (e) { outcome = (e as Error).message; }
+  check("…after 03:00 with the LMS not answering: waits (until the 4th)", /didn't answer/.test(outcome) && !(await mongoose.connection.db!.collection("mentorkpisnapshots").countDocuments()), outcome);
+  lmsDown = false;
+  outcome = await autoFreeze(new Date(first.getTime() + 5 * 3_600_000));
+  check("…every system answering: last month frozen as version 1", outcome === `${M1} frozen as version 1`, outcome);
+  check("…and only once", (await autoFreeze(new Date(first.getTime() + 6 * 3_600_000))) === "already frozen");
+  // The LMS changes its mind about last month afterwards: Bilal's late clock-ins.
+  HISTORY[M1]!.find((r) => r.email === "bilal@kpi-e2e.test")!.total.lateClockIns = 5;
+  res = await call("GET", `/mentor-kpis/scores?month=${M1}`, root);
+  let bil = res.body.data.mentors.find((m: Json) => m.email === "bilal@kpi-e2e.test");
+  check("the frozen month doesn't move when the systems change later", res.body.data.snapshot?.version === 1 && res.body.data.snapshot.frozenBy === "automatic" && bil?.score === 100, show({ s: res.body.data.snapshot, b: bil?.score }));
+  check("freezing it again → 409; this month can't be frozen → 400",
+    (await call("POST", "/mentor-kpis/snapshots/freeze", root, { month: M1 })).status === 409 && (await call("POST", "/mentor-kpis/snapshots/freeze", root, { month: MONTH })).status === 400);
+
+  const ask = (body: Json, who = root) => call("POST", "/mentor-kpis/corrections", who, { month: M1, email: "bilal@kpi-e2e.test", ...body });
+  check("a correction to this month (not frozen) → 409", (await ask({ month: MONTH, metric: "classes_held", action: "set_value", value: 20, reason: "x" })).status === 409);
+  check("…to a KPI not in that month's plan → 404, without a reason → 400, from a member → 403",
+    (await ask({ metric: "verified_collections", action: "leave_out", reason: "x" })).status === 404
+    && (await ask({ metric: "classes_held", action: "set_value", value: 20, reason: "" })).status === 400
+    && (await ask({ metric: "classes_held", action: "set_value", value: 20, reason: "x" }, member)).status === 403);
+  res = await ask({ metric: "classes_held", action: "set_value", value: 20, reason: "Two classes were logged twice", evidence: "LMS class list" });
+  const c1 = res.body.data;
+  check("asked: Bilal's classes held should be 20, not 34 — pending, with what the frozen version showed",
+    res.status === 201 && c1.status === "pending" && c1.was.value === 34 && c1.was.version === 1 && c1.raisedBy.source === "root", show(c1));
+  check("one open correction per mentor, month and KPI", (await ask({ metric: "classes_held", action: "set_value", value: 21, reason: "again" })).status === 409);
+  res = await call("POST", `/mentor-kpis/corrections/${c1.id}/approve`, root, { note: "Checked the class list" });
+  check("approved → version 2", res.status === 200 && res.body.data.status === "approved" && res.body.data.version === 2, show(res.body));
+  res = await call("GET", `/mentor-kpis/scores?month=${M1}`, root);
+  bil = res.body.data.mentors.find((m: Json) => m.email === "bilal@kpi-e2e.test");
+  // 20 against 40 × 17/22 = 30.9 → 64.7; on time 100 → A1 82.4; rating too few; B 100 → (60 × 82.4 + 40 × 100) / 100 = 89.4.
+  check("…re-scored from the frozen inputs: 20 of 30.9 → 89.4 overall (the LMS's later change still not in it)", res.body.data.snapshot.version === 2 && bil?.score === 89.4, show(bil));
+  res = await call("GET", `/mentor-kpis/scores/mentor?email=bilal@kpi-e2e.test&month=${M1}`, root);
+  const cls = res.body.data.mentor.categories.flatMap((c: Json) => c.subs.flatMap((s: Json) => s.kpis)).find((k: Json) => k.metric === "classes_held");
+  check("…the KPI says it was corrected, from 34, and why", cls?.value === 20 && cls.corrected?.was === 34 && /logged twice/.test(cls.corrected.reason) && res.body.data.corrections.length === 1, show(cls));
+
+  res = await ask({ metric: "on_time_start", action: "leave_out", reason: "Join links were down that week" });
+  const c2 = res.body.data;
+  check("rejecting needs a reason", (await call("POST", `/mentor-kpis/corrections/${c2.id}/reject`, root, { note: "" })).status === 400);
+  res = await call("POST", `/mentor-kpis/corrections/${c2.id}/reject`, root, { note: "The links worked; the joins are right" });
+  check("rejected: no new version", res.body.data.status === "rejected" && (await call("GET", `/mentor-kpis/snapshots?month=${M1}`, root)).body.data.length === 2);
+  check("a decided one can't be decided again", (await call("POST", `/mentor-kpis/corrections/${c2.id}/approve`, root, {})).status === 409);
+  res = await ask({ metric: "on_time_start", action: "leave_out", reason: "Join tracking was off for the month" });
+  await call("POST", `/mentor-kpis/corrections/${res.body.data.id}/approve`, root, { note: "" });
+  res = await call("GET", `/mentor-kpis/scores?month=${M1}`, root);
+  bil = res.body.data.mentors.find((m: Json) => m.email === "bilal@kpi-e2e.test");
+  // Both approved corrections: classes 64.7 is all of A1 → A 64.7; B 100 → 78.8; on time left out.
+  check("version 3 carries both approved corrections: 78.8, on-time start left out", res.body.data.snapshot.version === 3 && bil?.score === 78.8, show(bil));
+  const versions = (await call("GET", `/mentor-kpis/snapshots?month=${M1}`, root)).body.data;
+  check("every version kept, the latest current, each saying why",
+    versions.map((v: Json) => `${v.version}${v.current ? "*" : ""}`).join() === "3*,2,1" && /Correction: Bilal Test — Classes held/.test(versions[1].reason) && versions[2].reason === "Frozen on the 1st", show(versions));
+  res = await call("GET", "/mentor-kpis/corrections?status=decided", root);
+  check("the decided list: two approved, one rejected", res.body.data.length === 3 && res.body.data.filter((c: Json) => c.status === "approved").length === 2);
+  const trail = await mongoose.connection.db!.collection("auditlogs").countDocuments({ action: { $in: ["mentor_kpi_correction_raised", "mentor_kpi_correction_decided"] } });
+  check("asked and decided, each recorded", trail === 6, String(trail));
 
   fake.close();
   await mongoose.disconnect();

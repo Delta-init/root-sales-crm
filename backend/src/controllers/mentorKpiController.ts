@@ -1,7 +1,8 @@
 import type { Response, NextFunction } from "express";
 import { z } from "zod";
 import {
-  approveDraft, currentMonth, discardDraft, mentorScores, overview, saveDraft, scores, startDraft, suggestTargets, validKpiMonth,
+  approveCorrection, approveDraft, currentMonth, discardDraft, freezeMonth, listCorrections, mentorScores, overview, raiseCorrection,
+  rejectCorrection, saveDraft, scores, snapshots, startDraft, suggestTargets, validKpiMonth,
 } from "../services/mentorKpiService.js";
 import { record } from "../services/auditService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
@@ -106,3 +107,69 @@ export const getMentorScores = handle(async (req, res) => {
   }
   sendSuccess(res, "Mentor's scores", await mentorScores(email, month));
 });
+
+/* ── Frozen months and corrections (2026-11-09) ─────────────────────────────────────────────────────────────────── */
+
+const ID = /^[0-9a-f]{24}$/i;
+
+export const getSnapshots = handle(async (req, res) => {
+  const month = req.query.month;
+  if (!validKpiMonth(month)) {
+    sendError(res, "month is YYYY-MM", 400);
+    return;
+  }
+  sendSuccess(res, "Versions", await snapshots(month));
+});
+
+export const postFreeze = handle(async (req, res) => {
+  const month = (req.body ?? {}).month;
+  if (!validKpiMonth(month)) {
+    sendError(res, "month is YYYY-MM", 400);
+    return;
+  }
+  const v = await freezeMonth(month, req.admin!.email);
+  await record(req, "mentor_kpi_frozen", { adminId: req.admin!.adminId, adminEmail: req.admin!.email, detail: `${month} frozen by hand` });
+  sendSuccess(res, "Month frozen", v, 201);
+});
+
+export const getCorrections = handle(async (req, res) => {
+  sendSuccess(res, "Corrections", await listCorrections({ status: String(req.query.status ?? ""), month: String(req.query.month ?? "") }));
+});
+
+const correctionSchema = z.object({
+  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "month is YYYY-MM"),
+  email: z.string().trim().email().max(200),
+  metric: z.string().min(1).max(60),
+  action: z.enum(["set_value", "leave_out"]),
+  value: z.number().finite().min(0).max(10_000_000).nullable().optional(),
+  reason: z.string().trim().min(1, "Say why").max(500),
+  evidence: z.string().max(2000).default(""),
+});
+
+export const postCorrection = handle(async (req, res) => {
+  const parsed = correctionSchema.safeParse(req.body);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0]!;
+    sendError(res, `${issue.path.join(".") || "correction"}: ${issue.message}`, 400);
+    return;
+  }
+  const c = await raiseCorrection({ source: "root", email: req.admin!.email, name: req.admin!.email }, parsed.data);
+  await record(req, "mentor_kpi_correction_raised", { adminId: req.admin!.adminId, adminEmail: req.admin!.email, detail: `${c.month} ${c.email} ${c.metric}: ${c.reason}` });
+  sendSuccess(res, "Correction asked for", c, 201);
+});
+
+const decide = (approve: boolean) => handle(async (req, res) => {
+  if (!ID.test(req.params.id ?? "")) {
+    sendError(res, "No such correction", 404);
+    return;
+  }
+  const note = String((req.body ?? {}).note ?? "").slice(0, 500);
+  const c = approve ? await approveCorrection(req.params.id!, req.admin!.email, note) : await rejectCorrection(req.params.id!, req.admin!.email, note);
+  await record(req, "mentor_kpi_correction_decided", {
+    adminId: req.admin!.adminId, adminEmail: req.admin!.email,
+    detail: `${c.status}: ${c.month} ${c.email} ${c.metric}${c.version ? ` → version ${c.version}` : ""}${note ? ` (${note})` : ""}`,
+  });
+  sendSuccess(res, approve ? "Correction approved" : "Correction rejected", c);
+});
+export const postApproveCorrection = decide(true);
+export const postRejectCorrection = decide(false);

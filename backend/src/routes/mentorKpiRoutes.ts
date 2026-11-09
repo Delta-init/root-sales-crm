@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
-  deleteDraft, getMentorScores, getPlans, getScores, postApprove, postDraft, postSuggest, putDraft,
+  deleteDraft, getCorrections, getMentorScores, getPlans, getScores, getSnapshots, postApprove, postApproveCorrection, postCorrection,
+  postDraft, postFreeze, postRejectCorrection, postSuggest, putDraft,
 } from "../controllers/mentorKpiController.js";
 import { authenticate, requireRole } from "../middleware/auth.js";
 
@@ -22,5 +23,12 @@ router.post("/plans/draft/suggest-targets", postSuggest);
 router.post("/plans/draft/approve", postApprove);
 router.get("/scores", getScores);
 router.get("/scores/mentor", getMentorScores);
+// A finished month frozen (automatically on the 1st, or by hand), its versions, and the corrections that make new ones.
+router.get("/snapshots", getSnapshots);
+router.post("/snapshots/freeze", postFreeze);
+router.get("/corrections", getCorrections);
+router.post("/corrections", postCorrection);
+router.post("/corrections/:id/approve", postApproveCorrection);
+router.post("/corrections/:id/reject", postRejectCorrection);
 
 export default router;

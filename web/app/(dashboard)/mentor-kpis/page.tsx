@@ -3,8 +3,9 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Download, Search } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { AlertTriangle, CheckCircle2, Download, Lock, Radio, Search } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api, apiErrorMessage } from "@/lib/axios";
 import { cn } from "@/lib/utils";
 import {
-  CATEGORY_COLOURS, QUALITY_LABEL, SOURCE_SHORT, dubaiMonth, fmtScore, monthLabel, scoreBar, scoreMonths, scoreTone,
+  CATEGORY_COLOURS, QUALITY_LABEL, SOURCE_SHORT, dubaiMonth, dubaiWhen, fmtScore, monthLabel, scoreBar, scoreMonths, scoreTone,
   type KpiSource, type ScoresAnswer, type ScoresRow,
 } from "@/components/mentor-kpis/types";
 
@@ -50,6 +51,7 @@ function csv(rows: ScoresRow[], cats: ScoresAnswer["categories"], month: string)
 
 export default function MentorKpiScoresPage() {
   const router = useRouter();
+  const qc = useQueryClient();
   const [month, setMonth] = useState(dubaiMonth());
   const [role, setRole] = useState("");
   const [search, setSearch] = useState("");
@@ -65,6 +67,11 @@ export default function MentorKpiScoresPage() {
       (!role || (role === "none" ? !m.role : m.role === role)) &&
       (!term || m.name.toLowerCase().includes(term) || m.email.includes(term)));
   }, [data, role, search]);
+  const freeze = useMutation({
+    mutationFn: async () => (await api.post("/mentor-kpis/snapshots/freeze", { month })).data.data,
+    onSuccess: () => { toast.success(`${monthLabel(month)} frozen as version 1`); qc.invalidateQueries({ queryKey: ["mentor-kpis"] }); },
+    onError: (e) => toast.error(apiErrorMessage(e, "Not frozen")),
+  });
   const scored = (data?.mentors ?? []).filter((m) => m.score != null);
   const avg = scored.length ? scored.reduce((a, m) => a + (m.score ?? 0), 0) / scored.length : null;
 
@@ -107,6 +114,37 @@ export default function MentorKpiScoresPage() {
         </Card>
       ) : (
         <>
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+            {data.snapshot ? (
+              <>
+                <Lock className="h-4 w-4 text-primary" />
+                <span>
+                  Frozen — version {data.snapshot.version}, {dubaiWhen(data.snapshot.frozenAt)}
+                  {data.snapshot.frozenBy === "automatic" ? " (on the 1st)" : ` by ${data.snapshot.frozenBy}`}. {data.snapshot.reason}.
+                </span>
+                <span className="text-muted-foreground">Figures change only through an approved correction.</span>
+              </>
+            ) : data.freezable ? (
+              <>
+                <AlertTriangle className="h-4 w-4 text-amber-500" />
+                <span>Finished, not frozen yet — still worked out live. It freezes by itself on the 1st once every system answers.</span>
+                <Button size="sm" variant="outline" disabled={freeze.isPending}
+                  onClick={() => { if (confirm(`Freeze ${monthLabel(month)} now? From then on its figures change only through corrections.`)) freeze.mutate(); }}>
+                  <Lock className="mr-1.5 h-4 w-4" />Freeze now
+                </Button>
+              </>
+            ) : (
+              <>
+                <Radio className="h-4 w-4 text-emerald-500" />
+                <span>Live — this month, worked out from what the systems send now. It freezes on the 1st.</span>
+              </>
+            )}
+            {data.pendingCorrections > 0 && (
+              <Link href="/mentor-kpis/corrections" className="ml-auto text-primary underline-offset-2 hover:underline">
+                {data.pendingCorrections} correction{data.pendingCorrections === 1 ? "" : "s"} waiting
+              </Link>
+            )}
+          </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Stat label="Mentors ranked" value={`${scored.length}`} sub={`of ${data.mentors.length} in CS Portal's report`} />
             <Stat label="Average score" value={fmtScore(avg)} sub={data.elapsed < 100 ? `${data.elapsed}% of the month gone — counts pro-rated` : "Whole month"} />

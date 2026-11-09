@@ -204,6 +204,10 @@ export type AuditAction =
   // The mentor KPI plan kept in Root: a draft changed, and a version approved (2026-11-09).
   | "mentor_kpi_plan_changed"
   | "mentor_kpi_plan_approved"
+  // A finished month frozen by hand, and the corrections asked for and decided.
+  | "mentor_kpi_frozen"
+  | "mentor_kpi_correction_raised"
+  | "mentor_kpi_correction_decided"
   | "traffic_rules_changed"
   | "traffic_lead_retried"
   | "traffic_access_changed"

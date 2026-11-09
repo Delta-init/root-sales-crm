@@ -14,6 +14,8 @@ import { cn } from "@/lib/utils";
 const TABS = [
   { href: "/mentor-kpis", label: "Scores" },
   { href: "/mentor-kpis/plan", label: "Plan" },
+  // Corrections to frozen months, asked and decided (2026-11-09).
+  { href: "/mentor-kpis/corrections", label: "Corrections" },
 ];
 
 export default function MentorKpisLayout({ children }: { children: React.ReactNode }) {

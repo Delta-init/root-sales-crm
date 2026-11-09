@@ -69,6 +69,8 @@ export LMS_API_URL="" LMS_SSO_SECRET=""
 export COMMISSION_API_URL="http://127.0.0.1:$FAKE_PORT/api/v1" COMMISSION_SSO_SECRET="mentor-kpi-e2e-portal-secret"
 export FINANCE_HQ_API_URL="" FINANCE_HQ_SSO_SECRET=""
 export MEDIA_ERP_API_URL="" MEDIA_ERP_SSO_SECRET="" HRMS_SSO_SECRET=""
+# The driver freezes months itself (autoFreeze), so the server's own timer stays off.
+export MENTOR_KPI_WORKER=false
 export E2E_API_PORT="$API_PORT" E2E_FAKE_PORT="$FAKE_PORT" E2E_REPO="$REPO"
 
 # From the scratch directory, so dotenv finds no .env to fill the gaps with.

@@ -1,16 +1,21 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, ArrowDown, ArrowUp } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { AlertTriangle, ArrowLeft, ArrowDown, ArrowUp, Lock, Wrench } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, apiErrorMessage } from "@/lib/axios";
 import { cn } from "@/lib/utils";
 import {
-  CATEGORY_COLOURS, QUALITY_LABEL, SOURCE_SHORT, fmtScore, fmtValue, monthLabel, pct1, scoreBar, scoreMonths, scoreTone,
+  CATEGORY_COLOURS, QUALITY_LABEL, SOURCE_SHORT, dubaiWhen, fmtScore, fmtValue, monthLabel, pct1, scoreBar, scoreMonths, scoreTone,
   type KpiResult, type KpiSource, type MentorDetail,
 } from "@/components/mentor-kpis/types";
 
@@ -31,6 +36,7 @@ export default function MentorKpiDetailPage() {
     queryFn: async () => (await api.get("/mentor-kpis/scores/mentor", { params: { email, month } })).data.data as MentorDetail,
   });
   const d = q.data;
+  const [fixing, setFixing] = useState<KpiResult | null>(null);
 
   return (
     <div className="space-y-4">
@@ -74,6 +80,9 @@ export default function MentorKpiDetailPage() {
                   <p className={cn("text-4xl font-semibold tabular-nums", scoreTone(d.mentor.score))}>{fmtScore(d.mentor.score)}</p>
                   <p className="text-xs text-muted-foreground">
                     {monthLabel(month)} · {d.mentor.coverage}% of the plan scored{d.elapsed < 100 ? ` · ${d.elapsed}% of the month gone` : ""}
+                  </p>
+                  <p className="mt-1 flex items-center justify-end gap-1 text-xs text-muted-foreground">
+                    {d.snapshot ? <><Lock className="h-3 w-3" />Frozen, version {d.snapshot.version}</> : "Live — not frozen"}
                   </p>
                 </div>
               </CardContent>
@@ -130,7 +139,9 @@ export default function MentorKpiDetailPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {s.kpis.map((k) => <KpiRow key={k.metric} k={k} labels={d.statusLabels} />)}
+                          {s.kpis.map((k) => (
+                            <KpiRow key={k.metric} k={k} labels={d.statusLabels} onCorrect={d.snapshot && k.status !== "not_available" ? () => setFixing(k) : undefined} />
+                          ))}
                         </tbody>
                       </table>
                     </div>
@@ -139,13 +150,88 @@ export default function MentorKpiDetailPage() {
               </CardContent>
             </Card>
           ))}
+
+          <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-base">Corrections for {monthLabel(month)}</CardTitle></CardHeader>
+            <CardContent className="space-y-2 text-sm">
+              {!d.snapshot && <p className="text-muted-foreground">This month is still live — its figures follow the systems. Corrections are for a frozen month.</p>}
+              {d.snapshot && !d.corrections.length && <p className="text-muted-foreground">None asked. Use &ldquo;Correct&rdquo; on a KPI to ask for one.</p>}
+              {d.corrections.map((c) => (
+                <div key={c.id} className="flex flex-wrap items-start gap-2 border-t pt-2">
+                  <Badge variant={c.status === "approved" ? "success" : c.status === "rejected" ? "destructive" : "warning"}>
+                    {c.status === "approved" ? `Approved → v${c.version}` : c.status === "rejected" ? "Rejected" : "Waiting"}
+                  </Badge>
+                  <div className="min-w-0 flex-1">
+                    <p>{c.metricName}: {c.action === "leave_out" ? "leave it out of the month" : `set to ${c.value}`} <span className="text-muted-foreground">(was {c.was.value ?? "—"})</span></p>
+                    <p className="text-xs text-muted-foreground">{c.reason} · asked by {c.raisedBy.name || c.raisedBy.email}, {dubaiWhen(c.raisedAt)}</p>
+                    {c.decisionNote && <p className="text-xs text-muted-foreground">{c.decidedBy}: {c.decisionNote}</p>}
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+          {fixing && <CorrectDialog k={fixing} month={month} email={email} onClose={() => setFixing(null)} />}
         </>
       )}
     </div>
   );
 }
 
-function KpiRow({ k, labels }: { k: KpiResult; labels: MentorDetail["statusLabels"] }) {
+/** Ask for a correction to one KPI of a frozen month: the right value, or leave it out — with why and the evidence. */
+function CorrectDialog({ k, month, email, onClose }: { k: KpiResult; month: string; email: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [action, setAction] = useState<"set_value" | "leave_out">("set_value");
+  const [value, setValue] = useState(k.value == null ? "" : String(k.value));
+  const [reason, setReason] = useState("");
+  const [evidence, setEvidence] = useState("");
+  const [err, setErr] = useState("");
+  const send = useMutation({
+    mutationFn: async () => (await api.post("/mentor-kpis/corrections", {
+      month, email, metric: k.metric, action, value: action === "set_value" ? Number(value) : null, reason, evidence,
+    })).data.data,
+    onSuccess: () => { toast.success("Correction asked for — it waits on the Corrections tab"); qc.invalidateQueries({ queryKey: ["mentor-kpis"] }); onClose(); },
+    onError: (e) => setErr(apiErrorMessage(e, "Refused")),
+  });
+  const submit = () => {
+    if (action === "set_value" && (value.trim() === "" || !Number.isFinite(Number(value)) || Number(value) < 0)) return setErr("Enter the right value (0 or more).");
+    if (!reason.trim()) return setErr("Say why it's wrong.");
+    send.mutate();
+  };
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Correct {k.name}</DialogTitle>
+          <DialogDescription>
+            {monthLabel(month)} shows {fmtValue(k.value, k.unit)}. A root admin approves or rejects it; approving makes the month&apos;s next version.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <select value={action} onChange={(e) => { setAction(e.target.value as typeof action); setErr(""); }} className="h-9 w-full rounded-md border border-input bg-background px-3" aria-label="Correction">
+            <option value="set_value">The right value is…</option>
+            <option value="leave_out">Leave this KPI out of the month for them</option>
+          </select>
+          {action === "set_value" && (
+            <div className="flex items-center gap-2">
+              <Input type="number" min={0} value={value} onChange={(e) => { setValue(e.target.value); setErr(""); }} aria-label="The right value" className="w-40" />
+              <span className="text-muted-foreground">{k.unit}</span>
+            </div>
+          )}
+          <Input value={reason} onChange={(e) => { setReason(e.target.value); setErr(""); }} placeholder="Why it's wrong" aria-label="Why" maxLength={500} />
+          <textarea value={evidence} onChange={(e) => setEvidence(e.target.value)} placeholder="Evidence: what to check, links" aria-label="Evidence" maxLength={2000} rows={3}
+            className="w-full rounded-md border border-input bg-background px-3 py-2" />
+          {err && <p className="text-red-500">{err}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button disabled={send.isPending} onClick={submit}>Ask for it</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function KpiRow({ k, labels, onCorrect }: { k: KpiResult; labels: MentorDetail["statusLabels"]; onCorrect?: () => void }) {
   const prorated = k.effectiveTarget != null && k.target != null && k.effectiveTarget !== k.target;
   return (
     <tr className="border-t align-top">
@@ -154,7 +240,7 @@ function KpiRow({ k, labels }: { k: KpiResult; labels: MentorDetail["statusLabel
         <p className="flex items-center gap-1 text-xs text-muted-foreground">
           {SOURCE_SHORT[k.source]} · {k.direction === "up" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />}
           {k.direction === "up" ? "more is better" : "fewer is better"}
-          {k.sample > 0 && k.sampleOf ? ` · ${Math.round(k.sample)} ${k.sampleOf}` : ""}
+          {k.sample > 0 && k.sampleOf && !k.corrected ? ` · ${Math.round(k.sample)} ${k.sampleOf}` : ""}
         </p>
       </td>
       <td className="py-1.5 pr-2 tabular-nums">{fmtValue(k.value, k.unit)}</td>
@@ -167,7 +253,17 @@ function KpiRow({ k, labels }: { k: KpiResult; labels: MentorDetail["statusLabel
       <td className="py-1.5 pr-2 tabular-nums text-muted-foreground">{k.mode === "scored" ? pct1(k.share) : "—"}</td>
       <td className="py-1.5">
         <Badge variant={k.status === "scored" ? "success" : k.status === "monitoring" ? "secondary" : "warning"}>{labels[k.status] ?? k.status}</Badge>
-        {k.note && k.status !== "scored" && <p className="mt-0.5 max-w-[260px] text-xs text-muted-foreground">{k.note}</p>}
+        {k.corrected && (
+          <p className="mt-0.5 max-w-[260px] text-xs text-primary">
+            Corrected{k.corrected.action === "set_value" ? ` from ${k.corrected.was ?? "—"}` : ""}: {k.corrected.reason}
+          </p>
+        )}
+        {k.note && k.status !== "scored" && !k.corrected && <p className="mt-0.5 max-w-[260px] text-xs text-muted-foreground">{k.note}</p>}
+        {onCorrect && (
+          <button type="button" onClick={onCorrect} className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            <Wrench className="h-3 w-3" />Correct
+          </button>
+        )}
       </td>
     </tr>
   );

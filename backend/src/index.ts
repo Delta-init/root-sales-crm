@@ -11,6 +11,7 @@ import { verify as verifySsoToken } from "./controllers/ssoController.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
 import { startTrafficWorker } from "./services/trafficService.js";
 import { startBackupWorker } from "./services/backupService.js";
+import { startMentorKpiWorker } from "./services/mentorKpiService.js";
 
 const app = express();
 
@@ -50,6 +51,8 @@ const start = async () => {
   }
   // Every portal's database into R2, twice a day. BACKUP_WORKER=false for a second process.
   startBackupWorker();
+  // Last month's mentor KPIs frozen on the 1st. MENTOR_KPI_WORKER=false for a second process.
+  startMentorKpiWorker();
 };
 
 start();
