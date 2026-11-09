@@ -201,6 +201,9 @@ export type AuditAction =
   // who changed it, and who pushed a stuck lead through by hand, is recorded.
   // A sales CRM's commission plan changed in Root (2026-11-01): what people are paid follows it.
   | "commission_plan_changed"
+  // The mentor KPI plan kept in Root: a draft changed, and a version approved (2026-11-09).
+  | "mentor_kpi_plan_changed"
+  | "mentor_kpi_plan_approved"
   | "traffic_rules_changed"
   | "traffic_lead_retried"
   | "traffic_access_changed"

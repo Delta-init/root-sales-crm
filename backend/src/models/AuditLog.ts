@@ -51,6 +51,9 @@ const auditLogSchema = new Schema<IAuditLog>(
         // Lead traffic: the split between the CRMs, and a stuck lead sent by hand.
         // A sales CRM's commission plan changed in Root (2026-11-01).
         "commission_plan_changed",
+        // The mentor KPI plan: a draft changed, a version approved (2026-11-09).
+        "mentor_kpi_plan_changed",
+        "mentor_kpi_plan_approved",
         "traffic_rules_changed",
         "traffic_lead_retried",
         "traffic_access_changed",

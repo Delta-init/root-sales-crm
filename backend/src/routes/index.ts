@@ -23,6 +23,7 @@ import publicRoutes from "./publicRoutes.js";
 import tvMediaRoutes from "./tvMediaRoutes.js";
 import walletRoutes from "./walletRoutes.js";
 import rewardRoutes from "./rewardRoutes.js";
+import mentorKpiRoutes from "./mentorKpiRoutes.js";
 
 const router = Router();
 
@@ -58,6 +59,8 @@ router.use("/tv-media", tvMediaRoutes);
 router.use("/wallet", walletRoutes);
 // The sales CRMs' gift rewards: targets, gifts and the gifts chosen (2026-11-04) — root admins.
 router.use("/rewards", rewardRoutes);
+// Mentor KPIs: the plan (weights, targets) kept and approved here, and every mentor's points worked out here (2026-11-09).
+router.use("/mentor-kpis", mentorKpiRoutes);
 
 router.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
