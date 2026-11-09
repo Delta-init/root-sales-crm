@@ -10,7 +10,8 @@
  * Every figure comes from one call: CS Portal's mentor report (GET /service/mentor-report), which carries the LMS's
  * classes, joins, bookings, reviews, class assignments and meetings (with their reports, who booked them and who called
  * them off — the LMS update of 2026-11-09) and the HRMS's clock-ins and leave, matched by address. A field an older
- * LMS doesn't send reads as "not available yet". Verified payments still to come from CS Portal.
+ * LMS doesn't send reads as "not available yet". CS Portal adds the meetings' linked, finance-approved payments and the
+ * meeting mentor's commission (its update of 2026-11-09).
  */
 
 export const KPI_ROLES = ["junior_mentor", "senior_mentor", "chief_mentor"] as const;
@@ -66,6 +67,7 @@ const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 /** A field an older LMS doesn't send yet. */
 const has = (r: FeedRow, ...keys: string[]) => keys.every((k) => typeof r.total[k] === "number");
 const LMS_UPDATE = "Needs the LMS update of 2026-11-09";
+const PORTAL_UPDATE = "Needs the CS Portal update of 2026-11-09";
 const pct = (part: number, whole: number) => (whole > 0 ? (100 * part) / whole : 0);
 
 /* The catalogue. Keys are stored in plans: never rename one, add a new one instead. */
@@ -196,16 +198,25 @@ export const METRICS: KpiMetric[] = [
   // ── Revenue ──
   {
     key: "verified_collections", name: "Meeting-linked verified collections", source: "cs_portal", unit: "AED",
-    direction: "up", kind: "count", minSample: 0, sampleOf: "payments", available: false,
-    note: "Needs CS Portal's meeting-linked Paid payments",
+    direction: "up", kind: "count", minSample: 0, sampleOf: "students met", available: true,
+    note: "Course payments linked to the mentor's meeting on the funding form and approved by finance, by the meeting's month",
+    missing: `${PORTAL_UPDATE} (meeting-linked payments)`,
+    read: (r) => (has(r, "verifiedCollectionsAed") ? { value: n(r.total.verifiedCollectionsAed), sample: n(r.total.meetingStudents) } : null),
   },
   {
     key: "payment_conversion", name: "Meeting to verified payment", source: "cs_portal", unit: "%", direction: "up",
-    kind: "rate", minSample: 3, sampleOf: "meetings", available: false, note: "Needs CS Portal's meeting-linked Paid payments",
+    kind: "rate", minSample: 3, sampleOf: "students met", available: true,
+    note: "Students met in CS Portal meetings who paid through a linked, finance-approved course payment",
+    missing: `${PORTAL_UPDATE} (meeting-linked payments)`,
+    read: (r) => (has(r, "meetingStudents", "paidMeetingStudents")
+      ? { value: pct(n(r.total.paidMeetingStudents), n(r.total.meetingStudents)), sample: n(r.total.meetingStudents) } : null),
   },
   {
-    key: "eligible_commission", name: "Eligible 2% commission", source: "cs_portal", unit: "AED", direction: "up",
-    kind: "count", minSample: 0, sampleOf: "payments", available: false, note: "Needs CS Portal's 2% commission by mentor",
+    key: "eligible_commission", name: "Eligible 2% commission", source: "cs_portal", unit: "USD", direction: "up",
+    kind: "count", minSample: 0, sampleOf: "credits", available: true,
+    note: "Commission CS Portal credited them as the meeting mentor (the 2% on a course payment from a student they met)",
+    missing: `${PORTAL_UPDATE} (the meeting mentor's commission)`,
+    read: (r) => (has(r, "meetingMentorCommissionUsd") ? { value: n(r.total.meetingMentorCommissionUsd), sample: 1 } : null),
   },
   {
     key: "commission_credited", name: "Commission credited", source: "cs_portal", unit: "USD", direction: "up",

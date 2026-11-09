@@ -169,7 +169,8 @@ async function main() {
     && kpiOf(r, "late_clockins").effectiveTarget === 0.8, show(kpiOf(r, "classes_held")));
   r = scoreMentor(worked, { ...ctx(), categories: DEFAULT_CATEGORIES });
   check("the approved structure: what no system sends yet (assignments, meetings by who booked, verified payments) is 'not available yet', and the rest still scores",
-    kpiOf(r, "verified_collections").status === "not_available" && kpiOf(r, "assignments_reviewed").status === "not_available" && r.score !== null && r.coverage > 0 && r.coverage < 100, show({ s: r.score, c: r.coverage }));
+    kpiOf(r, "verified_collections").status === "not_available" && /CS Portal update/.test(kpiOf(r, "verified_collections").note)
+    && kpiOf(r, "assignments_reviewed").status === "not_available" && r.score !== null && r.coverage > 0 && r.coverage < 100, show({ s: r.score, c: r.coverage }));
 
   step("Case 1b — the LMS's figures of 2026-11-09");
   const { METRIC_BY_KEY } = await import("../services/mentorKpiMetrics.js");
@@ -190,6 +191,10 @@ async function main() {
     Math.abs((read("report_24h", lms)?.value ?? 0) - 83.33) < 0.01 && read("interested_rate", lms)?.value === 50);
   check("an older LMS without them: nothing read (so 'not available yet'), attendance falls back to every class",
     read("mentor_cancellations", { attended: 30, missed: 10 }) === null && read("report_24h", {}) === null && read("class_attendance", { attended: 30, missed: 10 })?.value === 75);
+  const portal = { meetingStudents: 8, paidMeetingStudents: 2, verifiedCollectionsAed: 9000, meetingMentorCommissionUsd: 49 };
+  check("CS Portal's: AED 9,000 collected; 2 of 8 students met paid → 25%; USD 49 as the meeting mentor",
+    read("verified_collections", portal)?.value === 9000 && read("payment_conversion", portal)?.value === 25 && read("eligible_commission", portal)?.value === 49);
+  check("…an older CS Portal sends none: not available", read("verified_collections", {}) === null && read("payment_conversion", {}) === null);
   r = scoreMentor(worked, { ...ctx(), categories: DEFAULT_CATEGORIES });
   check("…and its KPI says which update it waits for", /LMS update of 2026-11-09/.test(kpiOf(r, "assignments_reviewed").note) && kpiOf(r, "assignments_reviewed").status === "not_available", kpiOf(r, "assignments_reviewed").note);
 
@@ -197,7 +202,7 @@ async function main() {
   check("a draft may be unfinished: weights off 100 and no targets are fine", planProblems(DEFAULT_CATEGORIES, emptyTargets(), [], false).length === 0);
   let p = planProblems(DEFAULT_CATEGORIES, emptyTargets(), [], true);
   check("approval wants every role's target for each scored metric Root can measure — not for those it can't yet",
-    p.some((x) => x === "Classes held has no junior mentor target") && !p.some((x) => /Meeting-linked|Meeting to verified/.test(x)), show(p));
+    p.some((x) => x === "Classes held has no junior mentor target") && p.some((x) => x === "Meeting-linked verified collections has no junior mentor target"), show(p));
   const off100 = structuredClone(SMALL); off100[1]!.weight = 30;
   const full = emptyTargets(); for (const role of ["junior_mentor", "senior_mentor", "chief_mentor"] as const) full[role] = { ...T.junior_mentor };
   check("approval wants the categories to total 100%", planProblems(off100, full, [], true).includes("The categories total 90%, not 100%"));
@@ -236,7 +241,7 @@ async function main() {
   let res = await call("GET", "/mentor-kpis/plans", root);
   check("nothing yet: no plan in force, no draft, the measurable metrics listed",
     res.status === 200 && res.body.data.inForce === null && res.body.data.draft === null && res.body.data.metrics.find((m: Json) => m.key === "classes_held")?.available === true
-    && res.body.data.metrics.find((m: Json) => m.key === "verified_collections")?.available === false, show(res.body));
+    && res.body.data.metrics.find((m: Json) => m.key === "verified_collections")?.available === true && res.body.data.metrics.length === 23, show(res.body.data.metrics.length));
   res = await call("GET", `/mentor-kpis/scores?month=${M1}`, root);
   check("scores with no plan: none, and nothing asked of CS Portal", res.status === 200 && res.body.data.plan === null && fakeCalls === 0, show(res.body));
   check("a draft can't start in a month that has begun before this one", (await call("POST", "/mentor-kpis/plans/draft", root, { from: M1 })).status === 400);
@@ -268,6 +273,7 @@ async function main() {
     Object.assign(edited.targets[role], {
       class_attendance: 80, mentor_cancellations: 0, assignments_reviewed: 90, review_turnaround: 24,
       cse_meetings_held: 10, mentor_meetings_held: 4, meeting_cancellations: 0, report_24h: 95,
+      verified_collections: 50000, payment_conversion: 30,
     });
   }
   edited.overrides = [{ email: "chen@kpi-e2e.test", name: "Chen Test", metric: "classes_held", value: 30, reason: "Half-time this month" }];
