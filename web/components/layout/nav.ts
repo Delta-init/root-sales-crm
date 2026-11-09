@@ -8,7 +8,7 @@
  */
 import type { LucideIcon } from "lucide-react";
 import {
-  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, DatabaseBackup, FileBarChart, Gift, Headset, Images, Inbox, LayoutGrid, Phone, MonitorPlay, Shuffle, Tv, Users2,
+  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, DatabaseBackup, FileBarChart, Gauge, Gift, Headset, Images, Inbox, LayoutGrid, Phone, MonitorPlay, Shuffle, Tv, Users2,
   WalletCards,
 } from "lucide-react";
 
@@ -31,6 +31,8 @@ export interface NavItem extends Partial<NavLink> {
   rootOnly?: boolean;
   /** Present instead of an href: this opens rather than goes anywhere. */
   children?: NavLink[];
+  /** A group that shows as a plain link, under its own name, when only one of its links is someone's to see. */
+  flatWhenOne?: boolean;
 }
 
 export const NAV: NavItem[] = [
@@ -90,7 +92,18 @@ export const NAV: NavItem[] = [
      is nobody's business by default — booking changed that. The people who
      need an hour with a mentor are the people doing the work, and a calendar
      only they cannot see is one they have to ask somebody else to read. */
-  { href: "/mentors", label: "Mentors", icon: CalendarDays },
+  {
+    label: "Mentors",
+    icon: CalendarDays,
+    // One link for whoever sees only the calendar, as before; a menu for root admins.
+    flatWhenOne: true,
+    children: [
+      { href: "/mentors", label: "Mentor calendar", icon: CalendarDays },
+      // Mentor KPIs: the plan (weights, targets) edited and approved here only, and every mentor's points worked out
+      // here (2026-11-09). Root admins only while it is a preview.
+      { href: "/mentor-kpis", label: "Mentor KPIs", icon: Gauge, rootOnly: true },
+    ],
+  },
   /* Also open to everybody: raising work and clearing approvals are jobs the
      people doing the work do, and Media ERP decides who may actually do
      either. */
@@ -129,6 +142,7 @@ export function navFor(admin: { role: string; trafficAccess?: string; pendingAcc
     if (!item.children) return canSee(item) ? [item] : [];
     if (item.rootOnly && !root) return [];
     const children = item.children.filter(canSee);
+    if (children.length === 1 && item.flatWhenOne) return [{ ...children[0], label: item.label }];
     return children.length ? [{ ...item, children }] : [];
   });
 }
