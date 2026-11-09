@@ -161,5 +161,8 @@ export function planShares(categories: PlanCategory[]) {
 }
 export const pct1 = (v: number) => `${(Math.round(v * 10) / 10).toFixed(1)}%`;
 
+/** Whether the CS Portal shows the scores (2026-11-09), since when, and the 60-day observation. */
+export interface PortalSettings { open: boolean; since: string | null; observationUntil: string | null; changedBy: string; changedAt: string | null }
+
 export const dubaiWhen = (iso: string | null) =>
   iso ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(iso)) : "—";

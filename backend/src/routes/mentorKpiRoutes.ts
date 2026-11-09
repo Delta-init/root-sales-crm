@@ -1,7 +1,7 @@
 import { Router } from "express";
 import {
-  deleteDraft, getCorrections, getMentorScores, getPlans, getScores, getSnapshots, postApprove, postApproveCorrection, postCorrection,
-  postDraft, postFreeze, postRejectCorrection, postSuggest, putDraft,
+  deleteDraft, getCorrections, getMentorScores, getPlans, getScores, getSettings, getSnapshots, postApprove, postApproveCorrection,
+  postCorrection, postDraft, postFreeze, postRejectCorrection, postSuggest, putDraft, putSettings,
 } from "../controllers/mentorKpiController.js";
 import { authenticate, requireRole } from "../middleware/auth.js";
 
@@ -30,5 +30,8 @@ router.get("/corrections", getCorrections);
 router.post("/corrections", postCorrection);
 router.post("/corrections/:id/approve", postApproveCorrection);
 router.post("/corrections/:id/reject", postRejectCorrection);
+// Open to the CS Portal or not — opening starts the 60-day observation period.
+router.get("/settings", getSettings);
+router.put("/settings", putSettings);
 
 export default router;

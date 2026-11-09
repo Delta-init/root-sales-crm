@@ -208,6 +208,8 @@ export type AuditAction =
   | "mentor_kpi_frozen"
   | "mentor_kpi_correction_raised"
   | "mentor_kpi_correction_decided"
+  // Opened to the CS Portal (the 60-day observation starts), or closed.
+  | "mentor_kpi_portal_changed"
   | "traffic_rules_changed"
   | "traffic_lead_retried"
   | "traffic_access_changed"

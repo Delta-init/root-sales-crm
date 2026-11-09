@@ -2,6 +2,7 @@ import { Types } from "mongoose";
 import { MentorKpiPlan, type IMentorKpiPlan } from "../models/MentorKpiPlan.js";
 import { MentorKpiSnapshot, type IMentorKpiSnapshot } from "../models/MentorKpiSnapshot.js";
 import { MentorKpiCorrection, type IMentorKpiCorrection } from "../models/MentorKpiCorrection.js";
+import { MentorKpiSettings } from "../models/MentorKpiSettings.js";
 import { mentorReport } from "./cseService.js";
 import {
   DEFAULT_CATEGORIES, KPI_ROLES, METRICS, METRIC_BY_KEY, ROLE_LABELS, SOURCE_LABELS, emptyTargets,
@@ -541,4 +542,66 @@ export async function rejectCorrection(id: string, by: string, note: string) {
   ).lean<IMentorKpiCorrection>();
   if (!c) throw httpError("No such open correction", 404);
   return correctionDTO(c);
+}
+
+/* ── Open to the CS Portal (2026-11-09) ────────────────────────────────────────────────────────────────────────── */
+
+const OBSERVATION_DAYS = 60;
+
+/** Whether the CS Portal may show the scores, since when, and until when it is observation only. */
+export async function portalSettings() {
+  const s = await MentorKpiSettings.findOne({ key: "default" }).lean();
+  const since = s?.portalOpenSince ?? null;
+  return {
+    open: !!since,
+    since,
+    observationUntil: since ? new Date(new Date(since).getTime() + OBSERVATION_DAYS * 86_400_000) : null,
+    changedBy: s?.changedBy ?? "",
+    changedAt: s?.changedAt ?? null,
+  };
+}
+
+/** Open or close it. Opening again keeps the first day (the 60 days don't restart); closing forgets it. */
+export async function setPortalOpen(open: boolean, by: string) {
+  const now = new Date();
+  const current = await MentorKpiSettings.findOne({ key: "default" }).lean();
+  await MentorKpiSettings.updateOne(
+    { key: "default" },
+    { $set: { portalOpenSince: open ? current?.portalOpenSince ?? now : null, changedBy: by, changedAt: now } },
+    { upsert: true },
+  );
+  return portalSettings();
+}
+
+async function requireOpen() {
+  const s = await portalSettings();
+  if (!s.open) throw httpError("Mentor KPIs aren't open to the CS Portal yet", 409);
+  return s;
+}
+
+/** For the CS Portal: the month of the mentors it names (it decides who may see whom) — no ranking. */
+export async function portalScores(emails: string[], month: string) {
+  const s = await requireOpen();
+  const want = new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean));
+  const all = await scores(month);
+  return {
+    ...all,
+    observationUntil: s.observationUntil,
+    mentors: all.mentors.filter((m) => want.has(m.email)).map(({ rank: _rank, ...m }) => m).sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+/** For the CS Portal: one mentor's month, every KPI. */
+export async function portalMentor(email: string, month: string) {
+  const s = await requireOpen();
+  return { ...(await mentorScores(email, month)), observationUntil: s.observationUntil };
+}
+
+/** For the CS Portal: a correction asked by the mentor or someone over them (CS Portal checks who may). */
+export async function portalCorrection(
+  by: { email: string; name: string },
+  body: { month: string; email: string; metric: string; action: "set_value" | "leave_out"; value?: number | null; reason: string; evidence?: string },
+) {
+  await requireOpen();
+  return raiseCorrection({ source: "cs_portal", email: by.email.trim().toLowerCase(), name: by.name.trim() || by.email }, body);
 }

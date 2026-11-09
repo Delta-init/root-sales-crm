@@ -1,8 +1,9 @@
 import type { Response, NextFunction } from "express";
 import { z } from "zod";
 import {
-  approveCorrection, approveDraft, currentMonth, discardDraft, freezeMonth, listCorrections, mentorScores, overview, raiseCorrection,
-  rejectCorrection, saveDraft, scores, snapshots, startDraft, suggestTargets, validKpiMonth,
+  approveCorrection, approveDraft, currentMonth, discardDraft, freezeMonth, listCorrections, mentorScores, overview, portalCorrection,
+  portalMentor, portalScores, portalSettings, raiseCorrection, rejectCorrection, saveDraft, scores, setPortalOpen, snapshots, startDraft,
+  suggestTargets, validKpiMonth,
 } from "../services/mentorKpiService.js";
 import { record } from "../services/auditService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
@@ -173,3 +174,53 @@ const decide = (approve: boolean) => handle(async (req, res) => {
 });
 export const postApproveCorrection = decide(true);
 export const postRejectCorrection = decide(false);
+
+/* ── Open to the CS Portal, and what it asks (2026-11-09) ───────────────────────────────────────────────────────── */
+
+export const getSettings = handle(async (_req, res) => {
+  sendSuccess(res, "Mentor KPI settings", await portalSettings());
+});
+
+export const putSettings = handle(async (req, res) => {
+  const open = (req.body ?? {}).portalOpen;
+  if (typeof open !== "boolean") {
+    sendError(res, "portalOpen is true or false", 400);
+    return;
+  }
+  const s = await setPortalOpen(open, req.admin!.email);
+  await record(req, "mentor_kpi_portal_changed", {
+    adminId: req.admin!.adminId, adminEmail: req.admin!.email,
+    detail: open ? `Opened to the CS Portal (observation until ${s.observationUntil?.toISOString().slice(0, 10)})` : "Closed to the CS Portal",
+  });
+  sendSuccess(res, open ? "Open to the CS Portal" : "Closed to the CS Portal", s);
+});
+
+const monthOf = (v: unknown) => (validKpiMonth(v) ? v : currentMonth());
+
+/** CS Portal: the mentors it names, for a month. */
+export const servicePortalScores = handle(async (req, res) => {
+  const emails = String(req.query.emails ?? "").split(",").map((e) => e.trim()).filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)).slice(0, 500);
+  sendSuccess(res, "Mentor scores", await portalScores(emails, monthOf(req.query.month)));
+});
+
+/** CS Portal: one mentor's month. */
+export const servicePortalMentor = handle(async (req, res) => {
+  const email = typeof req.query.email === "string" ? req.query.email : "";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    sendError(res, "email is required", 400);
+    return;
+  }
+  sendSuccess(res, "Mentor's scores", await portalMentor(email, monthOf(req.query.month)));
+});
+
+/** CS Portal: a correction asked by the mentor or someone over them. */
+export const servicePortalCorrection = handle(async (req, res) => {
+  const parsed = correctionSchema.safeParse(req.body);
+  const raisedBy = (req.body ?? {}).raisedBy ?? {};
+  if (!parsed.success || typeof raisedBy.email !== "string" || !raisedBy.email.includes("@")) {
+    sendError(res, parsed.success ? "raisedBy.email is required" : `${parsed.error.issues[0]!.path.join(".")}: ${parsed.error.issues[0]!.message}`, 400);
+    return;
+  }
+  const c = await portalCorrection({ email: raisedBy.email, name: String(raisedBy.name ?? "") }, parsed.data);
+  sendSuccess(res, "Correction asked for", c, 201);
+});

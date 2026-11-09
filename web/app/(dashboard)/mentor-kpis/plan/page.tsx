@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, apiErrorMessage } from "@/lib/axios";
 import { PlanEditor, draftMonths, type DraftBody } from "@/components/mentor-kpis/PlanEditor";
-import { monthLabel, type KpiPlan, type PlansOverview } from "@/components/mentor-kpis/types";
+import { dubaiWhen, monthLabel, type KpiPlan, type PlansOverview, type PortalSettings } from "@/components/mentor-kpis/types";
 
 /**
  * The mentor KPI plan (the user, 2026-11-09: "edit only from Root"). With no draft: the plan in force, read only,
@@ -103,6 +103,15 @@ export default function MentorKpiPlanPage() {
     onError: fail,
   });
   const busy = start.isPending || saveM.isPending || suggest.isPending || approve.isPending || discard.isPending;
+  const portal = useQuery({
+    queryKey: ["mentor-kpis", "settings"],
+    queryFn: async () => (await api.get("/mentor-kpis/settings")).data.data as PortalSettings,
+  });
+  const togglePortal = useMutation({
+    mutationFn: async (open: boolean) => (await api.put("/mentor-kpis/settings", { portalOpen: open })).data.data as PortalSettings,
+    onSuccess: (s) => { toast.success(s.open ? "Open to the CS Portal — 60 days' observation started" : "Closed to the CS Portal"); refresh(); },
+    onError: fail,
+  });
 
   if (q.isLoading) return <Skeleton className="h-72 w-full" />;
   if (q.isError || !data) {
@@ -112,6 +121,31 @@ export default function MentorKpiPlanPage() {
   const draft = data.draft;
   return (
     <div className="space-y-4">
+      <Card>
+        <CardContent className="flex flex-wrap items-center gap-3 pt-4 text-sm">
+          <span className="font-medium">CS Portal</span>
+          {portal.data?.open ? (
+            <>
+              <Badge variant="success">Open</Badge>
+              <span className="text-muted-foreground">
+                Since {dubaiWhen(portal.data.since)}; observation until {dubaiWhen(portal.data.observationUntil)}. Mentors see their own; chiefs, CS Managers and admins their reach.
+              </span>
+              <span className="flex-1" />
+              <Button size="sm" variant="outline" disabled={togglePortal.isPending}
+                onClick={() => { if (confirm("Close Mentor KPIs to the CS Portal? Mentors and chiefs stop seeing them.")) togglePortal.mutate(false); }}>Close</Button>
+            </>
+          ) : (
+            <>
+              <Badge variant="secondary">Closed</Badge>
+              <span className="text-muted-foreground">Only root admins see Mentor KPIs. Opening starts 60 days&apos; observation — not used for pay.</span>
+              <span className="flex-1" />
+              <Button size="sm" disabled={togglePortal.isPending || !data.inForce}
+                title={data.inForce ? "" : "Approve a plan first"}
+                onClick={() => { if (confirm("Open Mentor KPIs to the CS Portal for everyone? The 60-day observation starts today.")) togglePortal.mutate(true); }}>Open to the CS Portal</Button>
+            </>
+          )}
+        </CardContent>
+      </Card>
       {draft && body ? (
         <>
           <Card>

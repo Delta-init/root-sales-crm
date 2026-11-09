@@ -14,6 +14,8 @@
  *   Case 6  frozen       last month frozen on the 1st (after 03:00, every system answering), once; it no longer moves;
  *                        a correction (the right value, or leave it out) asked, approved → the next version re-scored
  *                        from the frozen inputs, or rejected with a reason; every version kept; all recorded
+ *   Case 7  CS Portal    closed until a root admin opens it (60 days' observation from then); its secret; only the
+ *                        mentors it names, no ranking; one mentor's month; a correction asked there waits in Root
  *
  * Run through scripts/mentor-kpi-check.sh. Scratch database on 127.0.0.1 only; CS Portal is a fake served here.
  */
@@ -395,6 +397,39 @@ async function main() {
   check("the decided list: two approved, one rejected", res.body.data.length === 3 && res.body.data.filter((c: Json) => c.status === "approved").length === 2);
   const trail = await mongoose.connection.db!.collection("auditlogs").countDocuments({ action: { $in: ["mentor_kpi_correction_raised", "mentor_kpi_correction_decided"] } });
   check("asked and decided, each recorded", trail === 6, String(trail));
+
+  step("Case 7 — open to the CS Portal");
+  const svc = (p: string, secret: string | null = "mentor-kpi-e2e-portal-secret", method = "GET", body?: unknown) =>
+    call(method, `/service/mentor-kpis${p}`, secret ? { "x-portal-secret": secret } : {}, body);
+  check("CS Portal without its secret, or a wrong one → 401", (await svc(`/scores?month=${MONTH}&emails=bilal@kpi-e2e.test`, null)).status === 401
+    && (await svc(`/scores?month=${MONTH}&emails=bilal@kpi-e2e.test`, "nope")).status === 401);
+  res = await svc(`/scores?month=${MONTH}&emails=bilal@kpi-e2e.test`);
+  check("closed until a root admin opens it → 409", res.status === 409 && /aren't open/.test(res.body.message), show(res.body));
+  check("the switch is root admins' (a member → 403)", (await call("PUT", "/mentor-kpis/settings", member, { portalOpen: true })).status === 403);
+  res = await call("PUT", "/mentor-kpis/settings", root, { portalOpen: true });
+  const opened = res.body.data;
+  check("opened: observation for 60 days from today", res.status === 200 && opened.open === true
+    && Math.round((Date.parse(opened.observationUntil) - Date.parse(opened.since)) / 86_400_000) === 60, show(opened));
+  res = await call("PUT", "/mentor-kpis/settings", root, { portalOpen: true });
+  check("opening again keeps the first day (the 60 days don't restart)", res.body.data.since === opened.since);
+  res = await svc(`/scores?month=${MONTH}&emails=bilal@kpi-e2e.test,chen@kpi-e2e.test,nobody@kpi-e2e.test`);
+  check("CS Portal gets only the mentors it names — no ranking — and the observation date",
+    res.status === 200 && res.body.data.mentors.map((m: Json) => m.email).join() === "bilal@kpi-e2e.test,chen@kpi-e2e.test"
+    && res.body.data.mentors.every((m: Json) => !("rank" in m)) && !!res.body.data.observationUntil, show(res.body.data.mentors));
+  res = await svc(`/mentor?email=bilal@kpi-e2e.test&month=${M1}`);
+  check("…one mentor's month: last month frozen (version 3), its corrections", res.status === 200 && res.body.data.snapshot?.version === 3 && res.body.data.corrections.length === 3, show(res.body.data.snapshot));
+  res = await svc("/corrections", "mentor-kpi-e2e-portal-secret", "POST", {
+    month: M1, email: "chen@kpi-e2e.test", metric: "classes_held", action: "set_value", value: 52, reason: "Two classes taught as cover weren't counted",
+    raisedBy: { email: "chief@kpi-e2e.test", name: "Chief Test" },
+  });
+  check("a correction asked from CS Portal: waiting, raised by the chief there", res.status === 201 && res.body.data.status === "pending"
+    && res.body.data.raisedBy.source === "cs_portal" && res.body.data.raisedBy.email === "chief@kpi-e2e.test", show(res.body));
+  check("…without who asked → 400", (await svc("/corrections", "mentor-kpi-e2e-portal-secret", "POST", { month: M1, email: "chen@kpi-e2e.test", metric: "student_rating", action: "leave_out", reason: "x" })).status === 400);
+  res = await call("GET", "/mentor-kpis/corrections?status=pending", root);
+  check("…it waits in Root's Corrections for a root admin", res.body.data.some((c: Json) => c.raisedBy.source === "cs_portal" && c.email === "chen@kpi-e2e.test"));
+  await call("PUT", "/mentor-kpis/settings", root, { portalOpen: false });
+  check("closed again → CS Portal refused (409)", (await svc(`/mentor?email=bilal@kpi-e2e.test&month=${M1}`)).status === 409);
+  check("opening and closing recorded", (await mongoose.connection.db!.collection("auditlogs").countDocuments({ action: "mentor_kpi_portal_changed" })) === 3);
 
   fake.close();
   await mongoose.disconnect();

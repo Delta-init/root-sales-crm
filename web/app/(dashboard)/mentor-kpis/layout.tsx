@@ -3,8 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
+import { useQuery } from "@tanstack/react-query";
 import { Eye, Gauge } from "lucide-react";
+import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
+import { dubaiWhen, type PortalSettings } from "@/components/mentor-kpis/types";
 
 /*
  * Mentor KPIs (the user, 2026-11-09: "edit only from Root — weightage, targets, and Root calculates the points").
@@ -20,6 +23,11 @@ const TABS = [
 
 export default function MentorKpisLayout({ children }: { children: React.ReactNode }) {
   const path = usePathname();
+  const settings = useQuery({
+    queryKey: ["mentor-kpis", "settings"],
+    queryFn: async () => (await api.get("/mentor-kpis/settings")).data.data as PortalSettings,
+  });
+  const open = settings.data?.open;
   const active = (href: string) => (href === "/mentor-kpis" ? path === href || /^\/mentor-kpis\/\d{4}-\d{2}\//.test(path) : path.startsWith(href));
   return (
     <div className="space-y-6">
@@ -36,8 +44,10 @@ export default function MentorKpisLayout({ children }: { children: React.ReactNo
         <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-600 dark:text-amber-400">
           <Eye className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
-            Preview for root admins. Observation mode: not used for salary, commission, bonuses or penalties. Mentors and
-            chiefs don&apos;t see any of this yet.
+            Observation mode: not used for salary, commission, bonuses or penalties.{" "}
+            {open
+              ? `Open to the CS Portal since ${dubaiWhen(settings.data!.since)} — observation until ${dubaiWhen(settings.data!.observationUntil)}.`
+              : "A preview for root admins: mentors and chiefs don't see any of this until it's opened to the CS Portal (Plan tab)."}
           </span>
         </div>
         <nav className="flex gap-1 border-b border-border">
