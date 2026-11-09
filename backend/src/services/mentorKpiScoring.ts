@@ -190,7 +190,7 @@ export function scoreMentor(row: FeedRow, ctx: ScoreContext): MentorResult {
         if (!reading) {
           if (!ctx.sources[m.source].available) return out({ status: "source_down", note: ctx.sources[m.source].message ?? `${SOURCE_LABELS[m.source]} didn't answer` });
           if (quality[m.source] === "not_matched") return out({ status: "not_matched", note: `Not found in ${SOURCE_LABELS[m.source]} by their address` });
-          return out({ status: "not_available" });
+          return out({ status: "not_available", note: m.missing ?? m.note ?? "" });
         }
         const value = round1(reading.value);
         const effective = target == null ? null : round1(m.kind === "count" ? target * ctx.elapsed * working : target);

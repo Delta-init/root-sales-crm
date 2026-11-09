@@ -7,10 +7,10 @@
  * their targets and whether they are scored or only watched. A metric whose data no system sends yet is listed with
  * `available: false` — it can be in a plan, and shows "not available yet" instead of a score, never a zero.
  *
- * Today every figure comes from one call: CS Portal's mentor report (GET /service/mentor-report), which carries the
- * LMS's classes, joins, bookings and reviews and the HRMS's clock-ins and leave, matched by address. The LMS, CS Portal
- * and HRMS feeds still to come (cancellation causes, assignments, meetings by who booked them, verified payments) only
- * switch metrics below to available.
+ * Every figure comes from one call: CS Portal's mentor report (GET /service/mentor-report), which carries the LMS's
+ * classes, joins, bookings, reviews, class assignments and meetings (with their reports, who booked them and who called
+ * them off — the LMS update of 2026-11-09) and the HRMS's clock-ins and leave, matched by address. A field an older
+ * LMS doesn't send reads as "not available yet". Verified payments still to come from CS Portal.
  */
 
 export const KPI_ROLES = ["junior_mentor", "senior_mentor", "chief_mentor"] as const;
@@ -57,10 +57,15 @@ export interface KpiMetric {
   available: boolean;
   /** Why it isn't available yet, or what it includes. */
   note?: string;
+  /** Shown when the system's answer doesn't carry it yet (an older LMS). */
+  missing?: string;
   read?: (row: FeedRow) => Reading | null;
 }
 
 const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+/** A field an older LMS doesn't send yet. */
+const has = (r: FeedRow, ...keys: string[]) => keys.every((k) => typeof r.total[k] === "number");
+const LMS_UPDATE = "Needs the LMS update of 2026-11-09";
 const pct = (part: number, whole: number) => (whole > 0 ? (100 * part) / whole : 0);
 
 /* The catalogue. Keys are stored in plans: never rename one, add a new one instead. */
@@ -73,8 +78,10 @@ export const METRICS: KpiMetric[] = [
   },
   {
     key: "mentor_cancellations", name: "Mentor-caused class cancellations", source: "lms", unit: "classes", direction: "down",
-    kind: "count", minSample: 0, sampleOf: "classes", available: false,
-    note: "Needs the cancellation cause in the LMS (who caused it)",
+    kind: "count", minSample: 0, sampleOf: "classes", available: true,
+    note: "Cancellations recorded as caused by the mentor; older ones with no cause recorded aren't counted",
+    missing: `${LMS_UPDATE} (who caused a cancellation)`,
+    read: (r) => (has(r, "classesCancelledByMentor") ? { value: n(r.total.classesCancelledByMentor), sample: n(r.total.classes) + n(r.total.classesCancelled) } : null),
   },
   {
     key: "on_time_start", name: "On-time class start", source: "lms", unit: "%", direction: "up", kind: "rate",
@@ -86,17 +93,25 @@ export const METRICS: KpiMetric[] = [
     },
   },
   {
-    key: "class_attendance", name: "Class attendance", source: "lms", unit: "%", direction: "up", kind: "rate",
+    key: "class_attendance", name: "Regular-class attendance", source: "lms", unit: "%", direction: "up", kind: "rate",
     minSample: 10, sampleOf: "bookings", available: true,
-    note: "Students who came, of those booked. Includes Program classes until the LMS splits them",
+    note: "Students who came, of those booked, in regular classes (Program classes apart; with an older LMS, all classes)",
     read: (r) => {
-      const booked = n(r.total.attended) + n(r.total.missed);
-      return { value: pct(n(r.total.attended), booked), sample: booked };
+      const split = has(r, "programAttended", "programMissed");
+      const came = n(r.total.attended) - (split ? n(r.total.programAttended) : 0);
+      const booked = came + n(r.total.missed) - (split ? n(r.total.programMissed) : 0);
+      return { value: pct(came, booked), sample: booked };
     },
   },
   {
     key: "program_attendance", name: "Program auto-booking attendance", source: "lms", unit: "%", direction: "up",
-    kind: "rate", minSample: 10, sampleOf: "bookings", available: false, note: "Needs the LMS to split Program classes",
+    kind: "rate", minSample: 10, sampleOf: "bookings", available: true, note: "Students who came, of those seated, in Program classes",
+    missing: `${LMS_UPDATE} (Program classes apart)`,
+    read: (r) => {
+      if (!has(r, "programAttended", "programMissed")) return null;
+      const seated = n(r.total.programAttended) + n(r.total.programMissed);
+      return { value: pct(n(r.total.programAttended), seated), sample: seated };
+    },
   },
   {
     key: "student_rating", name: "Student rating", source: "lms", unit: "stars", direction: "up", kind: "average",
@@ -120,39 +135,61 @@ export const METRICS: KpiMetric[] = [
   // ── Student work ──
   {
     key: "assignments_reviewed", name: "Assignments reviewed", source: "lms", unit: "%", direction: "up", kind: "rate",
-    minSample: 5, sampleOf: "assignments", available: false, note: "Needs the LMS assignment feed",
+    minSample: 5, sampleOf: "assignments", available: true,
+    note: "Class assignments reviewed, of those sent in the month and waiting over 24 hours or reviewed",
+    missing: `${LMS_UPDATE} (class assignments)`,
+    read: (r) => (has(r, "assignmentsDue", "assignmentsReviewed")
+      ? { value: pct(n(r.total.assignmentsReviewed), n(r.total.assignmentsDue)), sample: n(r.total.assignmentsDue) } : null),
   },
   {
     key: "review_turnaround", name: "Review turnaround", source: "lms", unit: "hours", direction: "down", kind: "average",
-    minSample: 5, sampleOf: "assignments", available: false, note: "Needs the LMS assignment feed",
+    minSample: 5, sampleOf: "reviews", available: true, note: "Average hours from a student sending an assignment to its review",
+    missing: `${LMS_UPDATE} (class assignments)`,
+    read: (r) => {
+      if (!has(r, "reviewHoursSum", "reviewsTimed")) return null;
+      const timed = n(r.total.reviewsTimed);
+      return { value: timed ? n(r.total.reviewHoursSum) / timed : 0, sample: timed };
+    },
   },
   // ── Meetings ──
   {
-    key: "cse_meetings_held", name: "CSE-generated meetings held", source: "cs_portal", unit: "meetings", direction: "up",
-    kind: "count", minSample: 0, sampleOf: "meetings", available: false, note: "Needs CS Portal to say who booked each meeting",
+    key: "cse_meetings_held", name: "CSE-generated meetings held", source: "lms", unit: "meetings", direction: "up",
+    kind: "count", minSample: 0, sampleOf: "meetings", available: true, note: "Meetings over and not cancelled, booked from CS Portal",
+    missing: `${LMS_UPDATE} (who booked each meeting)`,
+    read: (r) => (has(r, "meetingsHeldCs") ? { value: n(r.total.meetingsHeldCs), sample: n(r.total.meetingsHeldCs) } : null),
   },
   {
-    key: "mentor_meetings_held", name: "Mentor-generated meetings held", source: "cs_portal", unit: "meetings", direction: "up",
-    kind: "count", minSample: 0, sampleOf: "meetings", available: false, note: "Needs CS Portal to say who booked each meeting",
+    key: "mentor_meetings_held", name: "Mentor-generated meetings held", source: "lms", unit: "meetings", direction: "up",
+    kind: "count", minSample: 0, sampleOf: "meetings", available: true, note: "Meetings over and not cancelled, booked by the mentor themselves",
+    missing: `${LMS_UPDATE} (who booked each meeting)`,
+    read: (r) => (has(r, "meetingsHeldOwn") ? { value: n(r.total.meetingsHeldOwn), sample: n(r.total.meetingsHeldOwn) } : null),
   },
   {
-    key: "meeting_cancellations", name: "Mentor-caused meeting cancellations", source: "cs_portal", unit: "meetings",
-    direction: "down", kind: "count", minSample: 0, sampleOf: "meetings", available: false,
-    note: "Needs \"cancelled by\" on the meeting-status answer",
+    key: "meeting_cancellations", name: "Mentor-caused meeting cancellations", source: "lms", unit: "meetings",
+    direction: "down", kind: "count", minSample: 0, sampleOf: "meetings", available: true,
+    note: "Meetings CS Portal recorded as called off by the mentor",
+    missing: `${LMS_UPDATE} ("cancelled by" on meetings)`,
+    read: (r) => (has(r, "meetingsCancelledByMentor") ? { value: n(r.total.meetingsCancelledByMentor), sample: n(r.total.meetings) } : null),
   },
   {
     key: "report_24h", name: "Meeting report within 24 hours", source: "lms", unit: "%", direction: "up", kind: "rate",
-    minSample: 3, sampleOf: "meetings", available: false, note: "Needs the LMS meeting-outcome feed",
+    minSample: 3, sampleOf: "reports due", available: true,
+    note: "CS Portal meetings whose report the mentor filled within 24 hours of the end",
+    missing: `${LMS_UPDATE} (meeting reports)`,
+    read: (r) => (has(r, "reportsDue", "reportsOnTime") ? { value: pct(n(r.total.reportsOnTime), n(r.total.reportsDue)), sample: n(r.total.reportsDue) } : null),
   },
   {
     key: "interested_rate", name: "Interested rate", source: "lms", unit: "%", direction: "up", kind: "rate",
-    minSample: 3, sampleOf: "meetings", available: false, note: "Needs the LMS meeting-outcome feed",
+    minSample: 3, sampleOf: "reports", available: true, note: "Meeting reports saying the student is interested",
+    missing: `${LMS_UPDATE} (meeting reports)`,
+    read: (r) => (has(r, "reportsFilled", "meetingsInterested") ? { value: pct(n(r.total.meetingsInterested), n(r.total.reportsFilled)), sample: n(r.total.reportsFilled) } : null),
   },
   {
     key: "meetings_held", name: "Meetings held (all)", source: "lms", unit: "meetings", direction: "up", kind: "count",
-    minSample: 0, sampleOf: "meetings", available: true, note: "Every 1:1 meeting not cancelled, whoever booked it",
+    minSample: 0, sampleOf: "meetings", available: true, note: "Every 1:1 meeting over and not cancelled, whoever booked it",
     read: (r) => {
-      const held = Math.max(0, n(r.total.meetings) - n(r.total.meetingsCancelled));
+      // An older LMS: every meeting not cancelled, those still ahead in the month included.
+      const held = has(r, "meetingsHeld") ? n(r.total.meetingsHeld) : Math.max(0, n(r.total.meetings) - n(r.total.meetingsCancelled));
       return { value: held, sample: n(r.total.meetings) };
     },
   },

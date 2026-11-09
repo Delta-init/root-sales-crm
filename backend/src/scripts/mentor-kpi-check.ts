@@ -171,11 +171,33 @@ async function main() {
   check("the approved structure: what no system sends yet (assignments, meetings by who booked, verified payments) is 'not available yet', and the rest still scores",
     kpiOf(r, "verified_collections").status === "not_available" && kpiOf(r, "assignments_reviewed").status === "not_available" && r.score !== null && r.coverage > 0 && r.coverage < 100, show({ s: r.score, c: r.coverage }));
 
+  step("Case 1b — the LMS's figures of 2026-11-09");
+  const { METRIC_BY_KEY } = await import("../services/mentorKpiMetrics.js");
+  const read = (metric: string, t: Record<string, number | null>) => METRIC_BY_KEY.get(metric)!.read!(row("x", "X", "x@kpi-e2e.test", "junior_mentor", tot(20, t)));
+  const lms = {
+    classesCancelled: 3, classesCancelledByMentor: 1, classesCancelledUnclassified: 1, attended: 30, missed: 10, programAttended: 6, programMissed: 4,
+    assignmentsSubmitted: 12, assignmentsReviewed: 9, assignmentsDue: 10, reviewHoursSum: 180, reviewsTimed: 9,
+    meetings: 14, meetingsHeld: 10, meetingsHeldCs: 7, meetingsHeldOwn: 2, meetingsCancelledByMentor: 1,
+    reportsDue: 6, reportsOnTime: 5, reportsFilled: 6, meetingsInterested: 3,
+  };
+  check("mentor-caused cancellations: only the mentor's (1 of 3)", read("mentor_cancellations", lms)?.value === 1);
+  check("regular-class attendance leaves Program classes out: 24 of 30 → 80%; Program 6 of 10 → 60%",
+    read("class_attendance", lms)?.value === 80 && read("class_attendance", lms)?.sample === 30 && read("program_attendance", lms)?.value === 60);
+  check("assignments: 9 reviewed of 10 due → 90%; 180 hours over 9 → 20 hours each", read("assignments_reviewed", lms)?.value === 90 && read("review_turnaround", lms)?.value === 20);
+  check("meetings: 7 booked by CS Portal, 2 by the mentor, 10 over in all, 1 called off by the mentor",
+    read("cse_meetings_held", lms)?.value === 7 && read("mentor_meetings_held", lms)?.value === 2 && read("meetings_held", lms)?.value === 10 && read("meeting_cancellations", lms)?.value === 1);
+  check("reports: 5 of 6 within 24 hours → 83.3%; 3 of 6 interested → 50%",
+    Math.abs((read("report_24h", lms)?.value ?? 0) - 83.33) < 0.01 && read("interested_rate", lms)?.value === 50);
+  check("an older LMS without them: nothing read (so 'not available yet'), attendance falls back to every class",
+    read("mentor_cancellations", { attended: 30, missed: 10 }) === null && read("report_24h", {}) === null && read("class_attendance", { attended: 30, missed: 10 })?.value === 75);
+  r = scoreMentor(worked, { ...ctx(), categories: DEFAULT_CATEGORIES });
+  check("…and its KPI says which update it waits for", /LMS update of 2026-11-09/.test(kpiOf(r, "assignments_reviewed").note) && kpiOf(r, "assignments_reviewed").status === "not_available", kpiOf(r, "assignments_reviewed").note);
+
   step("Case 2 — what a plan refuses");
   check("a draft may be unfinished: weights off 100 and no targets are fine", planProblems(DEFAULT_CATEGORIES, emptyTargets(), [], false).length === 0);
   let p = planProblems(DEFAULT_CATEGORIES, emptyTargets(), [], true);
   check("approval wants every role's target for each scored metric Root can measure — not for those it can't yet",
-    p.some((x) => x === "Classes held has no junior mentor target") && !p.some((x) => /Meeting-linked|Assignments reviewed/.test(x)), show(p));
+    p.some((x) => x === "Classes held has no junior mentor target") && !p.some((x) => /Meeting-linked|Meeting to verified/.test(x)), show(p));
   const off100 = structuredClone(SMALL); off100[1]!.weight = 30;
   const full = emptyTargets(); for (const role of ["junior_mentor", "senior_mentor", "chief_mentor"] as const) full[role] = { ...T.junior_mentor };
   check("approval wants the categories to total 100%", planProblems(off100, full, [], true).includes("The categories total 90%, not 100%"));
@@ -241,7 +263,13 @@ async function main() {
   const edited = structuredClone(sug.draft);
   edited.targets.chief_mentor = { ...edited.targets.senior_mentor };
   // No bookings in the history, so nothing to suggest class attendance from: typed in.
-  for (const role of ["junior_mentor", "senior_mentor", "chief_mentor"]) edited.targets[role].class_attendance = 80;
+  // …nor the LMS figures of 2026-11-09 (the fake sends none), so they're typed in too.
+  for (const role of ["junior_mentor", "senior_mentor", "chief_mentor"]) {
+    Object.assign(edited.targets[role], {
+      class_attendance: 80, mentor_cancellations: 0, assignments_reviewed: 90, review_turnaround: 24,
+      cse_meetings_held: 10, mentor_meetings_held: 4, meeting_cancellations: 0, report_24h: 95,
+    });
+  }
   edited.overrides = [{ email: "chen@kpi-e2e.test", name: "Chen Test", metric: "classes_held", value: 30, reason: "Half-time this month" }];
   res = await call("PUT", "/mentor-kpis/plans/draft", root, edited);
   check("the draft saved with the chiefs' targets and a mentor's own target", res.status === 200 && res.body.data.overrides.length === 1 && res.body.data.targets.chief_mentor.classes_held === 64, show(res.body));
