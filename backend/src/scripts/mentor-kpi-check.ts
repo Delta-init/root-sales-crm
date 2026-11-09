@@ -222,6 +222,7 @@ async function main() {
   const { AdminUser } = await import("../models/AdminUser.js");
   const { Organization } = await import("../models/Organization.js");
   await Organization.create({ code: "commission", kind: "commission", name: "CS Portal", timezone: "Asia/Dubai", currency: "AED", fxToBase: 1, isActive: true, sortOrder: 9, accent: "#2563eb" });
+  await Organization.create({ code: "lms", kind: "lms", name: "LMS", timezone: "Asia/Dubai", currency: "AED", fxToBase: 1, isActive: true, sortOrder: 8, accent: "#2563eb" });
   await AdminUser.create({ name: "Root E2E", email: "root@kpi-e2e.test", password: PASSWORD, role: "root_admin", status: "active" });
   await AdminUser.create({ name: "Member E2E", email: "member@kpi-e2e.test", password: PASSWORD, role: "member", status: "active" });
   await mongoose.connection.db!.collection("mentorkpiplans").createIndex({ status: 1 }, { unique: true, partialFilterExpression: { status: "draft" } });
@@ -427,6 +428,12 @@ async function main() {
   check("…without who asked → 400", (await svc("/corrections", "mentor-kpi-e2e-portal-secret", "POST", { month: M1, email: "chen@kpi-e2e.test", metric: "student_rating", action: "leave_out", reason: "x" })).status === 400);
   res = await call("GET", "/mentor-kpis/corrections?status=pending", root);
   check("…it waits in Root's Corrections for a root admin", res.body.data.some((c: Json) => c.raisedBy.source === "cs_portal" && c.email === "chen@kpi-e2e.test"));
+  res = await svc(`/mentor?email=bilal@kpi-e2e.test&month=${M1}`, "mentor-kpi-e2e-lms-secret");
+  check("the LMS admin asks with its own secret: the same answer", res.status === 200 && res.body.data.snapshot?.version === 3, show(res.body));
+  res = await svc("/corrections", "mentor-kpi-e2e-lms-secret", "POST", {
+    month: M1, email: "chen@kpi-e2e.test", metric: "student_rating", action: "leave_out", reason: "Ratings from a test class", raisedBy: { email: "admin@lms.test", name: "LMS Admin" },
+  });
+  check("…a correction asked in the LMS says it came from the LMS (never what the body claims)", res.status === 201 && res.body.data.raisedBy.source === "lms", show(res.body));
   await call("PUT", "/mentor-kpis/settings", root, { portalOpen: false });
   check("closed again → CS Portal refused (409)", (await svc(`/mentor?email=bilal@kpi-e2e.test&month=${M1}`)).status === 409);
   check("opening and closing recorded", (await mongoose.connection.db!.collection("auditlogs").countDocuments({ action: "mentor_kpi_portal_changed" })) === 3);

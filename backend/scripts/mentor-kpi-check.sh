@@ -64,7 +64,8 @@ export DELTA_API_URL="" DRAW_API_URL="" BANGLORE_API_URL="" REMOTE_API_URL=""
 export DELTA_SSO_SECRET="" DRAW_SSO_SECRET="" BANGLORE_SSO_SECRET="" REMOTE_SSO_SECRET=""
 export DELTA_MONGODB_URI="" DRAW_MONGODB_URI="" BANGLORE_MONGODB_URI="" REMOTE_MONGODB_URI=""
 export LEAD_TRAFFIC_SHEET_KEY="" TRAFFIC_WORKER=false
-export LMS_API_URL="" LMS_SSO_SECRET=""
+# The LMS asks for mentor KPIs too (its own secret).
+export LMS_API_URL="" LMS_SSO_SECRET="mentor-kpi-e2e-lms-secret"
 # CS Portal is the fake one the driver serves.
 export COMMISSION_API_URL="http://127.0.0.1:$FAKE_PORT/api/v1" COMMISSION_SSO_SECRET="mentor-kpi-e2e-portal-secret"
 export FINANCE_HQ_API_URL="" FINANCE_HQ_SSO_SECRET=""

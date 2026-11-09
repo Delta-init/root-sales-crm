@@ -102,7 +102,7 @@ function Pending({ c, onDone }: { c: Correction; onDone: () => void }) {
           <p className="text-sm">{asked(c)} <span className="text-muted-foreground">(version {c.was.version} shows {c.was.value == null ? "no value" : c.was.value}{c.was.score != null ? `, ${c.was.score} points` : ""})</span></p>
           <p className="text-sm text-muted-foreground">Why: {c.reason}</p>
           {c.evidence && <p className="whitespace-pre-wrap text-sm text-muted-foreground">Evidence: {c.evidence}</p>}
-          <p className="text-xs text-muted-foreground">Asked by {c.raisedBy.name || c.raisedBy.email}{c.raisedBy.source === "cs_portal" ? " (CS Portal)" : ""} · {dubaiWhen(c.raisedAt)}</p>
+          <p className="text-xs text-muted-foreground">Asked by {c.raisedBy.name || c.raisedBy.email}{c.raisedBy.source === "cs_portal" ? " (CS Portal)" : c.raisedBy.source === "lms" ? " (LMS)" : ""} · {dubaiWhen(c.raisedAt)}</p>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">

@@ -221,6 +221,7 @@ export const servicePortalCorrection = handle(async (req, res) => {
     sendError(res, parsed.success ? "raisedBy.email is required" : `${parsed.error.issues[0]!.path.join(".")}: ${parsed.error.issues[0]!.message}`, 400);
     return;
   }
-  const c = await portalCorrection({ email: raisedBy.email, name: String(raisedBy.name ?? "") }, parsed.data);
+  const source = (req as { portalCode?: string }).portalCode === "lms" ? "lms" : "cs_portal";
+  const c = await portalCorrection({ email: raisedBy.email, name: String(raisedBy.name ?? ""), source }, parsed.data);
   sendSuccess(res, "Correction asked for", c, 201);
 });

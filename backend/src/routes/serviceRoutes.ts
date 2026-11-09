@@ -4,7 +4,7 @@ import { crmLeads } from "../controllers/crmLeadsController.js";
 import { crmCommissionForFinance } from "../controllers/crmCommissionController.js";
 import * as engine from "../controllers/commissionEngineController.js";
 import { servicePortalCorrection, servicePortalMentor, servicePortalScores } from "../controllers/mentorKpiController.js";
-import { authenticateOrgService, authenticatePortalService } from "../middleware/orgServiceAuth.js";
+import { authenticateAnyPortal, authenticateOrgService, authenticatePortalService } from "../middleware/orgServiceAuth.js";
 import { serviceClaim, serviceRewards } from "../services/rewardsService.js";
 import { sendSuccess } from "../utils/response.js";
 import type { AuthenticatedRequest } from "../types/index.js";
@@ -25,11 +25,12 @@ router.get("/crm-commission", authenticatePortalService("finance-hq"), crmCommis
 // Finance asking each salesperson's salary on the CRM slabs for a month — its payroll puts them on it, loss of pay
 // priced off it (2026-11-01). The same secret as the commission above.
 router.get("/finance/slab-pay", authenticatePortalService("finance-hq"), engine.slabPay);
-// Mentor KPIs for CS Portal's My KPIs (2026-11-09): read only, plus asking for a correction. CS Portal decides who
-// may see whom; Root answers only once a root admin has opened it (409 until then).
-router.get("/mentor-kpis/scores", authenticatePortalService("commission"), servicePortalScores);
-router.get("/mentor-kpis/mentor", authenticatePortalService("commission"), servicePortalMentor);
-router.post("/mentor-kpis/corrections", authenticatePortalService("commission"), servicePortalCorrection);
+// Mentor KPIs for CS Portal's and the LMS admin's My KPIs (2026-11-09): read only, plus asking for a correction. The
+// portal decides who may see whom; Root answers only once a root admin has opened it (409 until then).
+const kpiPortals = authenticateAnyPortal(["commission", "lms"]);
+router.get("/mentor-kpis/scores", kpiPortals, servicePortalScores);
+router.get("/mentor-kpis/mentor", kpiPortals, servicePortalMentor);
+router.post("/mentor-kpis/corrections", kpiPortals, servicePortalCorrection);
 
 // Server-to-server only: a CRM backend acting for its own signed-in user.
 // Never reachable from a browser — the secret lives in the CRM's environment.

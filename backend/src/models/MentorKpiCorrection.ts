@@ -21,7 +21,7 @@ export interface IMentorKpiCorrection {
   reason: string;
   evidence: string;
   status: CorrectionStatus;
-  raisedBy: { source: "root" | "cs_portal"; email: string; name: string };
+  raisedBy: { source: "root" | "cs_portal" | "lms"; email: string; name: string };
   decidedBy: string;
   decidedAt: Date | null;
   decisionNote: string;
@@ -45,7 +45,7 @@ const correctionSchema = new Schema<IMentorKpiCorrection>(
     evidence: { type: String, default: "", maxlength: 2000 },
     status: { type: String, enum: ["pending", "approved", "rejected"], default: "pending" },
     raisedBy: {
-      source: { type: String, enum: ["root", "cs_portal"], required: true },
+      source: { type: String, enum: ["root", "cs_portal", "lms"], required: true },
       email: { type: String, default: "" },
       name: { type: String, default: "" },
     },

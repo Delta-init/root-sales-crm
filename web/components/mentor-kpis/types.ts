@@ -54,7 +54,7 @@ export interface Correction {
   action: "set_value" | "leave_out"; value: number | null;
   was: { value: number | null; score: number | null; status: string; version: number };
   reason: string; evidence: string; status: "pending" | "approved" | "rejected";
-  raisedBy: { source: "root" | "cs_portal"; email: string; name: string }; raisedAt: string;
+  raisedBy: { source: "root" | "cs_portal" | "lms"; email: string; name: string }; raisedAt: string;
   decidedBy: string; decidedAt: string | null; decisionNote: string; version: number | null;
 }
 

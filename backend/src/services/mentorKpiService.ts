@@ -462,7 +462,7 @@ export async function listCorrections(q: { status?: string; month?: string }) {
 
 /** Ask for a correction to a frozen month: one mentor, one KPI, the right value or leave it out — with why. */
 export async function raiseCorrection(
-  by: { source: "root" | "cs_portal"; email: string; name: string },
+  by: { source: "root" | "cs_portal" | "lms"; email: string; name: string },
   body: { month: string; email: string; metric: string; action: "set_value" | "leave_out"; value?: number | null; reason: string; evidence?: string },
 ) {
   const snap = await currentSnapshot(body.month);
@@ -597,11 +597,11 @@ export async function portalMentor(email: string, month: string) {
   return { ...(await mentorScores(email, month)), observationUntil: s.observationUntil };
 }
 
-/** For the CS Portal: a correction asked by the mentor or someone over them (CS Portal checks who may). */
+/** For CS Portal or the LMS: a correction asked by the mentor or someone over them (the portal checks who may). */
 export async function portalCorrection(
-  by: { email: string; name: string },
+  by: { email: string; name: string; source?: "cs_portal" | "lms" },
   body: { month: string; email: string; metric: string; action: "set_value" | "leave_out"; value?: number | null; reason: string; evidence?: string },
 ) {
   await requireOpen();
-  return raiseCorrection({ source: "cs_portal", email: by.email.trim().toLowerCase(), name: by.name.trim() || by.email }, body);
+  return raiseCorrection({ source: by.source ?? "cs_portal", email: by.email.trim().toLowerCase(), name: by.name.trim() || by.email }, body);
 }

@@ -108,3 +108,33 @@ export const authenticatePortalService = (code: string) =>
       next(error);
     }
   };
+
+/**
+ * Any one of these portals (2026-11-09, mentor KPIs: CS Portal and the LMS ask the same thing). Each is checked with its
+ * own secret, in x-portal-secret; the one that matched is on req.portalCode, so the caller is known and never claimed.
+ */
+export const authenticateAnyPortal = (codes: string[]) =>
+  async (req: AuthenticatedRequest & { portalCode?: string }, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const presented = req.headers["x-portal-secret"];
+      if (typeof presented !== "string" || !presented) {
+        sendError(res, "Missing service credential", 401);
+        return;
+      }
+      for (const code of codes) {
+        const secret = targetConfig(code).ssoSecret;
+        if (!secret || !safeEqual(secret, presented)) continue;
+        const org = await Organization.findOne({ code }).select("name isActive").lean();
+        if (!org?.isActive) {
+          sendError(res, `${org?.name ?? code} is not active on this server`, 503);
+          return;
+        }
+        req.portalCode = code;
+        next();
+        return;
+      }
+      sendError(res, "Invalid service credential", 401);
+    } catch (error) {
+      next(error);
+    }
+  };
