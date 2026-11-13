@@ -28,6 +28,17 @@ const forbidden = (e: unknown) => e instanceof AxiosError && e.response?.status 
 const notYet = (e: unknown) => e instanceof AxiosError && e.response?.status === 404;
 const aed = (n: number) => (n ? `AED ${n.toLocaleString("en-US")}` : "—");
 const money = (n: number) => n.toLocaleString("en-US");
+/**
+ * A course's rupee amounts (the user, 2026-11-13: "separate INR commission for each course, same plan but the INR pay
+ * will be different"): what the part of a sale paid in rupees pays each position — typed on their own, never the AED
+ * ones converted. None set: that part is paid at the AED amount.
+ */
+type InrAmounts = { salesInr?: number; tlInr?: number; smInr?: number };
+const hasInr = (r: InrAmounts | null | undefined, tlPaid: boolean) => (r?.salesInr ?? 0) + (tlPaid ? r?.tlInr ?? 0 : 0) + (r?.smInr ?? 0) > 0;
+/** The rupee amount under its AED one. */
+function Inr({ n }: { n: number | undefined }) {
+  return n ? <span className="block text-[11px] font-normal text-amber-600 dark:text-amber-400">INR {n.toLocaleString("en-US")}</span> : null;
+}
 const SLAB_ROLES = [
   { key: "sales", label: "Sales Staff" },
   { key: "tl", label: "Team Leader" },
@@ -377,11 +388,12 @@ function RootPlanSection({ code, name, tlPaid, crm, root }: { code: string; name
                       {c.updatedAt && c.updatedByEmail && !c.updatedByEmail.startsWith("copied") && (
                         <span className="block text-[11px] text-muted-foreground">changed {when(c.updatedAt)} by {c.updatedByEmail}</span>
                       )}
+                      {c.set && !hasInr(c, tlPaid) && <span className="block text-[11px] text-muted-foreground">No INR amounts yet — a rupee payment pays the AED ones</span>}
                     </td>
                     <td className="whitespace-nowrap py-2.5 pr-3 text-muted-foreground">{aed(c.fee)}</td>
-                    <td className="whitespace-nowrap py-2.5 pr-3 text-right">{aed(c.sales)}<Differs crm={theirs?.sales} root={c.sales} fmt={aed} /></td>
-                    {tlPaid && <td className="whitespace-nowrap py-2.5 pr-3 text-right">{aed(c.tl)}<Differs crm={theirs?.tl} root={c.tl} fmt={aed} /></td>}
-                    <td className="whitespace-nowrap py-2.5 pr-3 text-right">{aed(c.sm)}<Differs crm={theirs?.sm} root={c.sm} fmt={aed} /></td>
+                    <td className="whitespace-nowrap py-2.5 pr-3 text-right">{aed(c.sales)}<Differs crm={theirs?.sales} root={c.sales} fmt={aed} /><Inr n={c.salesInr} /></td>
+                    {tlPaid && <td className="whitespace-nowrap py-2.5 pr-3 text-right">{aed(c.tl)}<Differs crm={theirs?.tl} root={c.tl} fmt={aed} /><Inr n={c.tlInr} /></td>}
+                    <td className="whitespace-nowrap py-2.5 pr-3 text-right">{aed(c.sm)}<Differs crm={theirs?.sm} root={c.sm} fmt={aed} /><Inr n={c.smInr} /></td>
                     <td className="whitespace-nowrap py-2.5 pr-3 text-right">
                       {c.creditUsd ? `$${money(c.creditUsd)}` : "—"}<Differs crm={theirs?.creditUsd} root={c.creditUsd} fmt={(n) => (n ? `$${money(n)}` : "—")} />
                     </td>
@@ -453,13 +465,21 @@ function RootPlanSection({ code, name, tlPaid, crm, root }: { code: string; name
 }
 
 function CourseDialog({ code, tlPaid, course, onClose }: { code: string; tlPaid: boolean; course: RootCommissionPlan["courses"][number]; onClose: () => void }) {
-  const [form, setForm] = useState({ sales: String(course.sales), tl: String(course.tl), sm: String(course.sm), creditUsd: String(course.creditUsd) });
+  const [form, setForm] = useState({
+    sales: String(course.sales), tl: String(course.tl), sm: String(course.sm), creditUsd: String(course.creditUsd),
+    salesInr: String(course.salesInr ?? 0), tlInr: String(course.tlInr ?? 0), smInr: String(course.smInr ?? 0),
+  });
   const save = useSave(code, onClose);
   const fields: Array<{ key: keyof typeof form; label: string }> = [
     { key: "sales", label: "Sales Staff (AED)" },
     ...(tlPaid ? [{ key: "tl" as const, label: "Team Leader (AED)" }] : []),
     { key: "sm", label: "Sales Manager (AED)" },
     { key: "creditUsd", label: "MT5 credit (USD)" },
+  ];
+  const inrFields: Array<{ key: keyof typeof form; label: string }> = [
+    { key: "salesInr", label: "Sales Staff (INR)" },
+    ...(tlPaid ? [{ key: "tlInr" as const, label: "Team Leader (INR)" }] : []),
+    { key: "smInr", label: "Sales Manager (INR)" },
   ];
   const values = Object.fromEntries(Object.entries(form).map(([k, v]) => [k, Number(v)])) as Record<keyof typeof form, number>;
   const bad = Object.values(values).some((n) => !Number.isFinite(n) || n < 0);
@@ -478,15 +498,39 @@ function CourseDialog({ code, tlPaid, course, onClose }: { code: string; tlPaid:
             </div>
           ))}
         </div>
+        <InrFields idPrefix="course" fields={inrFields} form={form} onChange={(k, v) => setForm((s) => ({ ...s, [k]: v }))} />
         {bad && <p className="text-sm text-destructive">Amounts are numbers, 0 or more.</p>}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button disabled={bad || save.isPending} onClick={() => save.mutate({ path: `courses/${course.id}`, body: { ...values, tl: tlPaid ? values.tl : 0 } })}>
+          <Button disabled={bad || save.isPending}
+            onClick={() => save.mutate({ path: `courses/${course.id}`, body: { ...values, tl: tlPaid ? values.tl : 0, tlInr: tlPaid ? values.tlInr : 0 } })}>
             {save.isPending ? "Saving…" : "Save"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** The rupee amounts of a course, in a dialog: what the part of a sale paid in rupees pays each position. */
+function InrFields<K extends string>({ idPrefix, fields, form, onChange, note }: {
+  idPrefix: string; fields: Array<{ key: K; label: string }>; form: Record<K, string>; onChange: (key: K, value: string) => void; note?: string;
+}) {
+  return (
+    <div className="space-y-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
+      <p className="text-sm font-medium">When the client pays in rupees</p>
+      <p className="text-xs text-muted-foreground">
+        The part of the fee paid in rupees pays these amounts in INR, the rest the AED ones. {note ?? "Left at 0, that part is paid at the AED amounts."}
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {fields.map((f) => (
+          <div key={f.key} className="space-y-1.5">
+            <Label htmlFor={`${idPrefix}-${f.key}`}>{f.label}</Label>
+            <Input id={`${idPrefix}-${f.key}`} inputMode="decimal" value={form[f.key]} onChange={(e) => onChange(f.key, e.target.value)} />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -594,6 +638,8 @@ function TeamPlansCard({ code, tlPaid, root }: { code: string; tlPaid: boolean; 
               {root.courses.map((c) => {
                 const mine = own.get(c.id);
                 const shown = mine ?? c;
+                // The rupee amounts in force for this team: its own where it has any, else all teams'.
+                const inrShown = mine && hasInr(mine, tlPaid) ? mine : c;
                 const tone = mine ? "font-medium" : "text-muted-foreground";
                 return (
                   <tr key={c.id} className="border-b border-border/50 last:border-0">
@@ -602,9 +648,9 @@ function TeamPlansCard({ code, tlPaid, root }: { code: string; tlPaid: boolean; 
                       {mine ? <Badge className="ml-2">Team&apos;s own</Badge> : <span className="ml-2 text-xs text-muted-foreground">all teams&apos;</span>}
                       {mine?.updatedAt && <span className="block text-[11px] text-muted-foreground">changed {when(mine.updatedAt)} by {mine.updatedByEmail}</span>}
                     </td>
-                    <td className={`whitespace-nowrap py-2.5 pr-3 text-right ${tone}`}>{aed(shown.sales)}</td>
-                    {tlPaid && <td className={`whitespace-nowrap py-2.5 pr-3 text-right ${tone}`}>{aed(shown.tl)}</td>}
-                    <td className={`whitespace-nowrap py-2.5 pr-3 text-right ${tone}`}>{aed(shown.sm)}</td>
+                    <td className={`whitespace-nowrap py-2.5 pr-3 text-right ${tone}`}>{aed(shown.sales)}<Inr n={inrShown.salesInr} /></td>
+                    {tlPaid && <td className={`whitespace-nowrap py-2.5 pr-3 text-right ${tone}`}>{aed(shown.tl)}<Inr n={inrShown.tlInr} /></td>}
+                    <td className={`whitespace-nowrap py-2.5 pr-3 text-right ${tone}`}>{aed(shown.sm)}<Inr n={inrShown.smInr} /></td>
                     <td className="whitespace-nowrap py-2.5 text-right">
                       <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setCourse(c)} aria-label={`Set ${team.name}'s amounts for ${c.name}`}><Pencil className="h-3.5 w-3.5" /></Button>
                       {mine && (
@@ -660,13 +706,25 @@ function TeamCourseDialog({ code, tlPaid, team, course, own, onClose }: {
   own: CommissionTeamPlan["courses"][number] | null; onClose: () => void;
 }) {
   const start = own ?? course;
-  const [form, setForm] = useState({ sales: String(start.sales), tl: String(start.tl), sm: String(start.sm) });
+  // The team's own rupee amounts; none of its own: 0, and its sales take all teams' rupee amounts.
+  const [form, setForm] = useState({
+    sales: String(start.sales), tl: String(start.tl), sm: String(start.sm),
+    salesInr: String(own?.salesInr ?? 0), tlInr: String(own?.tlInr ?? 0), smInr: String(own?.smInr ?? 0),
+  });
   const save = useSave(code, onClose);
   const fields: Array<{ key: keyof typeof form; label: string }> = [
     { key: "sales", label: "Sales Staff (AED)" },
     ...(tlPaid ? [{ key: "tl" as const, label: "Team Leader (AED)" }] : []),
     { key: "sm", label: "Sales Manager (AED)" },
   ];
+  const inrFields: Array<{ key: keyof typeof form; label: string }> = [
+    { key: "salesInr", label: "Sales Staff (INR)" },
+    ...(tlPaid ? [{ key: "tlInr" as const, label: "Team Leader (INR)" }] : []),
+    { key: "smInr", label: "Sales Manager (INR)" },
+  ];
+  const allTeamsInr = hasInr(course, tlPaid)
+    ? `All left at 0, ${team.name} takes all teams' rupee amounts (INR ${money(course.salesInr ?? 0)}${tlPaid ? ` / INR ${money(course.tlInr ?? 0)}` : ""} / INR ${money(course.smInr ?? 0)}).`
+    : undefined;
   const values = Object.fromEntries(Object.entries(form).map(([k, v]) => [k, Number(v)])) as Record<keyof typeof form, number>;
   const bad = Object.values(values).some((n) => !Number.isFinite(n) || n < 0);
   return (
@@ -687,11 +745,12 @@ function TeamCourseDialog({ code, tlPaid, team, course, own, onClose }: {
             </div>
           ))}
         </div>
+        <InrFields idPrefix="team" fields={inrFields} form={form} onChange={(k, v) => setForm((s) => ({ ...s, [k]: v }))} note={allTeamsInr} />
         {bad && <p className="text-sm text-destructive">Amounts are numbers, 0 or more.</p>}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button disabled={bad || save.isPending}
-            onClick={() => save.mutate({ path: `teams/${team.id}/courses/${course.id}`, body: { ...values, tl: tlPaid ? values.tl : 0 } })}>
+            onClick={() => save.mutate({ path: `teams/${team.id}/courses/${course.id}`, body: { ...values, tl: tlPaid ? values.tl : 0, tlInr: tlPaid ? values.tlInr : 0 } })}>
             {save.isPending ? "Saving…" : `Save for ${team.name}`}
           </Button>
         </DialogFooter>

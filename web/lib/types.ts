@@ -620,7 +620,8 @@ export interface PlanPerson { id: string; name: string }
 /** A sales CRM's commission plan as Root keeps it, edited by root admins (2026-11-01). */
 export interface RootCommissionPlan {
   tlSlab: boolean;
-  courses: Array<CommissionPlanRow & { set: boolean; inCrm: boolean; updatedAt: string | null; updatedByEmail: string }>;
+  /** `…Inr` (2026-11-13): what the part of a sale paid in rupees pays each position; 0 or absent (a server before) = none set. */
+  courses: Array<CommissionPlanRow & CommissionInrAmounts & { set: boolean; inCrm: boolean; updatedAt: string | null; updatedByEmail: string }>;
   salesManager: PlanPerson | null;
   excluded: PlanPerson[];
   slabs: { from: string; sales: CommissionSlabRow[]; tl: CommissionSlabRow[]; sm: CommissionSlabRow[]; updatedAt: string | null; updatedByEmail: string };
@@ -638,9 +639,11 @@ export interface CommissionTeamPlan {
   name: string;
   status: string;
   inCrm: boolean;
-  courses: Array<{ id: string; name: string; sales: number; tl: number; sm: number; updatedAt: string | null; updatedByEmail: string }>;
+  courses: Array<CommissionInrAmounts & { id: string; name: string; sales: number; tl: number; sm: number; updatedAt: string | null; updatedByEmail: string }>;
   slabs: { from: string | null; sales: CommissionSlabRow[]; tl: CommissionSlabRow[]; updatedAt: string | null; updatedByEmail: string };
 }
+/** A course's rupee amounts per position (2026-11-13) — typed on their own, never the AED ones converted. */
+export interface CommissionInrAmounts { salesInr?: number; tlInr?: number; smInr?: number }
 
 // ── Salespeople: each sales CRM's people, and one person's figures ────────────
 

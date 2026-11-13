@@ -37,7 +37,9 @@ export const compare = async (req: AuthenticatedRequest, res: Response, next: Ne
 };
 
 const AED = z.number().min(0, "Amounts can't be negative").max(1_000_000);
-const courseSchema = z.object({ sales: AED, tl: AED, sm: AED, creditUsd: AED });
+/* The rupee amounts (2026-11-13) are left out by a page from before them: what is kept then stays as it is. */
+const INR = z.number().min(0, "Amounts can't be negative").max(100_000_000).optional();
+const courseSchema = z.object({ sales: AED, tl: AED, sm: AED, creditUsd: AED, salesInr: INR, tlInr: INR, smInr: INR });
 const slabRowSchema = z.object({
   name: z.string().trim().min(1, "Each level needs a name").max(40),
   target: z.number().min(0).max(100_000_000),
@@ -90,7 +92,7 @@ export const putSlabs = save(
 );
 /* A team on a plan of its own (2026-11-03): a course's amounts for the team, a position's slab for the team — or back
    on the portal's. */
-const teamCourseSchema = z.object({ sales: AED, tl: AED, sm: AED });
+const teamCourseSchema = z.object({ sales: AED, tl: AED, sm: AED, salesInr: INR, tlInr: INR, smInr: INR });
 const nothing = z.object({}).passthrough();
 export const putTeamCourse = save(
   (b) => teamCourseSchema.safeParse(b),

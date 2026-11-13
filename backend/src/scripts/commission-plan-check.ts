@@ -136,8 +136,25 @@ async function main() {
   check("a course's row saved: MBT pays 250 / 90 / 85, $50 credit, by whom", r.status === 200 && mbtRow?.sales === 250 && mbtRow.tl === 90 && mbtRow.creditUsd === 50 && mbtRow.updatedByEmail === "root@plan-e2e.test", show(mbtRow));
   check("…the CRM's own MBT row still 230 (the CRM is untouched)", delta?.courses?.find((c: Json) => c.id === String(mbt))?.sales === 230);
   check("…recorded in the change list, with before and after", /MBT: AED 230 \/ AED 85 \/ AED 85 \/ \$0 → AED 250 \/ AED 90 \/ AED 85 \/ \$50/.test(delta?.root?.changes?.[0]?.detail ?? "") && delta.root.changes[0].by === "root@plan-e2e.test", show(delta?.root?.changes));
+  // A course's rupee amounts (2026-11-13): typed on their own beside the AED ones, and kept by a save that sends none.
+  r = await call("PUT", `/commission-plans/delta/courses/${mbt}`, root, { sales: 250, tl: 90, sm: 85, creditUsd: 50, salesInr: 5000, tlInr: 1800, smInr: 1700 });
+  delta = r.body?.data?.find((p: Json) => p.code === "delta");
+  let inrRow = delta?.root?.courses?.find((c: Json) => c.id === String(mbt));
+  check("a course's rupee amounts saved beside the AED ones: INR 5,000 / 1,800 / 1,700", r.status === 200 && inrRow?.salesInr === 5000 && inrRow.tlInr === 1800 && inrRow.smInr === 1700 && inrRow.sales === 250, show(inrRow));
+  check("…recorded in the change list: none → the rupee amounts", /paid in rupees: none → INR 5,000 \/ INR 1,800 \/ INR 1,700/.test(delta?.root?.changes?.[0]?.detail ?? ""), show(delta?.root?.changes?.[0]));
+  r = await call("PUT", `/commission-plans/delta/courses/${mbt}`, root, { sales: 260, tl: 90, sm: 85, creditUsd: 50 });
+  inrRow = r.body?.data?.find((p: Json) => p.code === "delta")?.root?.courses?.find((c: Json) => c.id === String(mbt));
+  check("a save without rupee amounts (a page from before them) keeps them", r.status === 200 && inrRow?.sales === 260 && inrRow.salesInr === 5000 && inrRow.smInr === 1700, show(inrRow));
+  const quiet = r.body?.data?.find((p: Json) => p.code === "delta")?.root?.changes?.[0]?.detail ?? "";
+  check("…and says nothing of rupees in the change list, as they did not change", /AED 260/.test(quiet) && !/rupees/.test(quiet), quiet);
+  r = await call("PUT", `/commission-plans/delta/courses/${mbt}`, root, { sales: 250, tl: 90, sm: 85, creditUsd: 50, salesInr: -1 });
+  check("a negative rupee amount → 400", r.status === 400, show(r.body));
+  r = await call("PUT", `/commission-plans/delta/courses/${mbt}`, root, { sales: 250, tl: 90, sm: 85, creditUsd: 50, salesInr: 0, tlInr: 0, smInr: 0 });
+  inrRow = r.body?.data?.find((p: Json) => p.code === "delta")?.root?.courses?.find((c: Json) => c.id === String(mbt));
+  check("the rupee amounts cleared with zeros: back to none", r.status === 200 && inrRow?.salesInr === 0 && inrRow.tlInr === 0 && inrRow.smInr === 0 && inrRow.sales === 250
+    && /paid in rupees: INR 5,000 \/ INR 1,800 \/ INR 1,700 → none/.test(r.body?.data?.find((p: Json) => p.code === "delta")?.root?.changes?.[0]?.detail ?? ""), show(inrRow));
   r = await call("PUT", "/commission-plans/delta/slabs/tl", root, { rows: [{ name: "Base", target: 0, salary: 4500, percent: 50 }, { name: "Level 1", target: 90000, salary: 5000, percent: 100 }] });
-  const k2 = await mongoose.connection.db!.collection("commissionplans").findOne({ portal: "delta" });
+  const k2 =await mongoose.connection.db!.collection("commissionplans").findOne({ portal: "delta" });
   const v = k2?.slabs?.find((x: Json) => x.from === month);
   check(`the Team Leader slab from ${month}: the new rows; Sales Staff and SM carried from September`, r.status === 200 && v?.tl?.[0]?.salary === 4500 && v.sales[0].salary === 2100 && v.sm[1].target === 200000
     && k2!.slabs.find((x: Json) => x.from === "2026-09").tl[0].salary === 4000, show(v));
@@ -170,6 +187,8 @@ async function main() {
   step("Case 4 — errors");
   r = await call("PUT", `/commission-plans/draw/courses/${drawMbt}`, root, { sales: 230, tl: 50, sm: 85, creditUsd: 0 });
   check("Draw: a team leader paid on a sale → 400", r.status === 400 && /team leaders nothing/.test(r.body?.message ?? ""), show(r.body));
+  r = await call("PUT", `/commission-plans/draw/courses/${drawMbt}`, root, { sales: 230, tl: 0, sm: 85, creditUsd: 0, tlInr: 500 });
+  check("…in rupees too → 400", r.status === 400 && /team leaders nothing/.test(r.body?.message ?? ""), show(r.body));
   r = await call("PUT", "/commission-plans/delta/slabs/sales", root, { rows: [{ name: "E", target: 10000, salary: 2000, percent: 0 }] });
   check("a slab whose first row isn't at 0 → 400", r.status === 400 && /base/.test(r.body?.message ?? ""), show(r.body));
   r = await call("PUT", "/commission-plans/delta/slabs/sales", root, { rows: [{ name: "Base", target: 0, salary: 1, percent: 0 }, { name: "A", target: 0, salary: 2, percent: 0 }] });

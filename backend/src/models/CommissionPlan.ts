@@ -33,7 +33,13 @@ const slabVersionSchema = new Schema(
   { _id: false }
 );
 
-/** One course of the portal (its id in that CRM): what a sale of it pays each position, AED; the MT5 credit in USD. */
+/**
+ * One course of the portal (its id in that CRM): what a sale of it pays each position, AED; the MT5 credit in USD.
+ *
+ * The `…Inr` amounts (the user, 2026-11-13: "separate INR commission for each course, same plan but the INR pay will
+ * be different") are what the same sale pays for the part of its fee the client paid in rupees — amounts of their
+ * own, typed here, never the AED ones converted. 0: none set, and that part is paid at the AED amount.
+ */
 const courseRowSchema = new Schema(
   {
     courseId: { type: String, required: true },
@@ -41,6 +47,9 @@ const courseRowSchema = new Schema(
     sales: { type: Number, default: 0, min: 0 },
     tl: { type: Number, default: 0, min: 0 },
     sm: { type: Number, default: 0, min: 0 },
+    salesInr: { type: Number, default: 0, min: 0 },
+    tlInr: { type: Number, default: 0, min: 0 },
+    smInr: { type: Number, default: 0, min: 0 },
     creditUsd: { type: Number, default: 0, min: 0 },
     updatedAt: { type: Date, default: null },
     updatedByEmail: { type: String, default: "" },

@@ -449,6 +449,10 @@ export interface IPlanCourse {
   sales: number;
   tl: number;
   sm: number;
+  /** What the part of the fee paid in rupees pays each position, INR (2026-11-13); absent or 0: none set. */
+  salesInr?: number;
+  tlInr?: number;
+  smInr?: number;
   creditUsd: number;
   updatedAt: Date | null;
   updatedByEmail: string;

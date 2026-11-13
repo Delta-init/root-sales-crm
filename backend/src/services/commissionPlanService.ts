@@ -49,13 +49,14 @@ export interface TeamPlanView {
   name: string;
   status: string;
   inCrm: boolean;
-  courses: Array<{ id: string; name: string; sales: number; tl: number; sm: number; updatedAt: string | null; updatedByEmail: string }>;
+  courses: Array<{ id: string; name: string; sales: number; tl: number; sm: number; salesInr: number; tlInr: number; smInr: number; updatedAt: string | null; updatedByEmail: string }>;
   slabs: { from: string | null; sales: SlabRow[]; tl: SlabRow[]; updatedAt: string | null; updatedByEmail: string };
 }
 /** Root's plan for a portal, as the page shows it: this month's slabs, every CRM course with its row (or none yet). */
 export interface RootPlanView {
   tlSlab: boolean;
-  courses: Array<PlanRow & { set: boolean; inCrm: boolean; updatedAt: string | null; updatedByEmail: string }>;
+  /** `…Inr`: what the part of a sale paid in rupees pays each position (2026-11-13); 0 = none set, paid at the AED amount. */
+  courses: Array<PlanRow & { salesInr: number; tlInr: number; smInr: number; set: boolean; inCrm: boolean; updatedAt: string | null; updatedByEmail: string }>;
   salesManager: IPlanPerson | null;
   excluded: IPlanPerson[];
   slabs: { from: string; sales: SlabRow[]; tl: SlabRow[]; sm: SlabRow[]; updatedAt: string | null; updatedByEmail: string };
@@ -269,14 +270,14 @@ async function rootView(src: CrmSource | null, doc: ICommissionPlan): Promise<Ro
     const r = rows.get(id);
     return {
       id, name: String(c.name ?? r?.name ?? ""), fee: num(c.amount), status: String(c.status ?? ""),
-      sales: r?.sales ?? 0, tl: r?.tl ?? 0, sm: r?.sm ?? 0, creditUsd: r?.creditUsd ?? 0,
+      sales: r?.sales ?? 0, tl: r?.tl ?? 0, sm: r?.sm ?? 0, creditUsd: r?.creditUsd ?? 0, ...inrOf({}, r),
       set: !!r, inCrm: true, updatedAt: iso(r?.updatedAt), updatedByEmail: r?.updatedByEmail ?? "",
     };
   });
   for (const r of doc.courses) {
     if (seen.has(r.courseId)) continue;
     courses.push({
-      id: r.courseId, name: r.name, fee: 0, status: "", sales: r.sales, tl: r.tl, sm: r.sm, creditUsd: r.creditUsd,
+      id: r.courseId, name: r.name, fee: 0, status: "", sales: r.sales, tl: r.tl, sm: r.sm, creditUsd: r.creditUsd, ...inrOf({}, r),
       set: true, inCrm: !src, updatedAt: iso(r.updatedAt), updatedByEmail: r.updatedByEmail,
     });
   }
@@ -295,7 +296,7 @@ async function rootView(src: CrmSource | null, doc: ICommissionPlan): Promise<Ro
       return {
         id, name, status, inCrm,
         courses: (t?.courses ?? []).map((c) => ({
-          id: c.courseId, name: c.name, sales: c.sales, tl: c.tl, sm: c.sm, updatedAt: iso(c.updatedAt), updatedByEmail: c.updatedByEmail,
+          id: c.courseId, name: c.name, sales: c.sales, tl: c.tl, sm: c.sm, ...inrOf({}, c), updatedAt: iso(c.updatedAt), updatedByEmail: c.updatedByEmail,
         })),
         slabs: { from: v?.from ?? null, sales: rowsOf(v?.sales), tl: rowsOf(v?.tl), updatedAt: iso(v?.updatedAt), updatedByEmail: v?.updatedByEmail ?? "" },
       };
@@ -353,6 +354,22 @@ type Fail = Error & { statusCode: number };
 const fail = (statusCode: number, message: string): Fail => Object.assign(new Error(message), { statusCode });
 const aedOf = (n: number) => `AED ${n.toLocaleString("en-US")}`;
 
+/* The rupee amounts of a course's row (2026-11-13): what the part of a sale paid in rupees pays each position. */
+type InrAmounts = { salesInr?: number; tlInr?: number; smInr?: number };
+const inrNum = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
+/** The rupee amounts to keep: what was sent, else what the row already has (a page from before them sends none). */
+function inrOf(input: InrAmounts, row?: InrAmounts | null): { salesInr: number; tlInr: number; smInr: number } {
+  return {
+    salesInr: input.salesInr ?? inrNum(row?.salesInr), tlInr: input.tlInr ?? inrNum(row?.tlInr), smInr: input.smInr ?? inrNum(row?.smInr),
+  };
+}
+const hasInr = (r?: InrAmounts | null) => inrNum(r?.salesInr) + inrNum(r?.tlInr) + inrNum(r?.smInr) > 0;
+const inrFig = (r?: InrAmounts | null) =>
+  hasInr(r) ? [r!.salesInr, r!.tlInr, r!.smInr].map((n) => `INR ${inrNum(n).toLocaleString("en-US")}`).join(" / ") : "none";
+/** How a change of the rupee amounts reads in the log; nothing when they are as they were. */
+const inrChange = (before: InrAmounts | null | undefined, after: InrAmounts) =>
+  inrFig(before) === inrFig(after) ? "" : ` · paid in rupees: ${inrFig(before)} → ${inrFig(after)}`;
+
 async function sourceOf(code: PlanPortal): Promise<CrmSource | null> {
   const { sources } = await getSources();
   return sources.find((s) => s.org.code === code) ?? null;
@@ -367,11 +384,11 @@ const nameOf = (code: PlanPortal) => ({ delta: "Sales CRM", draw: "Draw", remote
 
 /** One course's row: what a sale of it pays each position, and the MT5 credit. Only for sales counted from now on. */
 export async function saveCourse(
-  code: string, courseId: string, input: { sales: number; tl: number; sm: number; creditUsd: number }, by: string,
+  code: string, courseId: string, input: { sales: number; tl: number; sm: number; creditUsd: number } & InrAmounts, by: string,
 ): Promise<string> {
   const doc = await planDoc(code);
   const portal = doc.portal;
-  if (doc.tlRule === "never" && input.tl > 0) throw fail(400, `${nameOf(portal)} pays team leaders nothing on a sale`);
+  if (doc.tlRule === "never" && (input.tl > 0 || (input.tlInr ?? 0) > 0)) throw fail(400, `${nameOf(portal)} pays team leaders nothing on a sale`);
   const row = doc.courses.find((c) => c.courseId === courseId);
   let name = row?.name ?? "";
   if (!row) {
@@ -383,12 +400,14 @@ export async function saveCourse(
     name = String(course.name ?? "");
   }
   const before = row ? `${aedOf(row.sales)} / ${aedOf(row.tl)} / ${aedOf(row.sm)} / $${row.creditUsd}` : "not set";
-  const next = { courseId, name, ...input, updatedAt: new Date(), updatedByEmail: by };
+  const inrBefore = row ? inrOf({}, row) : null;
+  const inr = inrOf(input, row);
+  const next = { courseId, name, ...input, ...inr, updatedAt: new Date(), updatedByEmail: by };
   if (row) Object.assign(row, next);
   else doc.courses.push(next);
   doc.updatedByEmail = by;
   await doc.save();
-  return `${nameOf(portal)} · ${name}: ${before} → ${aedOf(input.sales)} / ${aedOf(input.tl)} / ${aedOf(input.sm)} / $${input.creditUsd} (sales / TL / SM / credit)`;
+  return `${nameOf(portal)} · ${name}: ${before} → ${aedOf(input.sales)} / ${aedOf(input.tl)} / ${aedOf(input.sm)} / $${input.creditUsd} (sales / TL / SM / credit)${inrChange(inrBefore, inr)}`;
 }
 
 /** A position's slab rows, in force from this month (UAE) on; the other positions carried as they stand. */
@@ -511,24 +530,27 @@ async function courseName(doc: Awaited<ReturnType<typeof planDoc>>, courseId: st
 
 /** What a sale of a course pays each position on one team, in place of the portal's. Only for sales counted from now on. */
 export async function saveTeamCourse(
-  code: string, teamId: string, courseId: string, input: { sales: number; tl: number; sm: number }, by: string,
+  code: string, teamId: string, courseId: string, input: { sales: number; tl: number; sm: number } & InrAmounts, by: string,
 ): Promise<string> {
   const doc = await planDoc(code);
-  if (doc.tlRule === "never" && input.tl > 0) throw fail(400, `${nameOf(doc.portal)} pays team leaders nothing on a sale`);
+  if (doc.tlRule === "never" && (input.tl > 0 || (input.tlInr ?? 0) > 0)) throw fail(400, `${nameOf(doc.portal)} pays team leaders nothing on a sale`);
   const team = await teamPlanIn(doc, teamId, true);
   const name = await courseName(doc, courseId);
   const row = team.courses.find((c) => c.courseId === courseId);
   const base = doc.courses.find((c) => c.courseId === courseId);
   const fig = (r: { sales: number; tl: number; sm: number }) => `${aedOf(r.sales)} / ${aedOf(r.tl)} / ${aedOf(r.sm)}`;
   const before = row ? fig(row) : base ? `the portal's ${fig(base)}` : "not set";
-  const next: IPlanCourse = { courseId, name, ...input, creditUsd: 0, updatedAt: new Date(), updatedByEmail: by };
+  // The team's own rupee amounts; where it has none, a sale of its takes the portal's (commissionEngine courseRow).
+  const inrBefore = row ? inrOf({}, row) : null;
+  const inr = inrOf(input, row);
+  const next: IPlanCourse = { courseId, name, ...input, ...inr, creditUsd: 0, updatedAt: new Date(), updatedByEmail: by };
   team.courses = row ? team.courses.map((c) => (c.courseId === courseId ? next : c)) : [...team.courses, next];
   team.updatedAt = new Date();
   team.updatedByEmail = by;
   doc.markModified("teams");
   doc.updatedByEmail = by;
   await doc.save();
-  return `${nameOf(doc.portal)} · ${team.name} · ${name}: ${before} → ${fig(input)} (sales / TL / SM, this team only)`;
+  return `${nameOf(doc.portal)} · ${team.name} · ${name}: ${before} → ${fig(input)} (sales / TL / SM, this team only)${inrChange(inrBefore, inr)}`;
 }
 
 /** A course back on the portal's amounts for one team. */
@@ -669,7 +691,7 @@ export async function planForCrm(code: string, month: string) {
     tlPaidOnOwnClose: BUILT_IN[plan.portal].tlPaidOnOwnClose,
     salesManager: plan.salesManager,
     excluded: plan.excluded,
-    courses: plan.courses.map((c) => ({ courseId: c.courseId, name: c.name, sales: c.sales, tl: c.tl, sm: c.sm, creditUsd: c.creditUsd })),
+    courses: plan.courses.map((c) => ({ courseId: c.courseId, name: c.name, sales: c.sales, tl: c.tl, sm: c.sm, creditUsd: c.creditUsd, ...inrOf({}, c) })),
     month,
     slabsFrom: from,
     slabs,
