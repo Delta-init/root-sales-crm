@@ -12,6 +12,9 @@ import { isPastTvMonth, salesTv, salesTvMonth, type SalesTvOptions } from "./sal
  * /cs/dubai TV link: names, teams and amounts, never a student or an email), asked at most every 20 seconds
  * however many screens there are. A course payment approved since the screen opened is announced like a sale
  * ("CS payment"): it joins the closes with crm "cs".
+ *
+ * Asked with `real=1` (2026-11-14): the board without the amounts typed for the CS TV (the CS TV amounts page,
+ * csTvAmountsService.ts) — managers read what was collected. A CS Portal server from before that takes no notice.
  */
 
 const CODE = "commission";
@@ -57,7 +60,7 @@ async function refreshCs(now: number): Promise<void> {
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
       const target = await resolveTarget(CODE);
-      const res = await fetch(`${target.base}/api/public/cs-tv?location=${CS_LOCATION}`, { signal: controller.signal });
+      const res = await fetch(`${target.base}/api/public/cs-tv?location=${CS_LOCATION}&real=1`, { signal: controller.signal });
       const body = (await res.json().catch(() => ({}))) as CsAnswer & { error?: string; message?: string };
       if (res.status === 404) throw new Error("CS Portal's server needs updating — it has no CS board yet");
       if (!res.ok || !Array.isArray(body.cs)) throw new Error(body.error ?? body.message ?? `CS Portal answered ${res.status}`);
@@ -120,7 +123,7 @@ async function csMonth(month: string): Promise<{ data: CsAnswer | null; error: s
   let out: { data: CsAnswer | null; error: string | null; at: number };
   try {
     const target = await resolveTarget(CODE);
-    const res = await fetch(`${target.base}/api/public/cs-tv?location=${CS_LOCATION}&month=${month}`, { signal: controller.signal });
+    const res = await fetch(`${target.base}/api/public/cs-tv?location=${CS_LOCATION}&month=${month}&real=1`, { signal: controller.signal });
     const body = (await res.json().catch(() => ({}))) as CsAnswer & { error?: string; message?: string };
     if (!res.ok || !Array.isArray(body.cs)) throw new Error(body.error ?? body.message ?? `CS Portal answered ${res.status}`);
     // A CS Portal from before the month switch answers with this month: not shown as if it were the one asked for.

@@ -376,7 +376,7 @@ async function main() {
   same("…Noor's month, today, payments and HRMS photo", (({ monthAed, todayAed, payments, todayPayments, photoUrl, team }) => ({ monthAed, todayAed, payments, todayPayments, photoUrl, team }))(md.cs?.people?.[0] ?? {}),
     { monthAed: 12000, todayAed: 3670, payments: 4, todayPayments: 1, photoUrl: "https://hrms-e2e.test/photos/noor.jpg", team: "Falcons" });
   same("…the totals", md.cs?.totals, { monthAed: 21000, todayAed: 3670, payments: 7 });
-  check("asked for Dubai's board", csHits[0] === "?location=dubai", show(csHits));
+  check("asked for Dubai's real board — without the amounts typed for the CS TV", csHits[0] === "?location=dubai&real=1", show(csHits));
   const csClose = (md.closes ?? []).find((c: Json) => c.key === "cs:p1");
   check("the CS payment among the closes, as a CS payment", csClose?.crm === "cs" && csClose?.kind === "cs_payment" && csClose?.closer === "Noor" && csClose?.amount === 3670 && csClose?.courses?.join() === "DQMP", show(csClose));
   check("…with the sales' closes still there", (md.closes ?? []).some((c: Json) => c.crm === "delta"), show(md.closes));
@@ -456,7 +456,7 @@ async function main() {
     && pDelta.revenueToday === null && (pmd.onBreak ?? []).length === 0 && (pmd.closes ?? []).length === 0, show({ p: pDelta.people, b: pmd.onBreak, c: pmd.closes?.length }));
   same("…Dilshad hidden that month too, his figures counted", (({ count, closingsMonth, revenueMonth }) => ({ count, closingsMonth, revenueMonth }))(pDelta.hidden ?? {}), { count: 1, closingsMonth: 3, revenueMonth: 9000 });
   check("…Draw, from before the switch (it answered this month): said it needs updating, not shown as that month", crmOf(pmd, "draw").status === "outdated" && /past month/.test(crmOf(pmd, "draw").error ?? "") && !(crmOf(pmd, "draw").people ?? []).length, show(crmOf(pmd, "draw")));
-  check("…the CS team that month, from CS Portal's board for it", pmd.cs?.status === "ok" && pmd.cs?.month === MONTH_PREV && pmd.cs?.totals?.monthAed === 15000 && csHits.slice(csBefore).includes(`?location=dubai&month=${MONTH_PREV}`), show({ cs: pmd.cs, hits: csHits.slice(csBefore) }));
+  check("…the CS team that month, from CS Portal's board for it", pmd.cs?.status === "ok" && pmd.cs?.month === MONTH_PREV && pmd.cs?.totals?.monthAed === 15000 && csHits.slice(csBefore).includes(`?location=dubai&month=${MONTH_PREV}&real=1`), show({ cs: pmd.cs, hits: csHits.slice(csBefore) }));
   const hitsMid = hits.length, csMid = csHits.length;
   const pubPast = await call(`/public/manager-tv?month=${MONTH_PREV}`);
   check("the open link: the same month, no email anywhere, nobody asked again (kept a few minutes)", pubPast.body?.data?.month === MONTH_PREV && !/@/.test(JSON.stringify(pubPast.body?.data ?? {}).replace(/https?:\/\/[^"]*/g, ""))
