@@ -325,6 +325,68 @@ async function main() {
   check("…the page: Titans with no course rows, its own TL slab still in force", titansAfter?.courses?.length === 0 && titansAfter.slabs.tl.length === 2
     && titansAfter.slabs.sales.length === 0 && titansAfter.slabs.from === month, show(titansAfter));
 
+  step("Case 9 — a course's rupee amounts: the part of a sale paid in rupees earns them (2026-11-13)");
+  const inrLines = (x: Json) => (x?.lines ?? []).map((l: Json) => `${l.role}:${l.amount}:${l.amountInr}`).join(" ");
+  put = await call("PUT", `/commission-plans/delta/courses/${D.courses.mbt}`, root, { sales: 230, tl: 85, sm: 100, creditUsd: 500, salesInr: 5000, tlInr: 2000, smInr: 2500 });
+  r = await resolve("delta", { closer: String(D.users.ria), team: String(D.teams.glad), course: String(D.courses.mbt) });
+  check("a sale's lines carry the course's rupee amounts beside the AED ones", put.status === 200 && inrLines(r) === "sales:230:5000 tl:85:2000 sm:100:2500" && r.plan.salesInr === 5000 && r.plan.smInr === 2500, show(r));
+  check("…and the CRM reads them with the plan",
+    (await call("GET", `/service/commission/plan?month=${month}`, as("delta"))).body?.data?.courses?.find((c: Json) => c.courseId === String(D.courses.mbt))?.tlInr === 2000);
+  r = await resolve("delta", { closer: String(D.users.nina), team: String(D.teams.managers), course: String(D.courses.mbt) });
+  check("a line the rules pay nothing (the Sales Manager leading the team) pays nothing in rupees either", inrLines(r) === "sales:230:5000 tl:0:0 sm:100:2500", show(r));
+  r = await resolve("delta", { closer: String(D.users.mo), team: String(D.teams.titans), course: String(D.courses.dwt) });
+  check("a course with no rupee amounts: none on its lines", inrLines(r) === "sales:500:0 tl:200:0 sm:300:0", show(r));
+  await call("PUT", `${team}/courses/${D.courses.mbt}`, root, { sales: 300, tl: 120, sm: 150 });
+  r = await resolve("delta", { closer: String(D.users.mo), team: String(D.teams.titans), course: String(D.courses.mbt) });
+  check("a team's own row with no rupee amounts: its AED amounts, all teams' rupee amounts", inrLines(r) === "sales:300:5000 tl:120:2000 sm:150:2500", show(r));
+  put = await call("PUT", `${team}/courses/${D.courses.mbt}`, root, { sales: 300, tl: 120, sm: 150, salesInr: 6000, tlInr: 0, smInr: 0 });
+  r = await resolve("delta", { closer: String(D.users.mo), team: String(D.teams.titans), course: String(D.courses.mbt) });
+  check("…with rupee amounts of its own: those, and only those", put.status === 200 && inrLines(r) === "sales:300:6000 tl:120:0 sm:150:0", show(r));
+  check("…in the change list", /this team only\) · paid in rupees: none → INR 6,000 \/ INR 0 \/ INR 0/.test(put.body?.data?.find((p: Json) => p.code === "delta")?.root?.changes?.[0]?.detail ?? ""),
+    show(put.body?.data?.find((p: Json) => p.code === "delta")?.root?.changes?.[0]));
+  await call("DELETE", `${team}/courses/${D.courses.mbt}`, root);
+  r = await resolve("delta", { closer: String(D.users.mo), team: String(D.teams.titans), course: String(D.courses.mbt), amounts: { sales: 200, tl: 70, sm: 90, salesInr: 4000 } });
+  check("a held sale settles at the rupee amounts it was held at", inrLines(r) === "sales:200:4000 tl:70:0 sm:90:0", show(r));
+
+  // My Pay: three Gladiators sales this month — a quarter in rupees and paid in full; half paid (in rupees) and still
+  // owing; all in rupees but counted before the rupee amounts, so its lines have none.
+  const paidNow = new Date();
+  const before = row((await call("GET", `/service/commission/pay?month=${month}`, as("delta"))).body?.data, "Ria")?.commission;
+  const inrLine = (role: string, who: Types.ObjectId, userName: string, amount: number, amountInr?: number) => ({ role, user: who, userName, amount, ...(amountInr === undefined ? {} : { amountInr }) });
+  const gladLines = (inr: boolean) => [
+    inrLine("sales", D.users.ria, "Ria", 1000, inr ? 20000 : undefined), inrLine("tl", D.users.lena, "Lena", 300, inr ? 6000 : undefined), inrLine("sm", D.users.abrar, "Abrar", 150, inr ? 3000 : undefined),
+  ];
+  const saleBase = { course: D.courses.mbt, courseName: "MBT", closer: D.users.ria, closerName: "Ria", team: D.teams.glad, state: "counted", month, saleDate: paidNow };
+  await dbs.delta.collection("commissionsales").insertMany([
+    { ...saleBase, student: new Types.ObjectId(), studentName: "Part rupees", invoiceNumber: "IN-90001", fee: 20000, owedShare: 0,
+      collections: [{ paidAt: paidNow, share: 0.25, aed: 5000, inr: true }, { paidAt: paidNow, share: 0.75, aed: 15000 }], lines: gladLines(true) },
+    { ...saleBase, student: new Types.ObjectId(), studentName: "Still owing", invoiceNumber: "IN-90002", fee: 10000, owedShare: 0.5,
+      collections: [{ paidAt: paidNow, share: 0.5, aed: 5000, inr: true }], lines: gladLines(true) },
+    { ...saleBase, student: new Types.ObjectId(), studentName: "Before rupee amounts", invoiceNumber: "IN-90003", fee: 8000, owedShare: 0,
+      collections: [{ paidAt: paidNow, share: 1, aed: 8000, inr: true }], lines: gladLines(false) },
+  ]);
+  now = (await call("GET", `/service/commission/pay?month=${month}`, as("delta"))).body?.data;
+  const ria = row(now, "Ria"), riaPay = ria?.commission;
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  check("My Pay: the quarter paid in rupees earns INR 5,000 of the 20,000; the rest AED 750 — with the old sale's 1,000 all in dirhams",
+    r2(riaPay?.earned - (before?.earned ?? 0)) === 1750 && riaPay?.earnedInr === 5000, show([before, riaPay]));
+  check("…the sale still owing waits whole, in dirhams", r2(riaPay?.balance - (before?.balance ?? 0)) === 1000, show([before, riaPay]));
+  check("…the level's percent on each part, dirhams and rupees apart", riaPay?.payable === r2((riaPay.earned * ria.percent) / 100) && riaPay.payableInr === r2((5000 * ria.percent) / 100)
+    && ria.total === r2(ria.salary + riaPay.payable), show(ria));
+  check("…the team leader and the Sales Manager the same way: INR 1,500 and INR 750", row(now, "Lena")?.commission?.earnedInr === 1500 && row(now, "Abrar")?.commission?.earnedInr === 750,
+    show([row(now, "Lena")?.commission, row(now, "Abrar")?.commission]));
+
+  PAY.delta = [{ user: String(D.users.ria), name: "Ria", percent: 50, level: "Base", earned: riaPay?.earned, payable: 875, earnedInr: 5000, payableInr: 2500 }];
+  const fin = (await call("GET", `/service/crm-commission?month=${month}`, asFinance)).body?.data?.crms?.find((c: Json) => c.code === "delta");
+  const finRia = fin?.people?.find((p: Json) => p.name === "Ria");
+  const lineOf = (inv: string) => finRia?.lines?.find((l: Json) => l.invoiceNumber === inv);
+  check("finance is given the split: AED 750 + INR 5,000, a quarter in rupees of 1,000 / INR 20,000",
+    lineOf("IN-90001")?.amount === 750 && lineOf("IN-90001").amountInr === 5000 && lineOf("IN-90001").rupeeShare === 0.25 && lineOf("IN-90001").plan === 1000 && lineOf("IN-90001").planInr === 20000, show(lineOf("IN-90001")));
+  check("…the sale still owing: waiting whole, in dirhams", lineOf("IN-90002")?.waiting === 1000 && lineOf("IN-90002").amount === 0 && lineOf("IN-90002").amountInr === 0, show(lineOf("IN-90002")));
+  check("…the sale counted before the rupee amounts: all in dirhams", lineOf("IN-90003")?.amount === 1000 && lineOf("IN-90003").amountInr === 0 && lineOf("IN-90003").rupeeShare === 0, show(lineOf("IN-90003")));
+  check("…the person's and the CRM's rupee totals; the payable from the CRM's My Pay", finRia?.amountInr === 5000 && finRia.payableInr === 2500 && finRia.amount === 1750
+    && fin.totalInr === 7250 && fin.payableInrTotal === 2500, show({ amountInr: finRia?.amountInr, payableInr: finRia?.payableInr, amount: finRia?.amount, totalInr: fin?.totalInr, payableInrTotal: fin?.payableInrTotal }));
+
   console.log(`\n${checks - failures}/${checks} checks passed`);
   crmApi.close();
   await mongoose.disconnect();

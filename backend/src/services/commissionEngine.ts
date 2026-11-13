@@ -58,7 +58,13 @@ function rulesOf(plan: ICommissionPlan) {
 /* ── Who earns what on a sale ─────────────────────────────────────────────────────────────────────────────────── */
 
 export type SaleState = "counted" | "waiting" | "excluded";
-export interface EngineLine { role: PlanSlabRole; user: string; userName: string; amount: number; note?: string }
+/**
+ * `amountInr` (the user, 2026-11-13: "separate INR commission for each course… the INR pay will be different"): what
+ * the line pays, in rupees, for the part of the fee the client paid in rupees — the course's own rupee amount, never
+ * `amount` converted. 0: none set, and that part is paid at `amount` like the rest.
+ */
+export interface EngineLine { role: PlanSlabRole; user: string; userName: string; amount: number; amountInr: number; note?: string }
+type Row = { sales: number; tl: number; sm: number; creditUsd: number; salesInr: number; tlInr: number; smInr: number };
 export interface Resolved {
   state: SaleState;
   reason: string;
@@ -66,7 +72,7 @@ export interface Resolved {
   teamName: string;
   lines: EngineLine[];
   /** The course's row the amounts were taken from. */
-  plan: { sales: number; tl: number; sm: number; creditUsd: number };
+  plan: Row;
 }
 
 type TeamDoc = { _id: Types.ObjectId; name?: string; status?: string; leaders?: unknown[]; members?: unknown[] };
@@ -80,11 +86,36 @@ export function teamPlanOf(plan: ICommissionPlan, teamId: string): IPlanTeam | n
  * A course's row in the plan; zeros for one nobody has set. On a team with its own row for the course, that row's
  * amounts (2026-11-03) — the MT5 credit stays the portal's, as it is the student's, not commission.
  */
-export function courseRow(plan: ICommissionPlan, courseId: string, teamId = "") {
+export function courseRow(plan: ICommissionPlan, courseId: string, teamId = ""): Row {
   const r = plan.courses.find((c) => c.courseId === courseId);
-  const base = { sales: positive(r?.sales), tl: positive(r?.tl), sm: positive(r?.sm), creditUsd: positive(r?.creditUsd) };
+  const inrOf = (x?: { salesInr?: number; tlInr?: number; smInr?: number }) => ({ salesInr: positive(x?.salesInr), tlInr: positive(x?.tlInr), smInr: positive(x?.smInr) });
+  const base = { sales: positive(r?.sales), tl: positive(r?.tl), sm: positive(r?.sm), creditUsd: positive(r?.creditUsd), ...inrOf(r) };
   const own = teamPlanOf(plan, teamId)?.courses.find((c) => c.courseId === courseId);
-  return own ? { sales: positive(own.sales), tl: positive(own.tl), sm: positive(own.sm), creditUsd: base.creditUsd } : base;
+  if (!own) return base;
+  // The rupee amounts (2026-11-13): the team's own where its row has any, else the portal's.
+  const mine = inrOf(own);
+  const inr = mine.salesInr + mine.tlInr + mine.smInr > 0 ? mine : inrOf(r);
+  return { sales: positive(own.sales), tl: positive(own.tl), sm: positive(own.sm), creditUsd: base.creditUsd, ...inr };
+}
+
+/**
+ * The share of what a sale has received that came in rupees, 0–1 (2026-11-13) — from the payments the CRM marks
+ * `inr`. A sale not followed payment by payment, or with nothing received: none.
+ */
+export function rupeeShareOf(s: { collections?: Array<{ share?: number; inr?: boolean }> | null }): number {
+  const list = Array.isArray(s.collections) ? s.collections.filter((c) => Number(c.share) > 0) : [];
+  const all = list.reduce((t, c) => t + Number(c.share), 0);
+  if (!(all > 0)) return 0;
+  return Math.min(1, round4(list.filter((c) => c.inr === true).reduce((t, c) => t + Number(c.share), 0) / all));
+}
+
+/**
+ * A line's amount by how the client paid: the rupee share at the line's rupee amount, the rest in dirhams. With no
+ * rupee amount set, or nothing paid in rupees, all of it in dirhams as before.
+ */
+export function splitByCurrency(amount: number, amountInr: number, rupeeShare: number): { aed: number; inr: number } {
+  if (!(amountInr > 0) || !(rupeeShare > 0)) return { aed: amount, inr: 0 };
+  return { aed: round2(amount * (1 - rupeeShare)), inr: round2(amountInr * rupeeShare) };
 }
 
 /** Names of the CRM's people, read once each. */
@@ -129,15 +160,21 @@ export async function resolveSale(
     /** A bundle (Draw): every course of the sale — their rows added up, as the CRM adds them. */
     courses?: string[] | null;
     /** The amounts a held sale was held at (2026-11-01, stage 3): used instead of the course's row. */
-    amounts?: { sales: number; tl: number; sm: number; creditUsd?: number } | null;
+    amounts?: { sales: number; tl: number; sm: number; creditUsd?: number; salesInr?: number; tlInr?: number; smInr?: number } | null;
   },
   names: Names = new Names(db),
 ): Promise<Resolved> {
   // The amounts on the sale's team: its own row where it has one (2026-11-03), so worked out once the team is known.
-  const rowOn = (teamId: string) => input.amounts
-    ? { sales: positive(input.amounts.sales), tl: positive(input.amounts.tl), sm: positive(input.amounts.sm), creditUsd: positive(input.amounts.creditUsd) }
+  const rowOn = (teamId: string): Row => input.amounts
+    ? {
+      sales: positive(input.amounts.sales), tl: positive(input.amounts.tl), sm: positive(input.amounts.sm), creditUsd: positive(input.amounts.creditUsd),
+      salesInr: positive(input.amounts.salesInr), tlInr: positive(input.amounts.tlInr), smInr: positive(input.amounts.smInr),
+    }
     : input.courses?.length
-      ? input.courses.map((c) => courseRow(plan, idOf(c), teamId)).reduce((t, r) => ({ sales: t.sales + r.sales, tl: t.tl + r.tl, sm: t.sm + r.sm, creditUsd: t.creditUsd + r.creditUsd }), { sales: 0, tl: 0, sm: 0, creditUsd: 0 })
+      ? input.courses.map((c) => courseRow(plan, idOf(c), teamId)).reduce<Row>((t, r) => ({
+        sales: t.sales + r.sales, tl: t.tl + r.tl, sm: t.sm + r.sm, creditUsd: t.creditUsd + r.creditUsd,
+        salesInr: t.salesInr + r.salesInr, tlInr: t.tlInr + r.tlInr, smInr: t.smInr + r.smInr,
+      }), { sales: 0, tl: 0, sm: 0, creditUsd: 0, salesInr: 0, tlInr: 0, smInr: 0 })
       : courseRow(plan, idOf(input.course), teamId);
   const rules = rulesOf(plan);
   const none = { team: null, teamName: "", lines: [] as EngineLine[], plan: rowOn("") };
@@ -149,15 +186,16 @@ export async function resolveSale(
 
   const { team, reason } = await teamFor(db, idOf(input.team), closer, closerName);
   const row = rowOn(team ? String(team._id) : "");
-  const line = async (role: PlanSlabRole, user: string, amount: number, note?: string): Promise<EngineLine> => ({
-    role, user, userName: await names.of(user), amount, ...(note ? { note } : {}),
+  // A line the rules pay nothing pays nothing in rupees either.
+  const line = async (role: PlanSlabRole, user: string, amount: number, amountInr: number, note?: string): Promise<EngineLine> => ({
+    role, user, userName: await names.of(user), amount, amountInr, ...(note ? { note } : {}),
   });
   const sm = plan.salesManager?.id ?? "";
 
   if (rules.tlRule === "never") {
     const shown = { team: team ? String(team._id) : null, teamName: team?.name ?? "", lines: [] as EngineLine[], plan: row };
     if (!sm) return { ...shown, state: "waiting", reason: "No Sales Manager is set on the commission plan" };
-    return { ...shown, state: "counted", reason: "", lines: [await line("sales", closer, row.sales), await line("sm", sm, row.sm)] };
+    return { ...shown, state: "counted", reason: "", lines: [await line("sales", closer, row.sales, row.salesInr), await line("sm", sm, row.sm, row.smInr)] };
   }
 
   if (!team) return { ...none, state: "waiting", reason: reason ?? "No team" };
@@ -180,20 +218,21 @@ export async function resolveSale(
     state: "counted",
     reason: "",
     lines: [
-      await line("sales", closer, row.sales),
-      await line("tl", tl, tlIsSm || tlClosedIt ? 0 : row.tl, tlNote),
-      await line("sm", sm, row.sm),
+      await line("sales", closer, row.sales, row.salesInr),
+      await line("tl", tl, tlIsSm || tlClosedIt ? 0 : row.tl, tlIsSm || tlClosedIt ? 0 : row.tlInr, tlNote),
+      await line("sm", sm, row.sm, row.smInr),
     ],
   };
 }
 
 /* ── My Pay ───────────────────────────────────────────────────────────────────────────────────────────────────── */
 
-type Collection = { paidAt: Date; share: number; aed?: number };
+/** `inr`: the payment came in rupees (2026-11-13) — the CRM marks it; absent on payments from before. */
+type Collection = { paidAt: Date; share: number; aed?: number; inr?: boolean };
 type SaleDoc = {
   _id: Types.ObjectId;
   student?: unknown; closer?: unknown; team?: unknown; state?: string; month?: string; fee?: number; saleDate?: Date;
-  owedShare?: number | null; collections?: Collection[] | null; lines?: Array<{ user?: unknown; amount?: number }>;
+  owedShare?: number | null; collections?: Collection[] | null; lines?: Array<{ user?: unknown; amount?: number; amountInr?: number }>;
 };
 
 /** The share of the fee received between two instants; a sale not followed yet, all of it on its sale day. */
@@ -235,7 +274,13 @@ export interface EnginePayRow {
   next: (Level & { more: number }) | null;
   salary: number;
   percent: number;
-  commission: { earned: number; balance: number; payable: number; notCountedYet: number };
+  /**
+   * `earnedInr` / `payableInr` (2026-11-13): the part earned in rupees — on what clients paid in rupees, at the
+   * courses' rupee amounts — and what the level pays of it. Apart from `earned` / `payable`, which are dirhams only;
+   * `balance` (still waiting for full payment) stays in dirhams until the client has paid, as how they pay the rest
+   * decides the split.
+   */
+  commission: { earned: number; balance: number; payable: number; notCountedYet: number; earnedInr: number; payableInr: number };
   total: number;
 }
 
@@ -273,7 +318,7 @@ export function slabsOfMonth(
 
 type Fact = {
   closer: string; team: string; fee: number; collected: number; inMonth: boolean; approved: boolean; state: string;
-  lines: { user: string; amount: number; balance: number }[];
+  lines: { user: string; amount: number; inr: number; balance: number }[];
 };
 
 /** Everyone on the slabs in a month, with what the month pays them — the CRM's My Pay, from Root's plan. */
@@ -323,7 +368,12 @@ export async function payRows(db: Connection, plan: ICommissionPlan, month: stri
       approved: s.state === "counted" || s.state === "waiting" || approvedInFinance.has(String(s.student)),
       state: String(s.state ?? ""),
       lines: s.state === "counted"
-        ? (s.lines ?? []).map((l) => ({ user: idOf(l.user), amount: partOf(Number(l.amount) || 0, earnedShareBetween(s, from, to)), balance: partOf(Number(l.amount) || 0, waitingShareOf(s)) }))
+        ? (s.lines ?? []).map((l) => {
+          // Earned whole in the month the client finished paying — split then by how they paid (2026-11-13).
+          const earned = earnedShareBetween(s, from, to);
+          const by = splitByCurrency(Number(l.amount) || 0, Number(l.amountInr) || 0, rupeeShareOf(s));
+          return { user: idOf(l.user), amount: partOf(by.aed, earned), inr: partOf(by.inr, earned), balance: partOf(Number(l.amount) || 0, waitingShareOf(s)) };
+        })
         : [],
     };
   });
@@ -356,7 +406,8 @@ export async function payRows(db: Connection, plan: ICommissionPlan, month: stri
     const awaiting = mine.filter((f) => !f.approved && f.inMonth);
     const earned = round2(facts.reduce((t, f) => t + f.lines.filter((l) => l.user === user).reduce((x, l) => x + l.amount, 0), 0));
     const balance = round2(facts.reduce((t, f) => t + f.lines.filter((l) => l.user === user).reduce((x, l) => x + l.balance, 0), 0));
-    if (u.status !== "active" && !mine.length && !earned) continue;
+    const earnedInr = round2(facts.reduce((t, f) => t + f.lines.filter((l) => l.user === user).reduce((x, l) => x + l.inr, 0), 0));
+    if (u.status !== "active" && !mine.length && !earned && !earnedInr) continue;
     const value = round2(approved.reduce((t, f) => t + f.collected, 0));
     // Their team's slab where it has its own: the team a leader leads, the one a salesperson is in — only when that
     // is one team; the Sales Manager, and anyone in two, on the portal's.
@@ -365,6 +416,7 @@ export async function payRows(db: Connection, plan: ICommissionPlan, month: stri
     const onSlabs = slabsOf(slabTeam ? String(slabTeam._id) : "");
     const { level, next } = levelOf(onSlabs.slabs[role], value);
     const payable = round2((earned * level.percent) / 100);
+    const payableInr = round2((earnedInr * level.percent) / 100);
     rows.push({
       user, name: String(u.name ?? ""), role,
       teams: role === "tl" ? led.filter((t) => t.status === "active").map((t) => String(t.name ?? "")) : [],
@@ -372,7 +424,7 @@ export async function payRows(db: Connection, plan: ICommissionPlan, month: stri
       sales: { count: approved.length, value, fee: round2(approved.reduce((t, f) => t + f.fee, 0)) },
       awaitingFinance: { count: awaiting.length, value: round2(awaiting.reduce((t, f) => t + f.fee, 0)) },
       level, next, salary: level.salary, percent: level.percent,
-      commission: { earned, balance, payable, notCountedYet: mine.filter((f) => f.inMonth && (f.state === "progress" || f.state === "waiting")).length },
+      commission: { earned, balance, payable, notCountedYet: mine.filter((f) => f.inMonth && (f.state === "progress" || f.state === "waiting")).length, earnedInr, payableInr },
       total: round2(level.salary + payable),
     });
   }

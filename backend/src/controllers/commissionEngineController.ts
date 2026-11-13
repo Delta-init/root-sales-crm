@@ -33,11 +33,16 @@ export const plan = async (req: AuthenticatedRequest, res: Response, next: NextF
 
 const idish = z.string().max(64).nullable().optional();
 const amount = z.number().min(0).max(1_000_000);
+const rupees = z.number().min(0).max(100_000_000);
 const resolveSchema = z.object({
   closer: idish, team: idish, course: idish,
   courses: z.array(z.string().max(64)).max(20).nullable().optional(),
   // A held sale is settled at the amounts it was held at, not the course's row now.
-  amounts: z.object({ sales: amount, tl: amount, sm: amount, creditUsd: amount.optional() }).nullable().optional(),
+  // …and, since 2026-11-13, the rupee amounts it was held at (absent from a CRM before them: none).
+  amounts: z.object({
+    sales: amount, tl: amount, sm: amount, creditUsd: amount.optional(),
+    salesInr: rupees.optional(), tlInr: rupees.optional(), smInr: rupees.optional(),
+  }).nullable().optional(),
 });
 
 /* POST /service/commission/resolve — who earns what on one sale, under Root's plan. Nothing is written. */

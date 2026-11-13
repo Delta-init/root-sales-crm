@@ -2,6 +2,7 @@ import { Types } from "mongoose";
 import { getSources } from "./crmConnections.js";
 import { resolveTarget, callTarget } from "../lib/targetClient.js";
 import { inrPerAed } from "./bangaloreRevenue.js";
+import { rupeeShareOf, splitByCurrency } from "./commissionEngine.js";
 
 /**
  * GET /service/crm-commission?month=YYYY-MM — finance's CRM commission tab (the user, 2026-10-21: "commission of each
@@ -38,6 +39,14 @@ export interface CommissionLine {
   salesName: string; tlName: string;
   /** The CRM's student (finance's invoice external id); "" when the sale doesn't say. */
   studentId: string;
+  /**
+   * Paid in rupees (the user, 2026-11-13: "INR payment only gets commission in INR… separate INR commission for each
+   * course"): `amountInr` is what the line earned in INR this month — the share of the fee the client paid in rupees
+   * (`rupeeShare`, 0–1) at the course's own rupee amount (`planInr`) — and `amount` then only the rest, in the CRM's
+   * currency, of the line's whole amount (`plan`). No rupee amount on the course, or nothing paid in rupees: 0, and
+   * `amount` is the whole line as before.
+   */
+  amountInr: number; rupeeShare: number; plan: number; planInr: number;
 }
 export interface CommissionPerson {
   userId: string; name: string; roles: string[]; amount: number; sales: number; lines: CommissionLine[];
@@ -45,6 +54,8 @@ export interface CommissionPerson {
   waiting: number;
   /** My Pay's commission payable, the level's percent and name; null when the CRM's API couldn't say. */
   payable: number | null; percent: number | null; level: string | null;
+  /** Earned in INR this month, and what the level pays of it (null like `payable`); apart from `amount` / `payable`. */
+  amountInr: number; payableInr: number | null;
   /** Their login's email in the CRM — what finance's payroll matches them to an employee by (2026-11-01). */
   email?: string;
 }
@@ -57,9 +68,15 @@ export interface CrmCommission {
   payableTotal: number | null; payError: string | null;
   /** 1 AED = this many rupees, the CRM's Settings rate; null when it couldn't be read. */
   inrPerAed: number | null;
+  /** Earned and payable in INR this month, all people (2026-11-13); payable null with payError. */
+  totalInr: number; payableInrTotal: number | null;
 }
 
-export interface PayPerson { user: string; name: string; role?: string; percent: number; level: string; earned: number; balance?: number; payable: number; notCountedYet?: number }
+export interface PayPerson {
+  user: string; name: string; role?: string; percent: number; level: string; earned: number; balance?: number; payable: number; notCountedYet?: number;
+  /** In INR (2026-11-13); absent from a CRM before them. */
+  earnedInr?: number; payableInr?: number;
+}
 
 /** A CRM's My Pay figures for the month, through its API — or why not. */
 export async function payOf(code: string, month: string): Promise<{ people: PayPerson[] } | { error: string }> {
@@ -124,28 +141,35 @@ export async function crmCommission(month: string): Promise<{ month: string; crm
         const nameAs = (role: string) => String((s.lines ?? []).find((l: Record<string, unknown>) => l.role === role)?.userName ?? "");
         const salesName = nameAs("sales") || String(s.closerName ?? ""), tlName = nameAs("tl");
         const sold = new Set<string>();
+        // How much of what the client paid came in rupees (2026-11-13): that share of each line is earned in INR.
+        const rupeeShare = rupeeShareOf(s);
         for (const l of s.lines ?? []) {
-          const amount = Number(l.amount) || 0;
+          const amount = Number(l.amount) || 0, planInr = Number(l.amountInr) || 0;
           // A salesperson's own sale stays even at 0 — a course with no commission on the plan still counts toward
           // their slab in My Pay (2026-10-31: finance listed 11 sales where My Pay and the TV had 12); a team leader's
           // or sales manager's 0 is left out.
-          if (!l.user || !(amount > 0 || l.role === "sales")) continue;
+          if (!l.user || !(amount > 0 || planInr > 0 || l.role === "sales")) continue;
           const id = String(l.user);
           const mine = payByUser?.get(id);
           const p = byPerson.get(id) ?? {
             userId: id, name: String(l.userName || "—"), roles: [], amount: 0, waiting: 0, sales: 0, lines: [],
             payable: payByUser ? Math.round((Number(mine?.payable) || 0) * 100) / 100 : null,
             percent: mine ? Number(mine.percent) || 0 : payByUser ? 0 : null, level: mine?.level ?? null,
+            amountInr: 0, payableInr: payByUser ? Math.round((Number(mine?.payableInr) || 0) * 100) / 100 : null,
           };
           if (!p.roles.includes(String(l.role))) p.roles.push(String(l.role));
-          const earned = earnedHere ? amount : 0, held = waitingHere ? amount : 0;
+          // Earned: split by how the client paid. Waiting: all in dirhams until they have paid — how they pay the rest decides.
+          const by = splitByCurrency(amount, planInr, rupeeShare);
+          const earned = earnedHere ? by.aed : 0, earnedInr = earnedHere ? by.inr : 0, held = waitingHere ? amount : 0;
           p.amount += earned;
+          p.amountInr += earnedInr;
           p.waiting += held;
           if (!sold.has(id)) { p.sales++; sold.add(id); }
           p.lines.push({
             saleId: String(s._id), saleDate: new Date(s.saleDate).toISOString(), student: String(s.studentName ?? ""), course: String(s.courseName ?? ""),
             invoiceNumber: String(s.invoiceNumber ?? ""), role: String(l.role), amount: earned, waiting: held,
             paidInFullAt: fullAt ? fullAt.toISOString() : null, salesName, tlName, studentId: s.student ? String(s.student) : "",
+            amountInr: earnedInr, rupeeShare: planInr > 0 ? rupeeShare : 0, plan: amount, planInr,
           });
           byPerson.set(id, p);
         }
@@ -157,17 +181,19 @@ export async function crmCommission(month: string): Promise<{ month: string; crm
       );
       for (const p of byPerson.values()) p.email = emailOf.get(p.userId) ?? "";
       const people = [...byPerson.values()]
-        .map((p) => ({ ...p, amount: Math.round(p.amount * 100) / 100, waiting: Math.round(p.waiting * 100) / 100 }))
-        .sort((a, b) => b.amount - a.amount || a.name.localeCompare(b.name));
+        .map((p) => ({ ...p, amount: Math.round(p.amount * 100) / 100, waiting: Math.round(p.waiting * 100) / 100, amountInr: Math.round(p.amountInr * 100) / 100 }))
+        .sort((a, b) => b.amount - a.amount || b.amountInr - a.amountInr || a.name.localeCompare(b.name));
       const payableTotal = payByUser ? Math.round(people.reduce((t, p) => t + (p.payable ?? 0), 0) * 100) / 100 : null;
+      const payableInrTotal = payByUser ? Math.round(people.reduce((t, p) => t + (p.payableInr ?? 0), 0) * 100) / 100 : null;
       return {
         ...base, error: null, people, total: Math.round(people.reduce((t, p) => t + p.amount, 0) * 100) / 100, pending: { progress, waiting },
         waitingTotal: Math.round(people.reduce((t, p) => t + p.waiting, 0) * 100) / 100, payableTotal, payError, inrPerAed: rate,
+        totalInr: Math.round(people.reduce((t, p) => t + p.amountInr, 0) * 100) / 100, payableInrTotal,
       };
     } catch (e) {
-      return { ...base, error: e instanceof Error ? e.message : "Could not read its commission", people: [], total: 0, pending: { progress: 0, waiting: 0 }, waitingTotal: 0, payableTotal: null, payError, inrPerAed: rate };
+      return { ...base, error: e instanceof Error ? e.message : "Could not read its commission", people: [], total: 0, pending: { progress: 0, waiting: 0 }, waitingTotal: 0, payableTotal: null, payError, inrPerAed: rate, totalInr: 0, payableInrTotal: null };
     }
   }));
-  for (const f of failures) crms.push({ code: f.code, name: f.name, currency: "AED", error: f.error, people: [], total: 0, pending: { progress: 0, waiting: 0 }, waitingTotal: 0, payableTotal: null, payError: null, inrPerAed: null });
+  for (const f of failures) crms.push({ code: f.code, name: f.name, currency: "AED", error: f.error, people: [], total: 0, pending: { progress: 0, waiting: 0 }, waitingTotal: 0, payableTotal: null, payError: null, inrPerAed: null, totalInr: 0, payableInrTotal: null });
   return { month, crms };
 }
