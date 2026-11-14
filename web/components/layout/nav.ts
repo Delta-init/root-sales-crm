@@ -8,7 +8,7 @@
  */
 import type { LucideIcon } from "lucide-react";
 import {
-  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, DatabaseBackup, FileBarChart, Gauge, Gift, Headset, Images, Inbox, LayoutGrid, Phone, MonitorPlay, MonitorUp, Shuffle, Tv, Users2,
+  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, DatabaseBackup, FileBarChart, Gauge, Gift, GraduationCap, Headset, Images, Inbox, LayoutGrid, Phone, MonitorPlay, MonitorUp, Shuffle, Tv, Users2,
   WalletCards,
 } from "lucide-react";
 
@@ -104,6 +104,8 @@ export const NAV: NavItem[] = [
       // Mentor KPIs: the plan (weights, targets) edited and approved here only, and every mentor's points worked out
       // here (2026-11-09). Root admins only while it is a preview.
       { href: "/mentor-kpis", label: "Mentor KPIs", icon: Gauge, rootOnly: true },
+      // The open screens with today's classes, and the lines they call each mentor with — recorded here (2026-11-14).
+      { href: "/class-tv", label: "Class TV", icon: GraduationCap, rootOnly: true },
     ],
   },
   /* Also open to everybody: raising work and clearing approvals are jobs the

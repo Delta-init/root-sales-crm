@@ -22,6 +22,7 @@ import managerTvRoutes from "./managerTvRoutes.js";
 import publicRoutes from "./publicRoutes.js";
 import tvMediaRoutes from "./tvMediaRoutes.js";
 import csTvAmountsRoutes from "./csTvAmountsRoutes.js";
+import classTvRoutes from "./classTvRoutes.js";
 import walletRoutes from "./walletRoutes.js";
 import rewardRoutes from "./rewardRoutes.js";
 import mentorKpiRoutes from "./mentorKpiRoutes.js";
@@ -58,6 +59,8 @@ router.use("/public", publicRoutes);
 router.use("/tv-media", tvMediaRoutes);
 // Amounts typed for a Bangalore CS that CS Portal's CS TV shows like payments (2026-11-14) — root admins; kept in CS Portal.
 router.use("/cs-tv-amounts", csTvAmountsRoutes);
+// The Class TV's recorded lines (2026-11-14) — root admins; the TVs read the board and the recordings from /public.
+router.use("/class-tv", classTvRoutes);
 // My Wallet, from the HRMS (2026-11-04) — everyone signed in, their own only.
 router.use("/wallet", walletRoutes);
 // The sales CRMs' gift rewards: targets, gifts and the gifts chosen (2026-11-04) — root admins.

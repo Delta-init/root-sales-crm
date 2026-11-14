@@ -4,6 +4,7 @@ import { salesTv } from "../services/salesTvService.js";
 import { managerTv } from "../services/managerTvService.js";
 import { sendSuccess } from "../utils/response.js";
 import { giftPhoto } from "../services/rewardsService.js";
+import { classTv, voiceAudio } from "../services/classTvService.js";
 
 /*
  * Open to anybody with the link — no sign-in (2026-10-20). Only what an office
@@ -60,6 +61,34 @@ router.get("/rewards/photos/:id", tvLimiter, async (req: Request, res: Response,
     // Another site's page shows it: helmet's same-origin default would refuse that.
     res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
     res.end(p.photo);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// The Class TV (2026-11-14): an academy's classes today and who teaches them — names, courses, times and places, never
+// an email. One shared answer however many screens: the LMS is asked at most once a minute for each academy.
+router.get("/class-tv", tvLimiter, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
+    res.setHeader("Cache-Control", "no-store");
+    sendSuccess(res, "Class TV", await classTv(req.query.academy, { publicView: true }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// A line the Class TV plays, by its id: a short WAV recorded on the Mentor voices page. Versioned in the link (a new
+// recording is a new address), so a screen keeps its copy.
+router.get("/class-tv/voice/:id", tvLimiter, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const audio = await voiceAudio(String(req.params.id));
+    if (!audio) { res.status(404).end(); return; }
+    res.setHeader("Content-Type", "audio/wav");
+    res.setHeader("Content-Length", String(audio.length));
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    res.end(audio);
   } catch (error) {
     next(error);
   }
