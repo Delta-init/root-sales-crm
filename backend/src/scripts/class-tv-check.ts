@@ -11,10 +11,14 @@
  *   Case 4  errors       the LMS down: the open answer says so plainly, a root admin sees its words; today's board
  *                        kept through a failure; not a WAV, too big, no such line, no such recording
  *   Case 5  permission   the recordings: no session 401, not a root admin 403; the board and a recording open
+ *   Case 6  photos       each mentor's face from the HRMS (its signed work-modes): by their email, else by their name;
+ *                        somebody the HRMS has no photo of gets none; asked once for the same people however many
+ *                        screens; the HRMS down: the board carries on, with the faces it already had
  *
- * Run through scripts/class-tv-check.sh. Scratch database on 127.0.0.1 only; the LMS is a stand-in.
+ * Run through scripts/class-tv-check.sh. Scratch database on 127.0.0.1 only; the LMS and the HRMS are a stand-in.
  */
 import mongoose from "mongoose";
+import crypto from "node:crypto";
 import { createServer } from "node:http";
 
 const uri = process.env.MONGODB_URI ?? "";
@@ -82,9 +86,37 @@ const mentors = () => [
 ];
 const hits: { query: URLSearchParams; secret: boolean }[] = [];
 let down = false;
+// HRMS's work-modes, as it answers: one row for each person asked, in the order asked. It knows Asha by her email, Ben
+// only by his name (his HRMS email is another), has no photo of Zed, and has never heard of Ravi's email or name.
+const hrmsHits: { people: { email: string; name?: string }[]; signed: boolean }[] = [];
+let hrmsDown = false;
+const PHOTO = (who: string) => `https://hrms-e2e.test/photos/${who}.jpg?sig=abc`;
+const hrmsRow = (p: { email: string; name?: string }) => {
+  const email = p.email.toLowerCase();
+  const photoUrl = email === "asha@lms-e2e.test" ? PHOTO("asha") : p.name === "Ben" ? PHOTO("ben") : null;
+  return { email: p.email, matchedBy: email === "asha@lms-e2e.test" ? "email" : p.name === "Ben" ? "name" : null, hrmsEmail: null, hrmsName: p.name ?? null, workMode: "office", location: "Dubai", status: "active", designation: "Mentor", photoUrl };
+};
 const stand = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://x");
   const send = (status: number, body: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
+  if (url.pathname.startsWith("/hrms/")) {
+    let raw = "";
+    req.on("data", (c) => { raw += c; });
+    req.on("end", () => {
+      const path = url.pathname.slice("/hrms".length) + url.search;
+      const ts = String(req.headers["x-delta-timestamp"] ?? ""), nonce = String(req.headers["x-delta-nonce"] ?? "");
+      const canonical = [req.method, path, ts, nonce, crypto.createHash("sha256").update(raw).digest("hex")].join("\n");
+      const want = crypto.createHmac("sha256", "class-tv-e2e-hrms-signing").update(canonical).digest("hex");
+      const signed = req.headers["x-delta-signature"] === want && req.headers["x-delta-client"] === "class-tv-e2e";
+      const people: { email: string; name?: string }[] = (() => { try { return JSON.parse(raw).people ?? []; } catch { return []; } })();
+      hrmsHits.push({ people, signed });
+      if (!signed) return send(401, { success: false, message: "Bad signature" });
+      if (req.method !== "POST" || path !== "/api/v1/integrations/directory/work-modes") return send(404, { success: false, message: "Route not found" });
+      if (hrmsDown) return send(500, { success: false, message: "HRMS exploded at 10.0.0.6" });
+      send(200, { success: true, data: people.map(hrmsRow) });
+    });
+    return;
+  }
   if (url.pathname !== "/lms/api/v1/service/mentors") return send(404, { success: false, message: "Route not found" });
   hits.push({ query: url.searchParams, secret: req.headers["x-portal-secret"] === SECRET });
   if (req.headers["x-portal-secret"] !== SECRET) return send(401, { success: false, message: "Bad secret" });
@@ -132,7 +164,7 @@ async function main() {
   const c1 = (d.classes ?? []).find((c: Json) => c.id === "c1"), c2 = (d.classes ?? []).find((c: Json) => c.id === "c2");
   same("a class: course, module, time, place", (({ title, course, module, startsAt, endsAt, durationMins, status, online, place }) => ({ title, course, module, startsAt, endsAt, durationMins, status, online, place }))(c1 ?? {}),
     { title: "Forex A", course: "Forex Mastery", module: "Module 3", startsAt: C1.startsAt, endsAt: at(DXB, 120), durationMins: 60, status: "scheduled", online: true, place: "Pod 6" });
-  same("…its mentor, by name — no recording yet, no photo without HRMS", c1?.mentors, [{ id: ASHA, name: "Asha", photoUrl: null, voice: null }]);
+  same("…its mentor, by name, with her HRMS photo — no recording yet", c1?.mentors, [{ id: ASHA, name: "Asha", photoUrl: PHOTO("asha"), voice: null }]);
   check("a co-mentored class once, with both who teach it; in person, in its room, on now", c2?.mentors?.map((m: Json) => m.name).join() === "Asha,Ben" && c2.online === false && c2.place === "Class Room 1" && c2.status === "live" && c2.endsAt === at(DXB, 60), show(c2));
   check("a cancelled class says so", (d.classes ?? []).find((c: Json) => c.id === "c3")?.status === "cancelled");
   check("no email and no meeting anywhere in the open answer", !/@/.test(JSON.stringify(d)) && !/With a student/.test(JSON.stringify(d)), JSON.stringify(d).slice(0, 300));
@@ -141,6 +173,12 @@ async function main() {
     return !!h && h.secret && h.query.get("allAcademies") === "1" && h.query.get("remoteOrgId") === "64a000000000000000000d0b" && Date.parse(h.query.get("to") ?? "") === noonOf(240) + 12 * 3_600_000 - 1;
   })(), show(dayHits(240).map((h) => h.query.toString())));
   check("no common line yet", d.voices?.soon === null && d.voices?.now === null, show(d.voices));
+
+  step("Case 6 — the mentors' photos, from the HRMS");
+  check("Ben's too, found by his name; both faces on the class they teach together", c2?.mentors?.map((m: Json) => m.photoUrl).join() === `${PHOTO("asha")},${PHOTO("ben")}`, show(c2?.mentors));
+  check("the HRMS asked once, signed, for the mentors teaching in Dubai today — by email and name", hrmsHits.length === 1 && hrmsHits[0]!.signed
+    && hrmsHits[0]!.people.map((p) => `${p.email}:${p.name}`).sort().join() === "asha@lms-e2e.test:Asha,ben@lms-e2e.test:Ben", show(hrmsHits));
+  check("…nobody asked about who has no class today (Zed), and no email in the photo links", !/zed/i.test(JSON.stringify(hrmsHits)) && !/@/.test(JSON.stringify(d)));
 
   step("Case 5 — the recordings are root admins'; the board is open");
   for (const [method, path, body] of [["GET", "/class-tv", undefined], ["GET", "/class-tv/voices", undefined], ["PUT", `/class-tv/voices/mentor:${ASHA}`, {}], ["DELETE", `/class-tv/voices/mentor:${ASHA}`, undefined]] as [string, string, unknown][]) {
@@ -204,6 +242,7 @@ async function main() {
   for (let i = 0; i < 5; i++) await call("GET", "/public/class-tv?academy=dubai");
   await call("GET", "/class-tv?academy=dubai", root);
   check("Dubai's classes asked for once through all of that — recordings showed without asking again", dayHits(240).length === 1, show(dayHits(240).length));
+  check("…and the HRMS still asked only that once: the faces are kept ten minutes", hrmsHits.length === 1, show(hrmsHits.length));
 
   step("Case 3 — the pure parts");
   const { classesOf, dayOf } = await import("../services/classTvService.js");
@@ -230,11 +269,15 @@ async function main() {
 
   step("Case 1 — Bangalore's board, once its minute is over");
   await sleep(Math.max(0, blrAskedAt + 61_000 - Date.now()));
+  hrmsDown = true;   // Ravi's face is first wanted now, and the HRMS can't be asked
   r = await call("GET", "/public/class-tv?academy=bangalore");
   const b = r.body?.data ?? {};
   check("Bangalore's own classes and the one lent to it, in India's day", b.status === "ok" && b.academyName === "Bangalore" && b.timezone === "Asia/Kolkata" && (b.classes ?? []).map((c: Json) => c.id).join() === "c4,c5", show((b.classes ?? []).map((c: Json) => c.id)));
   check("…the lent class under its Dubai mentor, the common line there too", (b.classes ?? []).find((c: Json) => c.id === "c5")?.mentors?.[0]?.name === "Ben" && b.voices?.soon?.url === soonUrl, show(b.voices));
   check("…asked of the LMS for India's day", dayHits(330).length === 2 && dayHits(330).every((h) => h.secret), show(dayHits(330).length));
+  check("Case 6 — the HRMS down: the board carries on, Ravi without a face", b.status === "ok" && (b.classes ?? []).find((c: Json) => c.id === "c4")?.mentors?.[0]?.photoUrl === null && hrmsHits.length === 2, show({ hrms: hrmsHits.length, c4: (b.classes ?? []).find((c: Json) => c.id === "c4")?.mentors }));
+  check("…Ben with the face it already had, and only Ravi was asked about", (b.classes ?? []).find((c: Json) => c.id === "c5")?.mentors?.[0]?.photoUrl === PHOTO("ben") && hrmsHits[1]!.people.map((p) => p.email).join() === "ravi@lms-e2e.test", show(hrmsHits[1]));
+  hrmsDown = false;
   r = await call("GET", "/class-tv/voices", root);
   // Dubai's board is still the one kept through the failure above, so the list goes on saying the LMS couldn't be read.
   check("the Mentor voices list now counts both academies' classes", (r.body?.data?.mentors ?? []).map((m: Json) => `${m.name}:${m.classesToday}`).join() === "Asha:2,Ben:2,Ravi:1,Zed:0", show((r.body?.data?.mentors ?? []).map((m: Json) => `${m.name}:${m.classesToday}`)));

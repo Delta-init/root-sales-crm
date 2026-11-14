@@ -5,7 +5,8 @@
 # portal backend.
 #
 # Stands up a throwaway mongod holding the portal's database, and a stand-in
-# answering as the LMS's /api/v1/service/mentors. Tears everything down
+# answering as the LMS's /api/v1/service/mentors and as HRMS's signed
+# work-modes (the mentors' photos). Tears everything down
 # afterwards. Takes about 70 seconds: it waits out the one-minute cache.
 #
 # Nothing here touches a configured database or the real LMS: the
@@ -64,7 +65,8 @@ export JWT_SECRET="class-tv-e2e-access-secret-0123456789abcdef"
 export JWT_REFRESH_SECRET="class-tv-e2e-refresh-secret-0123456789abcdef"
 export CLIENT_URL="http://localhost:3100"
 export SMTP_HOST="" SMTP_USER="" SMTP_PASS="" SMTP_EMAIL_FROM=""
-export HRMS_API_URL="" HRMS_CLIENT_ID="" HRMS_INTEGRATION_SECRET="" HRMS_ORG_ID=""
+# The mentors' photos: HRMS's signed work-modes — the stand-in again.
+export HRMS_API_URL="$STANDIN/hrms" HRMS_CLIENT_ID="class-tv-e2e" HRMS_INTEGRATION_SECRET="class-tv-e2e-hrms-signing" HRMS_ORG_ID=""
 export LMS_API_URL="$STANDIN/lms/api/v1" LMS_SSO_SECRET="class-tv-e2e-lms" LMS_REMOTE_ORG_ID="64a000000000000000000d0b"
 export LEAD_TRAFFIC_SHEET_KEY="" TRAFFIC_WORKER=false BACKUP_WORKER=false
 export E2E_STANDIN_PORT="$STANDIN_PORT"
