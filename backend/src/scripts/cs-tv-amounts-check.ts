@@ -10,6 +10,9 @@
  *                        CS Portal's own refusal comes through in its words; a CS Portal server from before these
  *                        routes says it needs updating; CS Portal not in the registry says so
  *   Case 4  permission   no session 401, not a root admin 403 — on every route
+ *   Case 5  by name      somebody who is no CS in CS Portal: the list says who was added by name and the teams to put
+ *                        one under; adding and taking away reach CS Portal as it takes them; nonsense never leaves;
+ *                        CS Portal's refusal in its words; a CS Portal from before it says it needs updating
  *
  * Run through scripts/cs-tv-amounts-check.sh. Scratch database on 127.0.0.1 only; CS Portal is a stand-in.
  */
@@ -42,9 +45,11 @@ async function call(method: string, path: string, headers: Record<string, string
 }
 
 // ── The stand-in: CS Portal's /api/v1/service/cs-tv-amounts ──────────────────
-const BELA = "64b000000000000000000001", AMOUNT = "64b0000000000000000000a1";
+const BELA = "64b000000000000000000001", AMOUNT = "64b0000000000000000000a1", NILA = "64b0000000000000000000b2", TEAM = "64b0000000000000000000c3";
 const hits: { method: string; path: string; body: Json; secret: boolean }[] = [];
 let old = false;
+/** A CS Portal that has the amounts but not yet the people added by name. */
+let noPeople = false;
 const stand = createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://x");
   const send = (status: number, body: unknown) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
@@ -55,12 +60,22 @@ const stand = createServer((req, res) => {
     const path = url.pathname.replace("/commission/api/v1/service", "") + url.search;
     hits.push({ method: req.method ?? "", path, body, secret: req.headers["x-portal-secret"] === SECRET });
     if (req.headers["x-portal-secret"] !== SECRET) return send(401, { success: false, error: { code: "UNAUTHORISED", message: "Bad secret" } });
-    if (old || !url.pathname.startsWith("/commission/api/v1/service/cs-tv-amounts")) return send(404, { success: false, error: { code: "NOT_FOUND", message: "No such service route" } });
+    const people = url.pathname.startsWith("/commission/api/v1/service/cs-tv-people");
+    if (old || (people && noPeople) || !(people || url.pathname.startsWith("/commission/api/v1/service/cs-tv-amounts"))) return send(404, { success: false, error: { code: "NOT_FOUND", message: "No such service route" } });
+    if (people) {
+      if (url.pathname.endsWith("/remove")) {
+        return body.id === NILA ? send(200, { success: true, data: { removed: true } }) : send(404, { success: false, error: { code: "NOT_FOUND", message: "They are no longer there" } });
+      }
+      if (body.name === "Bela") return send(400, { success: false, error: { code: "VALIDATION_ERROR", message: "Bela is a CS here already — pick them from the list" } });
+      return send(200, { success: true, data: { id: NILA } });
+    }
     if (req.method === "GET") {
       return send(200, { success: true, data: {
         location: "bangalore", month: url.searchParams.get("month") ?? "2026-11",
         extras: [{ id: AMOUNT, cs_id: BELA, cs_name: "Bela", aed: 9000, product: "MSNR", at: "2026-11-13T10:00:00.000Z", show_on: "dubai", added_by: "root@cs-tv-amounts-e2e.test (Root)", added_at: "2026-11-13T10:00:01.000Z" }],
-        cs: [{ id: BELA, name: "Bela", team: "Team Bangalore" }], products: ["DGMP", "MSNR"], total_aed: 9000,
+        cs: noPeople ? [{ id: BELA, name: "Bela", team: "Team Bangalore" }] : [{ id: BELA, name: "Bela", team: "Team Bangalore", tv_only: false }, { id: NILA, name: "Nila", team: "Team Bangalore", tv_only: true }],
+        products: ["DGMP", "MSNR"], total_aed: 9000,
+        ...(noPeople ? {} : { people: [{ id: NILA, name: "Nila", team: "Team Bangalore", added_by: "root@cs-tv-amounts-e2e.test (Root)", added_at: "2026-11-14T08:00:00.000Z" }], teams: [{ id: TEAM, name: "Team Bangalore" }] }),
       } });
     }
     if (url.pathname.endsWith("/cs-tv-amounts")) {
@@ -99,8 +114,9 @@ async function main() {
   await Organization.create({ code: "commission", kind: "commission", name: "CS Portal", timezone: "Asia/Dubai", currency: "USD", fxToBase: 1, isActive: true, sortOrder: 5, accent: "#0d9488" });
 
   step("Case 4 — root admins only");
-  for (const [method, path, body] of [["GET", "/cs-tv-amounts", undefined], ["POST", "/cs-tv-amounts", {}], ["PATCH", `/cs-tv-amounts/${AMOUNT}`, {}], ["DELETE", `/cs-tv-amounts/${AMOUNT}`, undefined]] as [string, string, unknown][]) {
-    check(`${method} ${path.replace(AMOUNT, ":id")}: no session 401, not a root admin 403`, (await call(method, path, {}, body)).status === 401 && (await call(method, path, member, body)).status === 403);
+  for (const [method, path, body] of [["GET", "/cs-tv-amounts", undefined], ["POST", "/cs-tv-amounts", {}], ["PATCH", `/cs-tv-amounts/${AMOUNT}`, {}], ["DELETE", `/cs-tv-amounts/${AMOUNT}`, undefined],
+    ["POST", "/cs-tv-amounts/people", { name: "Nila" }], ["DELETE", `/cs-tv-amounts/people/${NILA}`, undefined]] as [string, string, unknown][]) {
+    check(`${method} ${path.replace(AMOUNT, ":id").replace(NILA, ":id")}: no session 401, not a root admin 403`, (await call(method, path, {}, body)).status === 401 && (await call(method, path, member, body)).status === 403);
   }
   check("…and CS Portal was never asked", hits.length === 0, show(hits));
 
@@ -109,7 +125,10 @@ async function main() {
   same("the month's amounts, in this portal's words", r.body?.data, {
     month: "2026-11",
     amounts: [{ id: AMOUNT, employeeId: BELA, employee: "Bela", aed: 9000, course: "MSNR", at: "2026-11-13T10:00:00.000Z", showOn: "dubai", addedBy: "root@cs-tv-amounts-e2e.test (Root)", addedAt: "2026-11-13T10:00:01.000Z" }],
-    employees: [{ id: BELA, name: "Bela", team: "Team Bangalore" }], courses: ["DGMP", "MSNR"], totalAed: 9000,
+    employees: [{ id: BELA, name: "Bela", team: "Team Bangalore", addedByName: false }, { id: NILA, name: "Nila", team: "Team Bangalore", addedByName: true }],
+    courses: ["DGMP", "MSNR"], totalAed: 9000,
+    people: [{ id: NILA, name: "Nila", team: "Team Bangalore", addedBy: "root@cs-tv-amounts-e2e.test (Root)", addedAt: "2026-11-14T08:00:00.000Z" }],
+    teams: [{ id: TEAM, name: "Team Bangalore" }], canAddPeople: true,
   });
   check("…asked of CS Portal with the secret, for that month", last().method === "GET" && last().path === "/cs-tv-amounts?month=2026-11" && last().secret, show(last()));
 
@@ -165,6 +184,34 @@ async function main() {
   r = await call("GET", "/cs-tv-amounts", root);
   check("a CS Portal server from before these routes: says it needs updating", r.status === 409 && /needs updating/.test(r.body?.message ?? ""), show(r.body));
   old = false;
+
+  step("Case 5 — somebody added by name");
+  r = await call("POST", "/cs-tv-amounts/people", root, { name: "  Nila   Guest ", teamId: TEAM, email: " Nila@HRMS-e2e.test " });
+  check("adding one: 200 with their id", r.status === 200 && r.body?.data?.id === NILA, show(r.body));
+  same("…as CS Portal takes it: the name tidied, the team, the email for the photo, who added", [last().method, last().path, last().body],
+    ["POST", "/cs-tv-people", { name: "Nila Guest", team_id: TEAM, email: "nila@hrms-e2e.test", by: "root@cs-tv-amounts-e2e.test" }]);
+  await call("POST", "/cs-tv-amounts/people", root, { name: "Nila" });
+  same("a name alone: nothing else sent — CS Portal picks the one team", last().body, { name: "Nila", by: "root@cs-tv-amounts-e2e.test" });
+  const beforePeople = hits.length;
+  for (const [label, body] of [["no name", { name: " " }], ["one letter", { name: "N" }], ["a team that isn't an id", { name: "Nila", teamId: "bangalore" }], ["an email that isn't one", { name: "Nila", email: "nila-at-hrms" }]] as [string, unknown][]) {
+    const bad = await call("POST", "/cs-tv-amounts/people", root, body);
+    check(`adding with ${label}: 400, in words`, bad.status === 400 && !!bad.body?.message, show(bad.body));
+  }
+  check("an id that isn't one: 404", (await call("DELETE", "/cs-tv-amounts/people/not-an-id", root)).status === 404);
+  check("…none of which reached CS Portal", hits.length === beforePeople, show(hits.slice(beforePeople)));
+  r = await call("POST", "/cs-tv-amounts/people", root, { name: "Bela" });
+  check("CS Portal's own refusal (already a CS), in its words", r.status === 409 && /is a CS here already/.test(r.body?.message ?? ""), show(r.body));
+  r = await call("DELETE", `/cs-tv-amounts/people/${NILA}`, root);
+  check("taking one away: 200", r.status === 200 && r.body?.data?.removed === true, show(r.body));
+  same("…POST /cs-tv-people/remove with their id", [last().path, last().body], ["/cs-tv-people/remove", { id: NILA }]);
+  r = await call("DELETE", `/cs-tv-amounts/people/${AMOUNT}`, root);
+  check("somebody already gone: CS Portal's words", r.status === 409 && /no longer there/.test(r.body?.message ?? ""), show(r.body));
+  noPeople = true;
+  r = await call("GET", "/cs-tv-amounts", root);
+  check("a CS Portal from before people by name: the list still comes, and says they can't be added yet", r.status === 200 && r.body?.data?.canAddPeople === false && r.body.data.people.length === 0 && r.body.data.employees.length === 1 && r.body.data.employees[0].addedByName === false, show(r.body?.data));
+  r = await call("POST", "/cs-tv-amounts/people", root, { name: "Nila" });
+  check("…adding one then: says CS Portal needs updating", r.status === 409 && /needs updating/.test(r.body?.message ?? ""), show(r.body));
+  noPeople = false;
 
   console.log(`\n${checks - failures}/${checks} checks passed`);
 }

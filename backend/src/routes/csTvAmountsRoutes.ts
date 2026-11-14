@@ -2,7 +2,7 @@ import { Router, type NextFunction, type Response } from "express";
 import { authenticate, requireRole } from "../middleware/auth.js";
 import { sendSuccess } from "../utils/response.js";
 import type { AuthenticatedRequest } from "../types/index.js";
-import { addCsTvAmount, csTvAmounts, removeCsTvAmount, updateCsTvAmount } from "../services/csTvAmountsService.js";
+import { addCsTvAmount, addCsTvPerson, csTvAmounts, removeCsTvAmount, removeCsTvPerson, updateCsTvAmount } from "../services/csTvAmountsService.js";
 
 /*
  * The CS TV amounts page (2026-11-14): amounts typed for a Bangalore CS that CS Portal's CS TV shows like payments —
@@ -23,6 +23,9 @@ const handle = (fn: (req: AuthenticatedRequest) => Promise<[string, unknown]>) =
   };
 
 router.get("/", handle(async (req) => ["CS TV amounts", await csTvAmounts(req.query.month)]));
+// Somebody added by name (2026-11-14): no CS account in CS Portal, picked like the team's CSs.
+router.post("/people", handle(async (req) => ["Added", await addCsTvPerson(req.body ?? {}, by(req))]));
+router.delete("/people/:id", handle(async (req) => ["Removed", await removeCsTvPerson(req.params.id!)]));
 router.post("/", handle(async (req) => ["On the TV", await addCsTvAmount(req.body ?? {}, by(req))]));
 router.patch("/:id", handle(async (req) => ["Saved", await updateCsTvAmount(req.params.id!, req.body ?? {}, by(req))]));
 router.delete("/:id", handle(async (req) => ["Removed from the TV", await removeCsTvAmount(req.params.id!)]));

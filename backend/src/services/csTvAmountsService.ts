@@ -10,6 +10,10 @@ import { callTarget, httpError, resolveTarget, type ResolvedTarget } from "../li
  *
  * Nothing is kept here. CS Portal keeps them (its functions/csTvExtras.ts) and answers through
  * /api/v1/service/cs-tv-amounts — Bangalore's CSs only, whatever is asked of it.
+ *
+ * Somebody who is not a CS there (the user, 2026-11-14: "add … also in the Bangalore team TV amount") is added by
+ * name: CS Portal keeps the name and the team to show them under, makes nobody an account, and from then on they are
+ * picked like the team's CSs. Taken away again with their amounts.
  */
 
 const CODE = "commission";
@@ -19,7 +23,11 @@ export const SHOW_ON = ["dubai", "bangalore", "both"] as const;
 export type ShowOn = (typeof SHOW_ON)[number];
 
 interface PortalAmount { id: string; cs_id: string; cs_name: string; aed: number; product: string; at: string; show_on: ShowOn; added_by?: string; added_at?: string }
-interface PortalList { month: string; extras?: PortalAmount[]; cs?: Array<{ id: string; name: string; team: string }>; products?: string[]; total_aed?: number }
+interface PortalList {
+  month: string; extras?: PortalAmount[]; cs?: Array<{ id: string; name: string; team: string; tv_only?: boolean }>; products?: string[]; total_aed?: number;
+  /** From a CS Portal that takes people by name (2026-11-14); absent from one before that. */
+  people?: Array<{ id: string; name: string; team: string; added_by?: string; added_at?: string }>; teams?: Array<{ id: string; name: string }>;
+}
 
 const view = (e: PortalAmount) => ({
   id: e.id, employeeId: e.cs_id, employee: e.cs_name, aed: Number(e.aed) || 0, course: e.product, at: e.at,
@@ -51,9 +59,13 @@ export async function csTvAmounts(month: unknown) {
   return {
     month: d.month,
     amounts: (d.extras ?? []).map(view),
-    employees: (d.cs ?? []).map((c) => ({ id: c.id, name: c.name, team: c.team })),
+    employees: (d.cs ?? []).map((c) => ({ id: c.id, name: c.name, team: c.team, addedByName: c.tv_only === true })),
     courses: d.products ?? [],
     totalAed: Number(d.total_aed) || 0,
+    // The people added by name, and the teams one can be shown under. `canAddPeople`: CS Portal's server knows how.
+    people: (d.people ?? []).map((p) => ({ id: p.id, name: p.name, team: p.team, addedBy: p.added_by ?? "", addedAt: p.added_at ?? "" })),
+    teams: (d.teams ?? []).map((t) => ({ id: t.id, name: t.name })),
+    canAddPeople: Array.isArray(d.people),
   };
 }
 
@@ -95,6 +107,24 @@ export async function updateCsTvAmount(id: string, body: Record<string, unknown>
   const set = fields(body, false);
   if (!Object.keys(set).length) throw httpError("Nothing to change", 400);
   return ask<{ id: string }>("/cs-tv-amounts/update", { method: "POST", body: { id, ...set, by }, verb: "change the amount" });
+}
+
+/** { name, teamId?, email? } — somebody with no CS account in CS Portal, to be picked like the team's CSs. */
+export async function addCsTvPerson(body: Record<string, unknown>, by: string) {
+  const name = String(body.name ?? "").trim().replace(/\s+/g, " ");
+  if (name.length < 2) throw httpError("Give the name", 400);
+  if (name.length > 80) throw httpError("That name is too long", 400);
+  const teamId = String(body.teamId ?? "").trim();
+  if (teamId && !ID.test(teamId)) throw httpError("Pick the team", 400);
+  const email = String(body.email ?? "").trim().toLowerCase();
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw httpError("That email isn't right", 400);
+  return ask<{ id: string }>("/cs-tv-people", { method: "POST", body: { name, ...(teamId ? { team_id: teamId } : {}), ...(email ? { email } : {}), by }, verb: "add them" });
+}
+
+/** Takes them off the list, with every amount added for them. */
+export async function removeCsTvPerson(id: string) {
+  if (!ID.test(id)) throw httpError("No such person", 404);
+  return ask<{ removed: boolean }>("/cs-tv-people/remove", { method: "POST", body: { id }, verb: "remove them" });
 }
 
 export async function removeCsTvAmount(id: string) {

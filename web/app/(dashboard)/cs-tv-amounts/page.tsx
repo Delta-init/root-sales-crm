@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { AxiosError } from "axios";
 import { toast } from "sonner";
-import { Loader2, MonitorUp, Pencil, Plus, Trash2 } from "lucide-react";
+import { Loader2, MonitorUp, Pencil, Plus, Trash2, UserPlus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,12 +20,21 @@ import { api, apiErrorMessage } from "@/lib/axios";
  * CSs collect — on the Dubai TV by default, the Bangalore TV, or both: ranking, totals, latest payments, pop-up and
  * voice, with nothing on the screen to tell them from a payment. They are not payments, and count nowhere else —
  * not CS Portal's reports, commission or finance, and not the Manager TV. CS Portal keeps them; root admins only.
+ *
+ * Somebody who is not a CS in CS Portal's Bangalore team (2026-11-14: "add … also in the Bangalore team TV amount") is
+ * added here by name, once: no account is made for them anywhere; from then on they are picked like the team's CSs
+ * and shown on the TV under the team, with their HRMS photo when the HRMS knows the name (or the email given).
  */
 
 type ShowOn = "dubai" | "bangalore" | "both";
 interface Amount { id: string; employeeId: string; employee: string; aed: number; course: string; at: string; showOn: ShowOn; addedBy: string; addedAt: string }
-interface Employee { id: string; name: string; team: string }
-interface Overview { month: string; amounts: Amount[]; employees: Employee[]; courses: string[]; totalAed: number }
+interface Employee { id: string; name: string; team: string; addedByName?: boolean }
+interface Person { id: string; name: string; team: string; addedBy: string; addedAt: string }
+interface Overview {
+  month: string; amounts: Amount[]; employees: Employee[]; courses: string[]; totalAed: number;
+  /** The people added by name, the teams one can be shown under, and whether CS Portal's server takes them yet. */
+  people?: Person[]; teams?: Array<{ id: string; name: string }>; canAddPeople?: boolean;
+}
 
 const SHOW_ON: Array<{ value: ShowOn; label: string }> = [
   { value: "dubai", label: "Dubai TV" },
@@ -89,6 +98,35 @@ export default function CsTvAmountsPage() {
     onError: (e) => toast.error(apiErrorMessage(e, "Not saved")),
   });
   const editProblem = !editing ? "" : !(Number(editing.aedText) > 0) ? "Give the amount" : !editing.course.trim() ? "Give the course" : !editing.date ? "Give the date" : "";
+  // ── Somebody added by name ──
+  const [person, setPerson] = useState({ name: "", teamId: "", email: "" });
+  const teams = o?.teams ?? [];
+  const addPerson = useMutation({
+    mutationFn: async () => (await api.post("/cs-tv-amounts/people", {
+      name: person.name.trim(), ...(person.teamId ? { teamId: person.teamId } : {}), ...(person.email.trim() ? { email: person.email.trim() } : {}),
+    })).data.data as { id: string },
+    onSuccess: (r) => {
+      toast.success(`${person.name.trim()} added, and picked in the form above. Type their amount there`);
+      setPerson({ name: "", teamId: "", email: "" });
+      // Chosen in the form above, ready for their first amount.
+      setForm((f) => ({ ...f, employeeId: r.id }));
+      refresh();
+    },
+    onError: (e) => toast.error(apiErrorMessage(e, "Not added")),
+  });
+  const personProblem = person.name.trim().length < 2 ? "Give the name" : teams.length > 1 && !person.teamId ? "Pick the team" : "";
+  const [removingPerson, setRemovingPerson] = useState<string | null>(null);
+  const removePerson = useMutation({
+    mutationFn: async (id: string) => (await api.delete(`/cs-tv-amounts/people/${id}`)).data,
+    onSuccess: (_r, id) => {
+      toast.success("Removed, with their amounts");
+      setRemovingPerson(null);
+      setForm((f) => (f.employeeId === id ? { ...f, employeeId: "" } : f));
+      refresh();
+    },
+    onError: (e) => { toast.error(apiErrorMessage(e, "Not removed")); setRemovingPerson(null); refresh(); },
+  });
+
   const [removing, setRemoving] = useState<string | null>(null);
   const remove = useMutation({
     mutationFn: async (id: string) => (await api.delete(`/cs-tv-amounts/${id}`)).data,
@@ -130,7 +168,7 @@ export default function CsTvAmountsPage() {
                   <span className="block text-muted-foreground">Bangalore employee</span>
                   <select id="tv-amount-employee" value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} className={SELECT} disabled={!o}>
                     <option value="">Choose…</option>
-                    {(o?.employees ?? []).map((c) => <option key={c.id} value={c.id}>{c.name} · {c.team}</option>)}
+                    {(o?.employees ?? []).map((c) => <option key={c.id} value={c.id}>{c.name} · {c.team}{c.addedByName ? " · added by name" : ""}</option>)}
                   </select>
                 </label>
                 <label className="space-y-1.5 text-sm">
@@ -166,12 +204,78 @@ export default function CsTvAmountsPage() {
                 </p>
               </div>
               {o && o.employees.length === 0 && (
-                <p className="text-sm text-muted-foreground">CS Portal has no active CS in a Bangalore team, so there is nobody to pick.</p>
+                <p className="text-sm text-muted-foreground">CS Portal has no active CS in a Bangalore team, so there is nobody to pick. Add somebody by name below.</p>
               )}
             </>
           )}
         </CardContent>
       </Card>
+
+      {/* Somebody who isn't in the list */}
+      {o && (
+        <Card>
+          <CardHeader><CardTitle className="flex items-center gap-2 text-base"><UserPlus className="h-4 w-4" /> Somebody who isn&apos;t in the list</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            {o.canAddPeople === false ? (
+              <p className="text-sm text-muted-foreground">CS Portal&apos;s server is still on the previous version, so nobody can be added by name yet. It works once that server is updated.</p>
+            ) : (
+              <>
+                <p className="max-w-3xl text-sm text-muted-foreground">
+                  The list above has the CSs of CS Portal&apos;s Bangalore team. For anybody else, add their name here once. No account is made
+                  for them: they only become somebody to pick above, and show on the TV under the team while they have an amount.
+                </p>
+                <div className="flex flex-wrap items-end gap-4">
+                  <label className="w-full max-w-xs space-y-1.5 text-sm">
+                    <span className="block text-muted-foreground">Name, as the TV should show it</span>
+                    <Input id="tv-person-name" value={person.name} maxLength={80} placeholder="e.g. Asha R" onChange={(e) => setPerson({ ...person, name: e.target.value })} />
+                  </label>
+                  {teams.length > 1 && (
+                    <label className="w-full max-w-[14rem] space-y-1.5 text-sm">
+                      <span className="block text-muted-foreground">Team</span>
+                      <select id="tv-person-team" value={person.teamId} onChange={(e) => setPerson({ ...person, teamId: e.target.value })} className={SELECT}>
+                        <option value="">Choose…</option>
+                        {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                    </label>
+                  )}
+                  <label className="w-full max-w-xs space-y-1.5 text-sm">
+                    <span className="block text-muted-foreground">HRMS email, for the photo (optional)</span>
+                    <Input id="tv-person-email" type="email" value={person.email} placeholder="name@company.com" onChange={(e) => setPerson({ ...person, email: e.target.value })} />
+                  </label>
+                  <Button variant="outline" onClick={() => (personProblem ? toast.error(personProblem) : addPerson.mutate())} disabled={addPerson.isPending}>
+                    {addPerson.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />} Add person
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {teams.length === 1 ? `Shown under ${teams[0]!.name}. ` : teams.length === 0 ? "CS Portal has no Bangalore team, so they show with no team. " : ""}
+                  Without an email the HRMS is asked for a photo by the name, which must match exactly; with none found the TV shows initials.
+                </p>
+                {(o.people ?? []).length > 0 && (
+                  <ul className="divide-y divide-border rounded-md border border-border">
+                    {(o.people ?? []).map((p) => (
+                      <li key={p.id} className="flex flex-wrap items-center gap-3 px-4 py-2 text-sm" data-testid={`tv-person-${p.id}`}>
+                        <span className="font-medium text-foreground">{p.name}</span>
+                        <Badge variant="secondary">{p.team}</Badge>
+                        <span className="text-xs text-muted-foreground">added by {p.addedBy || "somebody"}</span>
+                        <span className="ml-auto inline-flex gap-1">
+                          {removingPerson === p.id ? (
+                            <>
+                              <Button size="sm" variant="destructive" disabled={removePerson.isPending} onClick={() => removePerson.mutate(p.id)}>Remove with their amounts</Button>
+                              <Button size="sm" variant="ghost" onClick={() => setRemovingPerson(null)}>Keep</Button>
+                            </>
+                          ) : (
+                            <Button size="sm" variant="ghost" aria-label={`Remove ${p.name}`} onClick={() => setRemovingPerson(p.id)}><Trash2 className="h-4 w-4" /></Button>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* The month's amounts */}
       <Card>
