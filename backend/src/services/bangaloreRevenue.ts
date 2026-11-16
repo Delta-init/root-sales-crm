@@ -27,8 +27,14 @@ export const DEFAULT_INR_PER_AED = 22.75;
  */
 export const COUNTED_PAYMENT = {
   "payments.currency": { $ne: "INR" },
+  // A close a CRM marked "not counted in sales" (Draw, 2026-11-16): neither the lead nor its payments count.
+  "payments.notCounted": { $ne: true },
+  "notCountedInSales.at": { $exists: false },
   $or: [{ "payments.finance.externalId": { $exists: false } }, { "payments.finance.state": "approved" }],
 };
+
+/** A CRM enrolment (a close) that counts: not marked "not counted in sales" (Draw, 2026-11-16). */
+export const COUNTED_STUDENT = { "notCountedInSales.at": { $exists: false } };
 
 /** The CRM's rate: 1 AED = this many rupees. */
 export async function inrPerAed(src: CrmSource): Promise<number> {

@@ -1,6 +1,6 @@
 import { Types } from "mongoose";
 import { getSources, type CrmSource } from "./crmConnections.js";
-import { COUNTED_PAYMENT, bangaloreUnion } from "./bangaloreRevenue.js";
+import { COUNTED_PAYMENT, COUNTED_STUDENT, bangaloreUnion } from "./bangaloreRevenue.js";
 
 /*
  * A salesperson, from Root (the user, 2026-10-11): everyone in the sales CRMs —
@@ -78,7 +78,7 @@ export async function listSalespeople(period: Period) {
         { $group: { _id: "$assignedTo", n: { $sum: 1 } } },
       ], { maxTimeMS: QUERY_MS }).toArray(),
       src.conn.collection("students").aggregate<{ _id: unknown; n: number }>([
-        { $match: { status: { $ne: "dropped" }, ...within("enrollmentDate", period) } },
+        { $match: { status: { $ne: "dropped" }, ...COUNTED_STUDENT, ...within("enrollmentDate", period) } },
         { $group: { _id: "$assignedTo", n: { $sum: 1 } } },
       ], { maxTimeMS: QUERY_MS }).toArray(),
       leads.aggregate<{ _id: unknown; n: number }>([
@@ -137,7 +137,7 @@ export async function getSalesperson(code: string, userId: string, period: Perio
       { $match: { assignedTo: uid, ...within("createdAt", period) } },
       { $group: { _id: "$status", n: { $sum: 1 } } },
     ], { maxTimeMS: QUERY_MS }).toArray(),
-    students.find({ assignedTo: uid, status: { $ne: "dropped" }, ...within("enrollmentDate", period) },
+    students.find({ assignedTo: uid, status: { $ne: "dropped" }, ...COUNTED_STUDENT, ...within("enrollmentDate", period) },
       { projection: { name: 1, course: 1, courses: 1, totalFee: 1, paidAmount: 1, pendingAmount: 1, enrollmentDate: 1, status: 1 }, maxTimeMS: QUERY_MS })
       .sort({ enrollmentDate: -1 }).limit(LIST_LIMIT).toArray(),
     leads.aggregate<{ leadId: unknown; name?: string; amount: number; paidAt: Date; note?: string }>([

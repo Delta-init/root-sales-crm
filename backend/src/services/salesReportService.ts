@@ -1,6 +1,6 @@
 import { Organization } from "../models/Organization.js";
 import { getSources } from "./crmConnections.js";
-import { COUNTED_PAYMENT, bangaloreUnion } from "./bangaloreRevenue.js";
+import { COUNTED_PAYMENT, COUNTED_STUDENT, bangaloreUnion } from "./bangaloreRevenue.js";
 import { CALL_PORTALS, callsOverview } from "./callsService.js";
 import { markedOf } from "./salesPendingService.js";
 import { resolveTarget, callTarget } from "../lib/targetClient.js";
@@ -109,7 +109,7 @@ export async function salesReport(code: string, q: { from?: unknown; to?: unknow
       { $match: { "activityLogs.action": "status_changed", ...within("activityLogs.createdAt") } },
       { $project: { by: "$activityLogs.performedBy", at: "$activityLogs.createdAt", lead: "$_id" } },
     ], { maxTimeMS: QUERY_MS }).toArray(),
-    src.conn.collection("students").find({ status: { $ne: "dropped" }, ...within("enrollmentDate") },
+    src.conn.collection("students").find({ status: { $ne: "dropped" }, ...COUNTED_STUDENT, ...within("enrollmentDate") },
       { projection: { name: 1, course: 1, totalFee: 1, paidAmount: 1, enrollmentDate: 1, assignedTo: 1, status: 1 }, maxTimeMS: QUERY_MS }).toArray(),
     leads.aggregate([
       ...(await bangaloreUnion(src)),
