@@ -894,6 +894,59 @@ async function main() {
       && !(await crmDb.delta.collection("leads").findOne({ phone: { $regex: "500000077$" } })), show([crm.delta.calls, deltaCalls]));
   }
 
+  step("Case 8 — each row's status in its CRM, for the sheet's CRM Status column (2026-11-16)");
+  {
+    const statuses = (rows: unknown, extra: Record<string, unknown> = {}, key = SHEET_KEY) =>
+      call("POST", "/traffic/statuses", { sheet: "shoaib", rows, ...extra }, key ? { "x-traffic-key": key } : {});
+    const { TrafficStatusLink } = await import("../models/TrafficStatusLink.js");
+    const SH = "Sheet1";
+    // Sent through Root: its lead id is known.
+    const viaRoot = new Types.ObjectId();
+    await crmDb.delta.collection("leads").insertOne({ _id: viaRoot, name: "Via Root", phone: "+971505550001", status: "followup", createdAt: new Date() });
+    await TrafficLead.create({ ...legacyLead("meta:st-1", "+971505550001"), destination: "delta", crmLeadId: String(viaRoot) });
+    // Sent by the old script before Root (✅ SYNCED): only its phone.
+    const oldDraw = new Types.ObjectId();
+    await crmDb.draw.collection("leads").insertOne({ _id: oldDraw, name: "Old synced", phone: "0505550002", status: "closed", createdAt: new Date("2026-09-01") });
+    // In Remote and in Delta: the CRM that heard from them last.
+    await crmDb.delta.collection("leads").insertOne({ name: "Moved on", phone: "+971505550003", status: "lost", createdAt: new Date("2026-08-01"), updatedAt: new Date("2026-08-02") });
+    await crmDb.remote.collection("leads").insertOne({ name: "Moved on", phone: "971505550003", status: "meeting_done", createdAt: new Date("2026-10-01"), updatedAt: new Date("2026-11-10") });
+    const rows = [
+      { id: "st-1", tab: SH, created_time: "2026-11-01T10:00:00+0400", phone_number: "p:+971505550001" },
+      { id: "st-2", tab: SH, created_time: "2026-09-01T10:00:00+0400", phone_number: "p:+971505550002" },
+      { id: "st-3", tab: SH, created_time: "2026-10-01T10:00:00+0400", phone_number: "p:+971505550003" },
+      { id: "st-4", tab: SH, created_time: "2026-10-01T10:00:00+0400", phone_number: "p:+971505559999" },
+      { id: "", tab: SH, created_time: "2026-10-02T10:00:00+0400", phone_number: "+971505550002" },
+    ];
+    let r = await statuses(rows);
+    const got = (r.body?.data?.results ?? []).map((x: Json) => `${x.status}|${x.crm}`);
+    check("each row's status, in its order: sent via Root, old ✅ SYNCED by phone, the CRM that heard last, not found, a row with no id",
+      r.status === 200 && JSON.stringify(got) === JSON.stringify(["Follow Up|delta", "Closed|draw", "Meeting Done|remote", "|null", "Closed|draw"]), `${r.status} ${show(r.body)}`);
+    const link = await TrafficStatusLink.findOne({ sourceKey: "meta:st-2" }).lean();
+    check("…the phone match kept, so it is read by id next time", link?.org === "draw" && link?.leadId === String(oldDraw), show(link));
+    const miss = await TrafficStatusLink.findOne({ sourceKey: "meta:st-4" }).lean();
+    check("…not found: looked for again a day later", !!miss?.missUntil && new Date(miss.missUntil).getTime() > Date.now() + 23 * 3_600_000, show(miss));
+    check("…and nothing written to any CRM", (await crmDb.draw.collection("leads").findOne({ _id: oldDraw }))?.status === "closed"
+      && (await crmDb.delta.collection("leads").countDocuments({ phone: { $regex: "505559999$" } })) === 0);
+
+    await crmDb.delta.collection("leads").updateOne({ _id: viaRoot }, { $set: { status: "closed" } });
+    await crmDb.draw.collection("leads").updateOne({ _id: oldDraw }, { $set: { status: "cnc" } });
+    r = await statuses(rows.slice(0, 2));
+    check("a status changed in the CRM: the next refresh has it", JSON.stringify((r.body?.data?.results ?? []).map((x: Json) => x.status)) === JSON.stringify(["Closed", "CNC"]), show(r.body));
+    // The remembered lead deleted (or merged) in the CRM: forgotten, found again by phone where it is now.
+    await crmDb.draw.collection("leads").deleteOne({ _id: oldDraw });
+    r = await statuses([rows[1]]);
+    check("a remembered lead gone from its CRM: no status, and forgotten", r.body?.data?.results?.[0]?.status === "" && !(await TrafficStatusLink.findOne({ sourceKey: "meta:st-2" })), show(r.body));
+    await crmDb.delta.collection("leads").insertOne({ name: "Old synced, again", phone: "+971505550002", status: "assigned", createdAt: new Date() });
+    r = await statuses([rows[1]]);
+    check("…and next time found where it is now", r.body?.data?.results?.[0]?.status === "Assigned" && r.body?.data?.results?.[0]?.crm === "delta", show(r.body));
+
+    check("no sheet key: refused", (await statuses(rows, {}, "")).status === 401);
+    check("a wrong sheet key: refused", (await statuses(rows, {}, "wrong-key")).status === 401);
+    check("an unknown sheet: refused", (await statuses(rows, { sheet: "nobody" })).status === 400);
+    check("more than 200 rows: refused", (await statuses(Array.from({ length: 201 }, () => rows[0]))).status === 400);
+    check("Abhin's sheet (no sheet named) works the same", (await call("POST", "/traffic/statuses", { rows: rows.slice(0, 1) }, { "x-traffic-key": SHEET_KEY })).body?.data?.results?.[0]?.status === "Closed");
+  }
+
   console.log(`\n${checks - failures}/${checks} checks passed`);
   for (const s of servers) s.close();
   await mongoose.disconnect();

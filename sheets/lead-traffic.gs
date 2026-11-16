@@ -39,6 +39,12 @@
  *      sheet Root thinks this is), then Setup triggers (which also removes the
  *      old script's triggers).
  *
+ * The lead's status in its CRM (Follow Up, Closed, CNC, …) is written into a
+ * "CRM Status" column beside it every 30 minutes (2026-11-16), for every row
+ * already sent — the old ✅ SYNCED rows too, found by phone. 🔄 Refresh CRM
+ * status now does it at once; the first run fills every old row. Empty: the
+ * lead is not in any CRM (or that CRM could not be read just then).
+ *
  * Rows the old scripts already marked (✅ SYNCED, ✅ SYNCED → NUSRA,
  * ⚠️ DUPLICATE) are left alone. Rows marked ❌ ERROR were not taken by the CRM
  * and are sent again.
@@ -47,6 +53,16 @@
 var CHUNK_SIZE = 100;
 var EXCLUDED_SHEETS = ["Summary", "Dashboard", "Config", "README"];
 var SYNC_HEADER = "CRM Sync";
+// The lead's status in its CRM, written back every 30 minutes (2026-11-16). Not "lead_status": that is Meta's own column.
+var STATUS_HEADER = "CRM Status";
+var STATUS_CHUNK = 200;
+// Stop well inside Apps Script's 6 minutes; the next run carries on from the row it stopped at.
+var STATUS_BUDGET_MS = 4.5 * 60 * 1000;
+var STATUS_COLORS = {
+  "Closed": "#d9ead3", "Follow Up": "#cfe2f3", "Call Back": "#cfe2f3", "Interested": "#cfe2f3",
+  "Meeting Scheduled": "#d9d2e9", "Meeting Done": "#d9d2e9",
+  "Lost": "#f4cccc", "Wrong Number": "#f4cccc", "CNC": "#fce5cd", "Not Connected": "#fce5cd", "MIA": "#fce5cd",
+};
 
 var COLORS = {
   "✅": "#d9ead3",
@@ -100,6 +116,7 @@ function headerMap_(sheet) {
     knowledge: find(function (x) { return x.indexOf("knowledge") !== -1; }),
     organic: find(function (x) { return x === "is_organic"; }),
     sync: find(function (x) { return x === SYNC_HEADER.toLowerCase(); }),
+    status: find(function (x) { return x === STATUS_HEADER.toLowerCase(); }),
   };
   if (m.name === -1 || m.phone === -1 || m.created === -1) return null;
   return m;
@@ -160,6 +177,112 @@ function buildBatch_(sheet, pendingOnly, create) {
     });
   }
   return { batch: batch, syncCol: syncIdx + 1 };
+}
+
+// ── CRM Status: each sent lead's status in its CRM, every 30 minutes ─────────
+
+/** The CRM Status column, added after the last column if the tab has none yet. */
+function statusColumn_(sheet, m) {
+  if (m.status !== -1) return m.status;
+  var col = sheet.getLastColumn() + 1;
+  sheet.getRange(1, col).setValue(STATUS_HEADER).setFontWeight("bold").setBackground("#d9ead3");
+  sheet.setColumnWidth(col, 150);
+  return col - 1;
+}
+
+function postStatuses_(cfg, rows) {
+  try {
+    var res = UrlFetchApp.fetch(cfg.url + "/api/v1/traffic/statuses", {
+      method: "post",
+      contentType: "application/json",
+      headers: { "x-traffic-key": cfg.key },
+      payload: JSON.stringify({ sheet: cfg.sheet, rows: rows }),
+      muteHttpExceptions: true,
+    });
+    var body = {};
+    try { body = JSON.parse(res.getContentText()); } catch (e) {}
+    if (res.getResponseCode() !== 200) Logger.log("Root statuses → HTTP " + res.getResponseCode() + " | " + res.getContentText().substring(0, 300));
+    return res.getResponseCode() === 200 && body && body.success && body.data ? body.data.results || null : null;
+  } catch (err) {
+    Logger.log("Root unreachable: " + err);
+    return null;
+  }
+}
+
+/**
+ * One tab: every row already sent (✅ or ⚠️), asked of Root 200 at a time, and only the cells whose status changed
+ * written. Returns false when it ran out of time — `startAt` is kept, and the next run carries on from there.
+ */
+function refreshTab_(cfg, sheet, started) {
+  var m = headerMap_(sheet);
+  if (!m || m.sync === -1) return true;
+  var data = sheet.getDataRange().getValues();
+  var statusIdx = statusColumn_(sheet, m);
+  var props = PropertiesService.getScriptProperties();
+  var resumeKey = "STATUS_RESUME_" + sheet.getSheetId();
+  var startAt = Number(props.getProperty(resumeKey) || 1);
+  if (!(startAt >= 1 && startAt < data.length)) startAt = 1;
+  var cell = function (row, idx) { return idx === -1 ? "" : text_(row[idx]); };
+
+  var asked = [];
+  for (var i = startAt; i < data.length; i++) {
+    if (!isDone_(data[i][m.sync])) continue;
+    asked.push({ i: i, data: { id: cell(data[i], m.id), tab: sheet.getName(), created_time: cell(data[i], m.created), phone_number: cell(data[i], m.phone) } });
+  }
+  for (var c = 0; c < asked.length; c += STATUS_CHUNK) {
+    if (Date.now() - started > STATUS_BUDGET_MS) {
+      props.setProperty(resumeKey, String(asked[c].i));
+      Logger.log("[" + sheet.getName() + "] out of time — carries on from row " + (asked[c].i + 1) + " next run");
+      return false;
+    }
+    var chunk = asked.slice(c, c + STATUS_CHUNK);
+    var results = postStatuses_(cfg, chunk.map(function (x) { return x.data; }));
+    if (!results) continue; // Root not answering: those rows keep what they show
+    // One read and one write for the chunk's stretch of the column, rather than a call per cell.
+    var first = chunk[0].i, last = chunk[chunk.length - 1].i;
+    var range = sheet.getRange(first + 1, statusIdx + 1, last - first + 1, 1);
+    var values = range.getValues(), colors = range.getBackgrounds(), changed = false;
+    for (var k = 0; k < chunk.length; k++) {
+      var r = results[k];
+      if (!r) continue;
+      var at = chunk[k].i - first;
+      var next = String(r.status || "");
+      if (text_(values[at][0]) === next) continue;
+      values[at][0] = next;
+      colors[at][0] = STATUS_COLORS[next] || "#ffffff";
+      changed = true;
+    }
+    if (changed) { range.setValues(values); range.setBackgrounds(colors); }
+    Utilities.sleep(200);
+  }
+  props.deleteProperty(resumeKey);
+  return true;
+}
+
+function refreshStatuses_() {
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(60000); } catch (e) { Logger.log("Another run is going — status refresh skipped."); return; }
+  var started = Date.now();
+  try {
+    var cfg = config_();
+    var tabs = targetSheets_();
+    for (var t = 0; t < tabs.length; t++) {
+      try { if (!refreshTab_(cfg, tabs[t], started)) break; }
+      catch (err) { Logger.log("[" + tabs[t].getName() + "] status: " + err); }
+    }
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Every 30 minutes (Setup triggers), and from the menu. */
+function statusRefresh() {
+  try { refreshStatuses_(); } catch (err) { Logger.log("statusRefresh: " + err); }
+}
+
+function refreshStatusesNow() {
+  refreshStatuses_();
+  safeAlert_("✅ CRM Status refreshed. A long sheet may need one more run to fill every row — it carries on by itself every 30 minutes.");
 }
 
 // ── Talking to Root ──────────────────────────────────────────────────────────
@@ -270,7 +393,9 @@ function setupTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) { ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger("onSheetChange").forSpreadsheet(ss).onChange().create();
   ScriptApp.newTrigger("scheduledSync").timeBased().everyMinutes(15).create();
-  safeAlert_("✅ Triggers installed: on every change to the sheet, and every 15 minutes.");
+  // Each lead's status from its CRM into the CRM Status column (2026-11-16).
+  ScriptApp.newTrigger("statusRefresh").timeBased().everyMinutes(30).create();
+  safeAlert_("✅ Triggers installed: send on every change to the sheet and every 15 minutes; CRM Status every 30 minutes.");
 }
 
 function removeTriggers() {
@@ -318,6 +443,7 @@ function onOpen() {
       .createMenu("🔀 Lead traffic")
       .addItem("Send new rows now", "syncPendingRows")
       .addItem("Re-check every row", "recheckAllRows")
+      .addItem("🔄 Refresh CRM status now", "refreshStatusesNow")
       .addSeparator()
       .addItem("👁 Preview what will be sent", "previewPending")
       .addItem("🔌 Test connection", "testConnection")

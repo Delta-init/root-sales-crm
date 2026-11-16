@@ -78,6 +78,32 @@ export const intake = async (req: Request, res: Response, next: NextFunction) =>
   }
 };
 
+/**
+ * POST /traffic/statuses { sheet, rows } — each row's status in its CRM, for the sheet's "CRM Status" column
+ * (2026-11-16, services/leadStatusService.ts). Read-only. Up to 200 rows, answered in their order.
+ */
+const statusesSchema = z.object({
+  sheet: z.unknown().optional(),
+  rows: z.array(z.record(z.string(), z.unknown())).min(1, "rows is empty").max(200, "At most 200 rows per request"),
+});
+export const statuses = async (req: Request, res: Response, next: NextFunction) => {
+  const parsed = statusesSchema.safeParse(req.body);
+  if (!parsed.success) {
+    sendError(res, parsed.error.issues[0]?.message ?? "Invalid body", 400);
+    return;
+  }
+  if (!sheetOf(parsed.data.sheet)) {
+    sendError(res, unknownSheet(parsed.data.sheet), 400);
+    return;
+  }
+  try {
+    const { leadStatuses } = await import("../services/leadStatusService.js");
+    sendSuccess(res, "Lead statuses", { results: await leadStatuses(parsed.data.rows) });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // ── Root admins ──────────────────────────────────────────────────────────────
 
 export const getRules = async (_req: AuthenticatedRequest, res: Response, next: NextFunction) => {

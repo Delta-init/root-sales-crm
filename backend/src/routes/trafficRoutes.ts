@@ -2,7 +2,7 @@ import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { authenticate, requireTrafficAccess } from "../middleware/auth.js";
 import { requireSheetKey } from "../middleware/sheetKeyAuth.js";
-import { ping, intake, getRules, putRules, summary, leads, retry, crmUsers } from "../controllers/trafficController.js";
+import { ping, intake, statuses, getRules, putRules, summary, leads, retry, crmUsers } from "../controllers/trafficController.js";
 
 const router = Router();
 
@@ -23,6 +23,8 @@ const sheetLimiter = rateLimit({
 
 router.get("/intake/ping", sheetLimiter, requireSheetKey, ping);
 router.post("/intake", sheetLimiter, requireSheetKey, intake);
+// Each row's status in its CRM, for the sheet's "CRM Status" column (2026-11-16). Read-only.
+router.post("/statuses", sheetLimiter, requireSheetKey, statuses);
 
 /*
  * Everything else: root admins, and whoever a root admin has given lead-traffic
