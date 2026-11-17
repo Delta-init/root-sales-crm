@@ -23,6 +23,7 @@ import publicRoutes from "./publicRoutes.js";
 import tvMediaRoutes from "./tvMediaRoutes.js";
 import csTvAmountsRoutes from "./csTvAmountsRoutes.js";
 import classTvRoutes from "./classTvRoutes.js";
+import mentorsTvRoutes from "./mentorsTvRoutes.js";
 import walletRoutes from "./walletRoutes.js";
 import rewardRoutes from "./rewardRoutes.js";
 import mentorKpiRoutes from "./mentorKpiRoutes.js";
@@ -61,6 +62,8 @@ router.use("/tv-media", tvMediaRoutes);
 router.use("/cs-tv-amounts", csTvAmountsRoutes);
 // The Class TV's recorded lines (2026-11-14) — root admins; the TVs read the board and the recordings from /public.
 router.use("/class-tv", classTvRoutes);
+// The Mentors TV (2026-11-17): mentors' revenue — course payments after their meetings.
+router.use("/mentors-tv", mentorsTvRoutes);
 // My Wallet, from the HRMS (2026-11-04) — everyone signed in, their own only.
 router.use("/wallet", walletRoutes);
 // The sales CRMs' gift rewards: targets, gifts and the gifts chosen (2026-11-04) — root admins.

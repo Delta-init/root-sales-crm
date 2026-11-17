@@ -126,10 +126,19 @@ export interface SalesTvBoardProps {
   months?: boolean;
   /** Money rounded — 42.4K — the full amount on hover (the Manager TV, 2026-11-03). */
   compactMoney?: boolean;
+  /** No sales cards — only the `cs` card, the whole width (the Mentors TV, 2026-11-17). */
+  noCrms?: boolean;
+  /** What the `cs` card calls its people and its money (default the CS team's). */
+  csLabels?: CsLabels;
 }
+
+/** How the `cs` card speaks: the CS team's (Manager TV) or the mentors' (Mentors TV, 2026-11-17). */
+export interface CsLabels { title: string; tone: string; person: string; plural: string; earned: string; empty: string }
+const CS_LABELS: CsLabels = { title: "Team Mafia", tone: "cs", person: "CS", plural: "CSs", earned: "collected", empty: "No CSs yet." };
 
 export function SalesTvBoard({
   fetcher, variant, withCs = false, panels = true, title = "Sales TV", subtitle = "Team Cartel · Team Syndicate · Team Avengers", months = false, compactMoney = false,
+  noCrms = false, csLabels = CS_LABELS,
 }: SalesTvBoardProps) {
   const tv = variant === "tv";
   const [crms, setCrms] = useState<SalesTvCrm[] | null>(null);
@@ -224,7 +233,7 @@ export function SalesTvBoard({
 
   // Remote's people outside Team Avengers (AI Academy, Digital, CMA …) make a card of their own, shown only once the
   // arrow on Team Avengers is pressed (the user, 2026-11-06); the header's totals still count everybody.
-  const cards = (crms ?? PLACEHOLDER).flatMap((crm): Array<{ crm: SalesTvCrm; others?: { count: number } }> => {
+  const cards = (noCrms ? [] : crms ?? PLACEHOLDER).flatMap((crm): Array<{ crm: SalesTvCrm; others?: { count: number } }> => {
     const ids = new Set(crm.split?.otherIds ?? []);
     if (!ids.size) return [{ crm }];
     const main = { ...crm, people: crm.people.filter((p) => !ids.has(p.id)) };
@@ -234,7 +243,7 @@ export function SalesTvBoard({
     };
     return showOthers ? [{ crm: main, others: { count: ids.size } }, { crm: rest }] : [{ crm: main, others: { count: ids.size } }];
   });
-  const columns = String(Math.min(5, Math.max(3, cards.length + (withCs ? 1 : 0)))) as "3" | "4" | "5";
+  const columns = (noCrms ? "1" : String(Math.min(5, Math.max(3, cards.length + (withCs ? 1 : 0))))) as "1" | "3" | "4" | "5";
 
   return (
     <CompactMoney.Provider value={compactMoney}>
@@ -261,7 +270,7 @@ export function SalesTvBoard({
             onToggleHidden={() => setShowHidden((v) => !v)}
           />
         ))}
-        {withCs && <CsColumn cs={cs ?? CS_PLACEHOLDER} tv={tv} />}
+        {withCs && <CsColumn cs={cs ?? { ...CS_PLACEHOLDER, name: csLabels.title }} tv={tv} labels={csLabels} />}
         {panels && (
           <aside className={cn("flex min-h-0 flex-col", gap, !tv && "col-span-full lg:grid lg:grid-cols-2")}>
             <BreakPanel people={onBreak} serverNow={serverNow} tv={tv} />
@@ -285,13 +294,15 @@ const PLACEHOLDER: SalesTvCrm[] = [
 
 /* The board's columns: the CRM cards, the CS card on the Manager TV, and Remote's other teams when opened — written
    out whole so Tailwind keeps every one. */
-const GRID_TV: Record<"3" | "4" | "5", string> = { "3": "lg:grid-cols-3", "4": "lg:grid-cols-4", "5": "lg:grid-cols-5" };
-const GRID_TV_PANELS: Record<"3" | "4" | "5", string> = {
+const GRID_TV: Record<"1" | "3" | "4" | "5", string> = { "1": "lg:grid-cols-1", "3": "lg:grid-cols-3", "4": "lg:grid-cols-4", "5": "lg:grid-cols-5" };
+const GRID_TV_PANELS: Record<"1" | "3" | "4" | "5", string> = {
+  "1": "lg:grid-cols-[minmax(0,1fr)_minmax(15rem,0.4fr)]",
   "3": "lg:grid-cols-[repeat(3,minmax(0,1fr))_minmax(15rem,0.62fr)]",
   "4": "lg:grid-cols-[repeat(4,minmax(0,1fr))_minmax(14rem,0.5fr)]",
   "5": "lg:grid-cols-[repeat(5,minmax(0,1fr))_minmax(13rem,0.45fr)]",
 };
-const GRID_PAGE: Record<"3" | "4" | "5", string> = {
+const GRID_PAGE: Record<"1" | "3" | "4" | "5", string> = {
+  "1": "grid-cols-1",
   "3": "grid-cols-1 lg:grid-cols-3",
   "4": "grid-cols-1 lg:grid-cols-2 2xl:grid-cols-4",
   "5": "grid-cols-1 lg:grid-cols-2 2xl:grid-cols-5",
@@ -567,9 +578,15 @@ function CrmColumn({ crm: given, tv, others, showHidden = false, onToggleHidden 
  */
 const CS_COLS = "grid grid-cols-[clamp(1.7rem,1.9vw,2.9rem)_minmax(0,1fr)_minmax(0,clamp(3.6rem,4.2vw,6.2rem))_minmax(0,clamp(3rem,3.4vw,5rem))_minmax(0,clamp(1.9rem,2.1vw,3.1rem))] items-center whitespace-nowrap gap-x-[clamp(0.15rem,0.25vw,0.45rem)]";
 
-function CsColumn({ cs, tv }: { cs: SalesTvCs; tv: boolean }) {
+/* With the mentors' meetings (2026-11-17): one more column. */
+const CS_COLS_M = "grid grid-cols-[clamp(1.7rem,1.9vw,2.9rem)_minmax(0,1fr)_minmax(0,clamp(3.6rem,4.2vw,6.2rem))_minmax(0,clamp(3rem,3.4vw,5rem))_minmax(0,clamp(1.9rem,2.1vw,3.1rem))_minmax(0,clamp(2.4rem,2.7vw,3.8rem))] items-center whitespace-nowrap gap-x-[clamp(0.15rem,0.25vw,0.45rem)]";
+
+function CsColumn({ cs, tv, labels = CS_LABELS }: { cs: SalesTvCs; tv: boolean; labels?: CsLabels }) {
   const body = useRef<HTMLDivElement>(null);
   const rest = cs.people.slice(3);
+  // The Mentors TV's meetings: a column when the board has them (null: the LMS couldn't say — shown as "—").
+  const withMeetings = cs.totals.meetings !== undefined || cs.people.some((p) => p.meetings !== undefined);
+  const COLS = withMeetings ? CS_COLS_M : CS_COLS;
   useAutoScroll(body, tv, rest.length);
   const head = cn("text-right font-medium text-[color:var(--ink2)]", T.tiny);
   const zero = "text-[color:var(--mute)]";
@@ -579,7 +596,7 @@ function CsColumn({ cs, tv }: { cs: SalesTvCs; tv: boolean }) {
       data-testid="crm-cs"
     >
       <div className="flex items-center gap-2.5 px-[clamp(0.8rem,1vw,1.4rem)] pt-[clamp(0.6rem,0.8vw,1.1rem)]">
-        <span className="h-[0.7em] w-[0.7em] shrink-0 rounded-full" style={{ background: crmTone("cs") }} />
+        <span className="h-[0.7em] w-[0.7em] shrink-0 rounded-full" style={{ background: crmTone(labels.tone) }} />
         <h2 className={cn("truncate font-semibold", T.title)}>{cs.name}</h2>
         <span className={cn("ml-auto shrink-0 rounded-full border border-[color:var(--line)] px-3 py-0.5 text-[color:var(--mute)]", T.small)}>
           {monthLabel(cs.month)}
@@ -594,23 +611,24 @@ function CsColumn({ cs, tv }: { cs: SalesTvCs; tv: boolean }) {
 
       {cs.people.length === 0 ? (
         <p className={cn("px-3 py-10 text-center text-[color:var(--mute)]", T.small)}>
-          {cs.status === "loading" ? "Loading…" : cs.error ? "No figures to show." : "No CSs yet."}
+          {cs.status === "loading" ? "Loading…" : cs.error ? "No figures to show." : labels.empty}
         </p>
       ) : (
         <>
           <div className="grid grid-cols-3 items-end gap-[clamp(0.25rem,0.35vw,0.6rem)] px-[clamp(0.6rem,0.8vw,1.2rem)] pb-[clamp(0.5rem,0.7vw,1rem)] pt-[clamp(0.4rem,0.6vw,0.9rem)]" data-testid="podium-cs">
             {[1, 0, 2].map((i) => {
               const p = cs.people[i];
-              return p ? <CsStep key={p.id || p.name} p={p} rank={i + 1} /> : <span key={`empty-${i}`} />;
+              return p ? <CsStep key={p.id || p.name} p={p} rank={i + 1} earned={labels.earned} /> : <span key={`empty-${i}`} />;
             })}
           </div>
 
-          <div className={cn(CS_COLS, "mx-[clamp(0.4rem,0.5vw,0.8rem)] rounded-full bg-[color:var(--head)] px-[clamp(0.6rem,0.7vw,1rem)] py-[clamp(0.35rem,0.45vw,0.65rem)]")}>
+          <div className={cn(COLS, "mx-[clamp(0.4rem,0.5vw,0.8rem)] rounded-full bg-[color:var(--head)] px-[clamp(0.6rem,0.7vw,1rem)] py-[clamp(0.35rem,0.45vw,0.65rem)]")}>
             <span className={cn(head, "text-left")}>#</span>
-            <span className={cn(head, "text-left")}>CS</span>
-            <span className={head} title="Course payments collected this month (AED, approved)">Month</span>
-            <span className={head} title="Collected today (AED)">Today</span>
+            <span className={cn(head, "text-left")}>{labels.person}</span>
+            <span className={head} title={`Course payments ${labels.earned} this month (AED, approved)`}>Month</span>
+            <span className={head} title="Today (AED)">Today</span>
             <span className={head} title="Payments this month">Pays</span>
+            {withMeetings && <span className={head} title="Meetings this month">Meets</span>}
           </div>
 
           <div ref={body} className="stv-scroll min-h-0 flex-1 overflow-y-auto px-[clamp(0.4rem,0.5vw,0.8rem)]">
@@ -619,7 +637,7 @@ function CsColumn({ cs, tv }: { cs: SalesTvCs; tv: boolean }) {
             ) : (
               <ol>
                 {rest.map((p, i) => (
-                  <li key={p.id || `${p.name}-${i}`} className={cn(CS_COLS, "num border-b border-[color:var(--line)] px-[clamp(0.6rem,0.7vw,1rem)] py-[clamp(0.3rem,0.4vw,0.6rem)] last:border-b-0", T.body)}>
+                  <li key={p.id || `${p.name}-${i}`} className={cn(COLS, "num border-b border-[color:var(--line)] px-[clamp(0.6rem,0.7vw,1rem)] py-[clamp(0.3rem,0.4vw,0.6rem)] last:border-b-0", T.body)}>
                     <span className={cn("font-medium text-[color:var(--mute)]", T.tiny)}>#{String(i + 4).padStart(2, "0")}</span>
                     <span className="flex min-w-0 items-center gap-[clamp(0.4rem,0.5vw,0.75rem)]">
                       <Photo name={p.name} url={p.photoUrl} className="hidden h-[clamp(1.7rem,1.9vw,2.7rem)] w-[clamp(1.7rem,1.9vw,2.7rem)] rounded-full min-[1500px]:grid" />
@@ -631,17 +649,19 @@ function CsColumn({ cs, tv }: { cs: SalesTvCs; tv: boolean }) {
                     <Num className={p.monthAed ? "font-semibold text-[color:var(--money)]" : zero} title={fmtRevenue(p.monthAed)}><Money n={p.monthAed} /></Num>
                     <Num className={p.todayAed ? "font-semibold text-[color:var(--good)]" : zero} title={fmtRevenue(p.todayAed)}><Money n={p.todayAed} /></Num>
                     <Num className={p.payments ? undefined : zero}>{fmtInt(p.payments)}</Num>
+                    {withMeetings && <Num className={p.meetings ? undefined : zero}>{p.meetings == null ? "—" : fmtInt(p.meetings)}</Num>}
                   </li>
                 ))}
               </ol>
             )}
           </div>
 
-          <div className={cn(CS_COLS, "num border-t border-[color:var(--line)] px-[clamp(1rem,1.2vw,1.8rem)] py-[clamp(0.4rem,0.55vw,0.8rem)] font-semibold whitespace-nowrap", T.body)} data-testid="totals-cs">
-            <span className={cn("col-span-2 truncate font-medium text-[color:var(--mute)]", T.small)}>Total · {cs.people.length} CSs</span>
+          <div className={cn(COLS, "num border-t border-[color:var(--line)] px-[clamp(1rem,1.2vw,1.8rem)] py-[clamp(0.4rem,0.55vw,0.8rem)] font-semibold whitespace-nowrap", T.body)} data-testid="totals-cs">
+            <span className={cn("col-span-2 truncate font-medium text-[color:var(--mute)]", T.small)}>Total · {cs.people.length} {labels.plural}</span>
             <Num className="text-[color:var(--money)]" title={fmtRevenue(cs.totals.monthAed)}><Money n={cs.totals.monthAed} /></Num>
             <Num title={fmtRevenue(cs.totals.todayAed)}><Money n={cs.totals.todayAed} /></Num>
             <Num>{fmtInt(cs.totals.payments)}</Num>
+            {withMeetings && <Num>{cs.totals.meetings == null ? "—" : fmtInt(cs.totals.meetings)}</Num>}
           </div>
         </>
       )}
@@ -649,7 +669,7 @@ function CsColumn({ cs, tv }: { cs: SalesTvCs; tv: boolean }) {
   );
 }
 
-function CsStep({ p, rank }: { p: SalesTvCsPerson; rank: number }) {
+function CsStep({ p, rank, earned = "collected" }: { p: SalesTvCsPerson; rank: number; earned?: string }) {
   const first = rank === 1;
   // A coloured trophy only with something collected.
   const place: Place | undefined = p.monthAed > 0 ? PLACES[rank - 1] : undefined;
@@ -676,14 +696,15 @@ function CsStep({ p, rank }: { p: SalesTvCsPerson; rank: number }) {
           >
             <Trophy className="h-[55%] w-[55%]" />
           </span>
-          <p className={cn("num mt-1 whitespace-nowrap font-bold leading-none text-[color:var(--money)]", first ? "text-[clamp(1.15rem,1.45vw,2.1rem)]" : "text-[clamp(0.95rem,1.15vw,1.7rem)]")} title="Collected this month">
+          <p className={cn("num mt-1 whitespace-nowrap font-bold leading-none text-[color:var(--money)]", first ? "text-[clamp(1.15rem,1.45vw,2.1rem)]" : "text-[clamp(0.95rem,1.15vw,1.7rem)]")} title={`${earned.charAt(0).toUpperCase()}${earned.slice(1)} this month`}>
             <Money n={p.monthAed} aed />
           </p>
-          <p className={cn("text-[color:var(--mute)]", T.tiny)}>collected</p>
+          <p className={cn("text-[color:var(--mute)]", T.tiny)}>{earned}</p>
           <div className="my-[clamp(0.25rem,0.35vw,0.5rem)] h-px w-4/5 bg-[color:var(--line)]" />
           <p className={cn("num whitespace-nowrap text-[color:var(--ink2)]", T.tiny)}>
             <span className={p.todayAed > 0 ? "font-semibold text-[color:var(--good)]" : undefined}><Money n={p.todayAed} /> today</span>
             {" · "}{fmtInt(p.payments)} {p.payments === 1 ? "payment" : "payments"}
+            {p.meetings != null && <>{" · "}{fmtInt(p.meetings)} {p.meetings === 1 ? "meeting" : "meetings"}</>}
           </p>
         </div>
       </div>

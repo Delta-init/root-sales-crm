@@ -30,7 +30,7 @@ export interface SaleClosed {
   at: string;
   test?: boolean;
   /** A CS course payment (the Manager TV, 2026-10-23) rather than a sale. */
-  kind?: "sale" | "cs_payment";
+  kind?: "sale" | "cs_payment" | "mentor_payment";
 }
 
 // ── What it says ──────────────────────────────────────────────────────────────
@@ -59,7 +59,10 @@ export function spokenLine(sale: SaleClosed): string {
   const courses = listed(sale.courses);
   const where = sale.crmName ? `, in ${sale.crmName}` : "";
   const what = sale.kind === "cs_payment" ? "Course payment collected" : "Sale closed";
-  let line = sale.closer ? `${what} by ${sale.closer}${where}! ` : `${what}${where}! `;
+  // The Mentors TV (2026-11-17): "Mentor payment for Hafiz! DGMP, for 2,250 dirhams."
+  let line = sale.kind === "mentor_payment"
+    ? (sale.closer ? `Mentor payment for ${sale.closer}! ` : "Mentor payment! ")
+    : sale.closer ? `${what} by ${sale.closer}${where}! ` : `${what}${where}! `;
   line += courses ? `${courses}` : "A new enrolment";
   if (money) line += `, for ${money.spoken}`;
   return `${line}. Congratulations!`;

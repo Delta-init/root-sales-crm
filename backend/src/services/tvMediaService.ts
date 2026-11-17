@@ -12,6 +12,7 @@ import { tvMediaStore, tvStoreMissing } from "../lib/tvMediaStore.js";
 export const TV_SCREENS = [
   { key: "root-sales-tv", name: "Sales TV", where: "Root" },
   { key: "root-manager-tv", name: "Manager TV", where: "Root" },
+  { key: "root-mentors-tv", name: "Mentors TV", where: "Root" },
   { key: "sales-crm", name: "Leaderboard", where: "Sales CRM" },
   { key: "draw", name: "Leaderboard", where: "Draw" },
   { key: "remote", name: "Leaderboard", where: "Remote" },

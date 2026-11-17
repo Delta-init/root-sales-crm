@@ -65,6 +65,8 @@ export const NAV: NavItem[] = [
       { href: "/sales-tv", label: "Sales TV", icon: Tv, rootOnly: true },
       // The Sales TV with the CS team as a fourth card, and its own open link (2026-10-23).
       { href: "/manager-tv", label: "Manager TV", icon: MonitorPlay, rootOnly: true },
+      // Mentors' revenue — course payments after their meetings — on its own TV (2026-11-17).
+      { href: "/mentors-tv", label: "Mentors TV", icon: GraduationCap, rootOnly: true },
       // Photos and videos every office TV shows between its boards (2026-11-02).
       { href: "/tv-media", label: "TV photos & videos", icon: Images, rootOnly: true },
       // Amounts typed for a Bangalore employee that the CS TV shows like payments — on the Dubai TV, Bangalore's or both (2026-11-14).

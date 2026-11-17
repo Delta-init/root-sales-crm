@@ -69,7 +69,7 @@ async function main() {
     && (await call("POST", "/tv-media/uploads", member, { name: "x.png", mime: "image/png", size: 10 })).status === 403);
   let r = await call("GET", "/tv-media", root);
   check("the page: nothing yet, every TV listed at a minute, storage set up", r.status === 200 && r.body.data.media.length === 0
-    && r.body.data.screens.length === 9 && r.body.data.screens.every((s: Json) => s.boardSeconds === 60 && s.enabled) && r.body.data.storeMissing.length === 0, show(r.body.data?.screens?.[0]));
+    && r.body.data.screens.length === 10 && r.body.data.screens.every((s: Json) => s.boardSeconds === 60 && s.enabled) && r.body.data.storeMissing.length === 0, show(r.body.data?.screens?.[0]));
   check("a PDF: refused", (await call("POST", "/tv-media/uploads", root, { name: "a.pdf", mime: "application/pdf", size: 100 })).status === 400);
   check("a photo over 10 MB, a video over 200 MB: refused before they go up",
     (await call("POST", "/tv-media/uploads", root, { name: "big.jpg", mime: "image/jpeg", size: 11 * 1024 * 1024 })).status === 400

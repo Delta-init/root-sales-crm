@@ -66,7 +66,7 @@ export interface SalesTvClose {
   at: string;
   seenAt: string;
   /** The Manager TV's CS payments come in among the closes (crm "cs"), announced as a CS payment. */
-  kind?: "sale" | "cs_payment";
+  kind?: "sale" | "cs_payment" | "mentor_payment";
 }
 
 /* The Manager TV's fourth card (2026-10-23): the CS team as CS Portal's CS leaderboard ranks it — each CS
@@ -80,6 +80,8 @@ export interface SalesTvCsPerson {
   payments: number;
   todayPayments: number;
   photoUrl: string | null;
+  /** The Mentors TV (2026-11-17): meetings this month; null when the LMS couldn't say. Absent on the CS card. */
+  meetings?: number | null;
 }
 
 export interface SalesTvCs {
@@ -91,7 +93,7 @@ export interface SalesTvCs {
   updatedAt: string | null;
   people: SalesTvCsPerson[];
   teams: Array<{ team: string; monthAed: number; todayAed: number; payments: number; csCount: number }>;
-  totals: { monthAed: number; todayAed: number; payments: number };
+  totals: { monthAed: number; todayAed: number; payments: number; meetings?: number | null };
 }
 
 export interface SalesTvData {
@@ -168,7 +170,7 @@ export function monthLabel(m: string | null): string {
 }
 
 /** Each CRM's colour on the board: the stripe on its table and its tag on breaks and closes. */
-const CRM_TONE: Record<string, string> = { delta: "#2f6bff", draw: "#9b5cff", remote: "#00b3a4", remote_others: "#00b3a4", cs: "#e85d9a" };
+const CRM_TONE: Record<string, string> = { delta: "#2f6bff", draw: "#9b5cff", remote: "#00b3a4", remote_others: "#00b3a4", cs: "#e85d9a", mentors: "#f59e0b" };
 export const crmTone = (crm: string | undefined) => (crm && CRM_TONE[crm]) || "#6b7280";
 
 /** The short tag a CRM goes by on the board — its team's name (2026-11-06): Cartel, Syndicate, Avengers, Mafia. */

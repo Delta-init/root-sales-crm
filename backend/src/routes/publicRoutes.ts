@@ -2,6 +2,7 @@ import { Router, type Request, type Response, type NextFunction } from "express"
 import rateLimit from "express-rate-limit";
 import { salesTv } from "../services/salesTvService.js";
 import { managerTv } from "../services/managerTvService.js";
+import { mentorsTv } from "../services/mentorsTvService.js";
 import { sendSuccess } from "../utils/response.js";
 import { giftPhoto } from "../services/rewardsService.js";
 import { classTv, voiceAudio } from "../services/classTvService.js";
@@ -45,6 +46,19 @@ router.get("/manager-tv", tvLimiter, async (req: Request, res: Response, next: N
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
     res.setHeader("Cache-Control", "no-store");
     sendSuccess(res, "Manager TV", await managerTv({ since, publicView: true, month: req.query.month }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// The Mentors TV (2026-11-17): the mentors' revenue this month, a location at a time — one shared answer however many
+// screens (CS Portal asked at most every 20 s).
+router.get("/mentors-tv", tvLimiter, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const since = typeof req.query.since === "string" ? req.query.since.slice(0, 40) : undefined;
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
+    res.setHeader("Cache-Control", "no-store");
+    sendSuccess(res, "Mentors TV", await mentorsTv({ location: req.query.location, since, month: req.query.month, publicView: true }));
   } catch (error) {
     next(error);
   }
