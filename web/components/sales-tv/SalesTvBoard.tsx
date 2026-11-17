@@ -130,19 +130,30 @@ export interface SalesTvBoardProps {
   noCrms?: boolean;
   /** What the `cs` card calls its people and its money (default the CS team's). */
   csLabels?: CsLabels;
+  /**
+   * The CS & Mentors TV (2026-11-18): the answer's `mentors` as a second card beside the `cs` one, the screen split in
+   * two — with `noCrms`, nothing else — each half's totals in the header.
+   */
+  withMentors?: boolean;
+  /** How the `mentors` card speaks. */
+  mentorLabels?: CsLabels;
+  /** Each card's teams under it, with their leader (the CS & Mentors TV). */
+  teamStrip?: boolean;
 }
 
 /** How the `cs` card speaks: the CS team's (Manager TV) or the mentors' (Mentors TV, 2026-11-17). */
 export interface CsLabels { title: string; tone: string; person: string; plural: string; earned: string; empty: string }
 const CS_LABELS: CsLabels = { title: "Team Mafia", tone: "cs", person: "CS", plural: "CSs", earned: "collected", empty: "No CSs yet." };
+const MENTOR_LABELS: CsLabels = { title: "Mentors", tone: "mentors", person: "Mentor", plural: "mentors", earned: "revenue", empty: "No mentor has a payment or a meeting this month yet." };
 
 export function SalesTvBoard({
   fetcher, variant, withCs = false, panels = true, title = "Sales TV", subtitle = "Team Cartel · Team Syndicate · Team Avengers", months = false, compactMoney = false,
-  noCrms = false, csLabels = CS_LABELS,
+  noCrms = false, csLabels = CS_LABELS, withMentors = false, mentorLabels = MENTOR_LABELS, teamStrip = false,
 }: SalesTvBoardProps) {
   const tv = variant === "tv";
   const [crms, setCrms] = useState<SalesTvCrm[] | null>(null);
   const [cs, setCs] = useState<SalesTvCs | null>(null);
+  const [mentors, setMentors] = useState<SalesTvCs | null>(null);
   const [onBreak, setOnBreak] = useState<SalesTvBreak[]>([]);
   const [closes, setCloses] = useState<SalesTvClose[]>([]);
   const [lastOk, setLastOk] = useState<number | null>(null);
@@ -190,6 +201,7 @@ export function SalesTvBoard({
     seen.current = new Set();
     setCrms(null);
     setCs(null);
+    setMentors(null);
     setCloses([]);
     setOnBreak([]);
     const tick = async () => {
@@ -213,6 +225,7 @@ export function SalesTvBoard({
         since.current = d.serverTime;
         setCrms(d.crms);
         if (d.cs) setCs(d.cs);
+        if (d.mentors) setMentors(d.mentors);
         setOnBreak(d.onBreak);
         setLastOk(Date.now());
         setFetchError(null);
@@ -243,14 +256,15 @@ export function SalesTvBoard({
     };
     return showOthers ? [{ crm: main, others: { count: ids.size } }, { crm: rest }] : [{ crm: main, others: { count: ids.size } }];
   });
-  const columns = (noCrms ? "1" : String(Math.min(5, Math.max(3, cards.length + (withCs ? 1 : 0))))) as "1" | "3" | "4" | "5";
+  const columns = (noCrms ? (withMentors ? "2" : "1") : String(Math.min(5, Math.max(3, cards.length + (withCs ? 1 : 0))))) as "1" | "2" | "3" | "4" | "5";
 
   return (
     <CompactMoney.Provider value={compactMoney}>
     <div ref={root} className={cn("stv relative", boardFont.className, tv ? "stv-tv flex h-[100dvh] flex-col overflow-hidden p-[clamp(0.5rem,0.7vw,1.1rem)]" : "rounded-2xl p-3 sm:p-4")}>
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
       <Header tv={tv} serverNow={serverNow} lastOk={lastOk} now={now} fetchError={fetchError} rootRef={root} title={title} subtitle={subtitle}
-        totals={withCs && crms ? boardTotals(crms, cs, past) : null} months={months ? { month, pick: pickMonth } : null} />
+        totals={withCs && crms && !withMentors ? boardTotals(crms, cs, past) : null} months={months ? { month, pick: pickMonth } : null}
+        parts={withMentors ? [halfTotals(csLabels.person, cs, past), halfTotals(mentorLabels.title, mentors, past)] : null} />
 
       <div
         className={cn(
@@ -270,7 +284,8 @@ export function SalesTvBoard({
             onToggleHidden={() => setShowHidden((v) => !v)}
           />
         ))}
-        {withCs && <CsColumn cs={cs ?? { ...CS_PLACEHOLDER, name: csLabels.title }} tv={tv} labels={csLabels} />}
+        {withCs && <CsColumn cs={cs ?? { ...CS_PLACEHOLDER, name: csLabels.title }} tv={tv} labels={csLabels} teamStrip={teamStrip} />}
+        {withMentors && <CsColumn cs={mentors ?? { ...CS_PLACEHOLDER, name: mentorLabels.title }} tv={tv} labels={mentorLabels} teamStrip={teamStrip} testId="mentors" />}
         {panels && (
           <aside className={cn("flex min-h-0 flex-col", gap, !tv && "col-span-full lg:grid lg:grid-cols-2")}>
             <BreakPanel people={onBreak} serverNow={serverNow} tv={tv} />
@@ -294,15 +309,17 @@ const PLACEHOLDER: SalesTvCrm[] = [
 
 /* The board's columns: the CRM cards, the CS card on the Manager TV, and Remote's other teams when opened — written
    out whole so Tailwind keeps every one. */
-const GRID_TV: Record<"1" | "3" | "4" | "5", string> = { "1": "lg:grid-cols-1", "3": "lg:grid-cols-3", "4": "lg:grid-cols-4", "5": "lg:grid-cols-5" };
-const GRID_TV_PANELS: Record<"1" | "3" | "4" | "5", string> = {
+const GRID_TV: Record<"1" | "2" | "3" | "4" | "5", string> = { "1": "lg:grid-cols-1", "2": "lg:grid-cols-2", "3": "lg:grid-cols-3", "4": "lg:grid-cols-4", "5": "lg:grid-cols-5" };
+const GRID_TV_PANELS: Record<"1" | "2" | "3" | "4" | "5", string> = {
   "1": "lg:grid-cols-[minmax(0,1fr)_minmax(15rem,0.4fr)]",
+  "2": "lg:grid-cols-[repeat(2,minmax(0,1fr))_minmax(15rem,0.5fr)]",
   "3": "lg:grid-cols-[repeat(3,minmax(0,1fr))_minmax(15rem,0.62fr)]",
   "4": "lg:grid-cols-[repeat(4,minmax(0,1fr))_minmax(14rem,0.5fr)]",
   "5": "lg:grid-cols-[repeat(5,minmax(0,1fr))_minmax(13rem,0.45fr)]",
 };
-const GRID_PAGE: Record<"1" | "3" | "4" | "5", string> = {
+const GRID_PAGE: Record<"1" | "2" | "3" | "4" | "5", string> = {
   "1": "grid-cols-1",
+  "2": "grid-cols-1 lg:grid-cols-2",
   "3": "grid-cols-1 lg:grid-cols-3",
   "4": "grid-cols-1 lg:grid-cols-2 2xl:grid-cols-4",
   "5": "grid-cols-1 lg:grid-cols-2 2xl:grid-cols-5",
@@ -326,10 +343,16 @@ function boardTotals(crms: SalesTvCrm[], cs: SalesTvCs | null, past = false) {
   return { today: past ? undefined : today, month, monthName: monthLabel(crms.find((c) => c.month)?.month ?? cs?.month ?? null) };
 }
 
-function Header({ tv, serverNow, lastOk, now, fetchError, rootRef, title, subtitle, totals, months }: {
+/** One half of the CS & Mentors TV in the header (2026-11-18): its today and month — each its own, never added together. */
+function halfTotals(label: string, card: SalesTvCs | null, past = false) {
+  return { label, today: past ? undefined : card ? card.totals.todayAed : null, month: card?.totals.monthAed ?? 0, monthName: monthLabel(card?.month ?? null) };
+}
+
+function Header({ tv, serverNow, lastOk, now, fetchError, rootRef, title, subtitle, totals, months, parts }: {
   tv: boolean; serverNow: number; lastOk: number | null; now: number; fetchError: string | null; rootRef: RefObject<HTMLDivElement>;
   title: string; subtitle: string; totals?: ReturnType<typeof boardTotals> | null;
   months?: { month: string | null; pick: (m: string | null) => void } | null;
+  parts?: Array<ReturnType<typeof halfTotals>> | null;
 }) {
   const past = months?.month ?? null;
   const pref = useSoundPref();
@@ -391,6 +414,16 @@ function Header({ tv, serverNow, lastOk, now, fetchError, rootRef, title, subtit
             <span>{totals.monthName} <b className="text-[color:var(--money)]" title={fmtRevenue(totals.month)}>AED <Money n={totals.month} /></b></span>
           </span>
         )}
+        {parts?.map((h) => (
+          <span key={h.label} className={cn("num inline-flex items-center gap-2 rounded-full border border-[color:var(--line)] px-3 py-1 font-medium text-[color:var(--ink2)]", T.small)} data-testid={`board-totals-${h.label.toLowerCase()}`}>
+            <span className="text-[color:var(--ink)]">{h.label}</span>
+            {h.today !== undefined && <>
+              <span>Today <b className="text-[color:var(--good)]">{h.today === null ? "—" : <>AED <Money n={h.today} /></>}</b></span>
+              <span className="text-[color:var(--mute)]">·</span>
+            </>}
+            <span>{h.monthName} <b className="text-[color:var(--money)]" title={fmtRevenue(h.month)}>AED <Money n={h.month} /></b></span>
+          </span>
+        ))}
         <span className={cn("hidden text-[color:var(--mute)] md:inline", T.small)} suppressHydrationWarning>{dubaiDate(serverNow)}</span>
         <span className={cn("num hidden min-w-[5.5ch] font-semibold sm:inline", T.title)} suppressHydrationWarning>{dubaiTime(serverNow)}</span>
         <button
@@ -581,7 +614,7 @@ const CS_COLS = "grid grid-cols-[clamp(1.7rem,1.9vw,2.9rem)_minmax(0,1fr)_minmax
 /* With the mentors' meetings (2026-11-17): one more column. */
 const CS_COLS_M = "grid grid-cols-[clamp(1.7rem,1.9vw,2.9rem)_minmax(0,1fr)_minmax(0,clamp(3.6rem,4.2vw,6.2rem))_minmax(0,clamp(3rem,3.4vw,5rem))_minmax(0,clamp(1.9rem,2.1vw,3.1rem))_minmax(0,clamp(2.4rem,2.7vw,3.8rem))] items-center whitespace-nowrap gap-x-[clamp(0.15rem,0.25vw,0.45rem)]";
 
-function CsColumn({ cs, tv, labels = CS_LABELS }: { cs: SalesTvCs; tv: boolean; labels?: CsLabels }) {
+function CsColumn({ cs, tv, labels = CS_LABELS, teamStrip = false, testId = "cs" }: { cs: SalesTvCs; tv: boolean; labels?: CsLabels; teamStrip?: boolean; testId?: string }) {
   const body = useRef<HTMLDivElement>(null);
   const rest = cs.people.slice(3);
   // The Mentors TV's meetings: a column when the board has them (null: the LMS couldn't say — shown as "—").
@@ -593,7 +626,7 @@ function CsColumn({ cs, tv, labels = CS_LABELS }: { cs: SalesTvCs; tv: boolean; 
   return (
     <section
       className={cn("flex min-h-0 flex-col overflow-hidden rounded-[clamp(1rem,1.2vw,1.6rem)] border border-[color:var(--line)] bg-[color:var(--panel)]", !tv && "max-h-[85vh]")}
-      data-testid="crm-cs"
+      data-testid={`crm-${testId}`}
     >
       <div className="flex items-center gap-2.5 px-[clamp(0.8rem,1vw,1.4rem)] pt-[clamp(0.6rem,0.8vw,1.1rem)]">
         <span className="h-[0.7em] w-[0.7em] shrink-0 rounded-full" style={{ background: crmTone(labels.tone) }} />
@@ -663,9 +696,31 @@ function CsColumn({ cs, tv, labels = CS_LABELS }: { cs: SalesTvCs; tv: boolean; 
             <Num>{fmtInt(cs.totals.payments)}</Num>
             {withMeetings && <Num>{cs.totals.meetings == null ? "—" : fmtInt(cs.totals.meetings)}</Num>}
           </div>
+          {teamStrip && cs.teams.length > 0 && <TeamStrip teams={cs.teams} testId={testId} />}
         </>
       )}
     </section>
+  );
+}
+
+/*
+ * Each team under its card (the CS & Mentors TV, 2026-11-18: "and the team leaders too"): the team, its leader's photo
+ * and name — a CS team's leader, a mentor team's Chief Mentor — and what the team brought in this month, biggest first.
+ */
+function TeamStrip({ teams, testId }: { teams: SalesTvCs["teams"]; testId: string }) {
+  return (
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,clamp(13rem,15vw,22rem)),1fr))] gap-[clamp(0.3rem,0.4vw,0.6rem)] border-t border-[color:var(--line)] px-[clamp(0.6rem,0.8vw,1.2rem)] py-[clamp(0.45rem,0.6vw,0.9rem)]" data-testid={`teams-${testId}`}>
+      {teams.slice(0, 8).map((t) => (
+        <div key={t.team} className="flex min-w-0 items-center gap-[clamp(0.35rem,0.45vw,0.7rem)] rounded-[clamp(0.6rem,0.7vw,1rem)] bg-[color:var(--head)] px-[clamp(0.45rem,0.55vw,0.8rem)] py-[clamp(0.3rem,0.4vw,0.6rem)]">
+          <Photo name={t.leader || t.team} url={t.leaderPhotoUrl ?? null} className="h-[clamp(1.6rem,1.8vw,2.6rem)] w-[clamp(1.6rem,1.8vw,2.6rem)] shrink-0 rounded-full" />
+          <div className="min-w-0 flex-1 leading-tight">
+            <p className={cn("truncate font-semibold", T.small)} title={t.team}>{t.team}</p>
+            <p className={cn("truncate text-[color:var(--mute)]", T.tiny)}>{t.leader ? `Leader · ${t.leader}` : `${fmtInt(t.csCount)} in the team`}</p>
+          </div>
+          <span className={cn("num shrink-0 font-bold text-[color:var(--money)]", T.small)} title={fmtRevenue(t.monthAed)}><Money n={t.monthAed} /></span>
+        </div>
+      ))}
+    </div>
   );
 }
 

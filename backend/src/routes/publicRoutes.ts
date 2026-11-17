@@ -3,6 +3,7 @@ import rateLimit from "express-rate-limit";
 import { salesTv } from "../services/salesTvService.js";
 import { managerTv } from "../services/managerTvService.js";
 import { mentorsTv } from "../services/mentorsTvService.js";
+import { csMentorsTv } from "../services/csMentorsTvService.js";
 import { sendSuccess } from "../utils/response.js";
 import { giftPhoto } from "../services/rewardsService.js";
 import { classTv, voiceAudio } from "../services/classTvService.js";
@@ -59,6 +60,19 @@ router.get("/mentors-tv", tvLimiter, async (req: Request, res: Response, next: N
     res.setHeader("X-Robots-Tag", "noindex, nofollow");
     res.setHeader("Cache-Control", "no-store");
     sendSuccess(res, "Mentors TV", await mentorsTv({ location: req.query.location, since, month: req.query.month, publicView: true }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// The CS & Mentors TV (2026-11-18): the CS and the mentors side by side, a location at a time — the same shared answers
+// as the CS TV and the Mentors TV (CS Portal asked at most every 20 s per board).
+router.get("/cs-mentors-tv", tvLimiter, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const since = typeof req.query.since === "string" ? req.query.since.slice(0, 40) : undefined;
+    res.setHeader("X-Robots-Tag", "noindex, nofollow");
+    res.setHeader("Cache-Control", "no-store");
+    sendSuccess(res, "CS & Mentors TV", await csMentorsTv({ location: req.query.location, since, month: req.query.month, publicView: true }));
   } catch (error) {
     next(error);
   }

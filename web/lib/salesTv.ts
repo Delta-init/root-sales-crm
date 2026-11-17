@@ -92,7 +92,8 @@ export interface SalesTvCs {
   month: string | null;
   updatedAt: string | null;
   people: SalesTvCsPerson[];
-  teams: Array<{ team: string; monthAed: number; todayAed: number; payments: number; csCount: number }>;
+  /** `leader`: the CS & Mentors TV's team strip (2026-11-18) — a CS team's leader, a mentor team's Chief Mentor. */
+  teams: Array<{ team: string; monthAed: number; todayAed: number; payments: number; csCount: number; leader?: string | null; leaderPhotoUrl?: string | null }>;
   totals: { monthAed: number; todayAed: number; payments: number; meetings?: number | null };
 }
 
@@ -101,8 +102,10 @@ export interface SalesTvData {
   crms: SalesTvCrm[];
   onBreak: SalesTvBreak[];
   closes: SalesTvClose[];
-  /** Only on the Manager TV. */
+  /** Only on the Manager TV (the CS & Mentors TV's left half). */
   cs?: SalesTvCs;
+  /** The CS & Mentors TV's right half (2026-11-18): the mentors, in the CS card's shape. */
+  mentors?: SalesTvCs;
   /** The Manager TV's month switch (2026-11-01): a month gone by, as it ended — no closes, nothing of today. */
   past?: boolean;
   month?: string;

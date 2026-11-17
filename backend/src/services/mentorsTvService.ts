@@ -88,6 +88,25 @@ async function refresh(loc: MentorsTvLocation, now: number): Promise<void> {
   return s.inflight;
 }
 
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * The mentors' teams (2026-11-18, the CS & Mentors TV's team strip): each with its Chief Mentor — the team's mentor
+ * whose role is a chief's — and what its mentors brought in. A mentor on no team is in none.
+ */
+function teamsOf(mentors: Mentor[]) {
+  const by = new Map<string, { team: string; leader: string | null; leaderPhotoUrl: string | null; monthAed: number; todayAed: number; payments: number; csCount: number }>();
+  for (const m of mentors) {
+    const name = String(m.team ?? "").trim();
+    if (!name) continue;
+    const t = by.get(name) ?? { team: name, leader: null, leaderPhotoUrl: null, monthAed: 0, todayAed: 0, payments: 0, csCount: 0 };
+    t.monthAed += m.month_aed || 0; t.todayAed += m.today_aed || 0; t.payments += m.payments || 0; t.csCount += 1;
+    if (!t.leader && /chief/i.test(m.role ?? "")) { t.leader = m.name; t.leaderPhotoUrl = m.photo ?? null; }
+    by.set(name, t);
+  }
+  return [...by.values()].map((t) => ({ ...t, monthAed: round2(t.monthAed), todayAed: round2(t.todayAed) })).sort((a, b) => b.monthAed - a.monthAed || a.team.localeCompare(b.team));
+}
+
 /** The mentors' card, in the Sales TV's CS-card shape (SalesTvBoard draws it), each mentor with their meetings. */
 function card(pub: boolean, from: { data: Answer | null; error: string | null; at: number }) {
   const d = from.data;
@@ -102,7 +121,7 @@ function card(pub: boolean, from: { data: Answer | null; error: string | null; a
       id: m.id, name: m.name, team: [m.role, m.team].filter(Boolean).join(" · "), monthAed: m.month_aed, todayAed: m.today_aed,
       payments: m.payments, todayPayments: m.today_payments, photoUrl: m.photo ?? null, meetings: m.meetings,
     })),
-    teams: [],
+    teams: teamsOf(d?.mentors ?? []),
     totals: { monthAed: d?.totals?.month_aed ?? 0, todayAed: d?.totals?.today_aed ?? 0, payments: d?.totals?.payments ?? 0, meetings: d?.totals?.meetings ?? null },
   };
 }

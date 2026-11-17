@@ -8,7 +8,7 @@
  */
 import type { LucideIcon } from "lucide-react";
 import {
-  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, DatabaseBackup, FileBarChart, Gauge, Gift, GraduationCap, Headset, Images, Inbox, LayoutGrid, Phone, MonitorPlay, MonitorUp, Shuffle, Tv, Users2,
+  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, Columns2, DatabaseBackup, FileBarChart, Gauge, Gift, GraduationCap, Headset, Images, Inbox, LayoutGrid, Phone, MonitorPlay, MonitorUp, Shuffle, Tv, Users2,
   WalletCards,
 } from "lucide-react";
 
@@ -67,6 +67,8 @@ export const NAV: NavItem[] = [
       { href: "/manager-tv", label: "Manager TV", icon: MonitorPlay, rootOnly: true },
       // Mentors' revenue — course payments after their meetings — on its own TV (2026-11-17).
       { href: "/mentors-tv", label: "Mentors TV", icon: GraduationCap, rootOnly: true },
+      // The CS and the mentors side by side, with their teams' leaders, on one TV (2026-11-18).
+      { href: "/cs-mentors-tv", label: "CS & Mentors TV", icon: Columns2, rootOnly: true },
       // Photos and videos every office TV shows between its boards (2026-11-02).
       { href: "/tv-media", label: "TV photos & videos", icon: Images, rootOnly: true },
       // Amounts typed for a Bangalore employee that the CS TV shows like payments — on the Dubai TV, Bangalore's or both (2026-11-14).
