@@ -57,6 +57,8 @@ interface MentorMeeting {
   durationMins: number;
   attendeeNames: string[];
   bookedByEmail: string;
+  /** Who that is, by name, where they work and their role (2026-11-18) — null when nobody was found; absent from an older Root backend. */
+  bookedBy?: { name: string; where: string; role: string | null } | null;
 }
 
 interface Mentor {
@@ -184,6 +186,32 @@ export default function MentorsPage() {
   const [find, setFind] = useState("");
   const [course, setCourse] = useState("");
   const [mod, setMod] = useState("");
+  /*
+   * Booked by (the user, 2026-11-18: "filter by who scheduled the meeting — CS or salesperson"): one person's
+   * meetings only, by the address the meeting carries. Classes are nobody's booking, so they step aside while it is on.
+   * The list is everybody who booked something in the days on screen, salespeople and CS apart.
+   */
+  const [booker, setBooker] = useState("");
+  const bookers = useMemo(() => {
+    const by = new Map<string, { email: string; label: string; group: string; n: number }>();
+    for (const m of schedule.data?.mentors ?? []) for (const v of m.meetings ?? []) {
+      const email = String(v.bookedByEmail ?? "").toLowerCase();
+      if (!email) continue;
+      const had = by.get(email);
+      if (had) { had.n += 1; continue; }
+      const who = v.bookedBy;
+      const group = !who ? "Not found" : who.where === "CS Portal" ? "CS Portal" : who.where === "Root" ? "Root" : "Salespeople";
+      const label = !who ? email : `${who.name} · ${who.where === "CS Portal" ? (who.role || "CS Portal") : who.where}`;
+      by.set(email, { email, label, group, n: 1 });
+    }
+    const order = ["Salespeople", "CS Portal", "Root", "Not found"];
+    return order.map((g) => ({ group: g, people: Array.from(by.values()).filter((p) => p.group === g).sort((a, b) => a.label.localeCompare(b.label)) }))
+      .filter((g) => g.people.length);
+  }, [schedule.data]);
+  const bookerOf = (id: string) => {
+    for (const m of schedule.data?.mentors ?? []) for (const v of m.meetings ?? []) if (v.id === id) return v.bookedBy ?? null;
+    return null;
+  };
   const { courses, modules } = useMemo(() => {
     const cs = new Map<string, string>(), ms = new Map<string, string>();
     for (const m of schedule.data?.mentors ?? []) for (const c of m.classes ?? []) {
@@ -194,11 +222,12 @@ export default function MentorsPage() {
     return { courses: sorted(cs), modules: sorted(ms) };
   }, [schedule.data, course]);
   const needle = find.trim().toLowerCase();
-  const filtering = !!(needle || course);
+  const filtering = !!(needle || course || booker);
   const has = (...vs: (string | null | undefined)[]) => vs.some((v) => String(v ?? "").toLowerCase().includes(needle));
   const classShown = (c: MentorClass) =>
-    (!course || c.courseId === course) && (!mod || c.moduleId === mod) && (!needle || (c.mine && has(c.title, c.course, c.module)));
-  const meetingShown = (v: MentorMeeting) => !needle || has(v.title, ...(v.attendeeNames ?? []));
+    !booker && (!course || c.courseId === course) && (!mod || c.moduleId === mod) && (!needle || (c.mine && has(c.title, c.course, c.module)));
+  const meetingShown = (v: MentorMeeting) =>
+    (!booker || String(v.bookedByEmail ?? "").toLowerCase() === booker) && (!needle || has(v.title, ...(v.attendeeNames ?? []), v.bookedBy?.name));
 
   const shown = useMemo(() => {
     const all = schedule.data?.mentors ?? [];
@@ -208,7 +237,7 @@ export default function MentorsPage() {
     return filtering
       ? people.filter((m) => m.classes.some((c) => c.status !== "cancelled" && classShown(c)) || m.meetings.some(meetingShown))
       : people;
-  }, [schedule.data, query, needle, course, mod]);
+  }, [schedule.data, query, needle, course, mod, booker]);
 
   /*
    * Booking an hour.
@@ -527,11 +556,12 @@ export default function MentorsPage() {
             type="button"
             key={v.id}
             onClick={(e) => { e.stopPropagation(); setViewing(v.id); }}
-            title={`${v.title} · with ${v.attendeeNames.join(", ")} · ${v.durationMins} minutes`}
+            title={`${v.title} · with ${v.attendeeNames.join(", ")} · ${v.durationMins} minutes · booked by ${v.bookedBy?.name ?? v.bookedByEmail}`}
             className="w-full rounded border border-violet-500/30 bg-violet-500/15 px-1.5 py-0.5 text-left text-[11px] text-violet-300 transition-colors hover:bg-violet-500/25"
           >
             <span className="tabular-nums">{at(v.startsAt)}</span>{" "}
             {KIND_LABEL[v.kind] ?? v.kind} · {v.attendeeNames.join(", ")}
+            {v.bookedBy && <span className="block truncate text-[10px] opacity-70">by {v.bookedBy.name}</span>}
           </button>
         ))}
       </div>
@@ -598,8 +628,17 @@ export default function MentorsPage() {
           <option value="">{course && !modules.length ? "No modules" : "All modules"}</option>
           {modules.map(([id, title]) => <option key={id} value={id}>{title}</option>)}
         </select>
+        <select value={booker} onChange={(e) => setBooker(e.target.value)} aria-label="Booked by" disabled={!bookers.length}
+          className="h-9 max-w-[260px] rounded-md border border-input bg-background px-2 text-sm disabled:opacity-50">
+          <option value="">{bookers.length ? "Booked by anyone" : "No meetings booked"}</option>
+          {bookers.map((g) => (
+            <optgroup key={g.group} label={g.group}>
+              {g.people.map((p) => <option key={p.email} value={p.email}>{p.label} ({p.n})</option>)}
+            </optgroup>
+          ))}
+        </select>
         {filtering && (
-          <Button variant="ghost" size="sm" onClick={() => { setFind(""); setCourse(""); setMod(""); }}>Clear</Button>
+          <Button variant="ghost" size="sm" onClick={() => { setFind(""); setCourse(""); setMod(""); setBooker(""); }}>Clear</Button>
         )}
       </div>
 
@@ -1017,7 +1056,9 @@ export default function MentorsPage() {
                     </div>
                   )}
 
-                  <p className="pt-1 text-xs text-muted-foreground">Booked by {d.bookedByEmail}</p>
+                  <p className="pt-1 text-xs text-muted-foreground">
+                    Booked by {(() => { const who = bookerOf(d.id); return who ? `${who.name} (${who.where === "CS Portal" ? (who.role || "CS Portal") : who.where}) · ${d.bookedByEmail}` : d.bookedByEmail; })()}
+                  </p>
                 </div>
 
                 <DialogFooter className="gap-2">

@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import type { SalespersonDetail, SalespersonLead } from "@/lib/types";
 import { SalespersonBreakdown, type SalesCard } from "@/components/salespeople/SalespersonBreakdown";
 import { BreakdownHint, cardButton } from "@/components/common/Breakdown";
+import { MeetingsBookedCard } from "@/components/mentors/MeetingsBookedCard";
 
 /**
  * One salesperson (the user, 2026-10-11): the leads that reached them in the
@@ -223,6 +224,9 @@ export default function SalespersonPage() {
               </CardContent>
             </Card>
           </div>
+
+          {/* The meetings they booked with the mentors, and how each went (2026-11-18). */}
+          <MeetingsBookedCard email={d.person.email} period={period} />
         </>
       )}
     </div>

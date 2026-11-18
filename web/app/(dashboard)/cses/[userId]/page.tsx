@@ -18,6 +18,7 @@ import { api } from "@/lib/axios";
 import { cn } from "@/lib/utils";
 import type { CseDetail, EnrolmentFlow, MoneyByCurrency } from "@/lib/types";
 import { CseEnrolments } from "@/components/pending/EnrolmentFlow";
+import { MeetingsBookedCard } from "@/components/mentors/MeetingsBookedCard";
 
 /**
  * One CSE (the user, 2026-10-11): their figures and the lists behind them —
@@ -234,6 +235,9 @@ export default function CsePage() {
               ))}</tbody>
             </Section>
           </div>
+
+          {/* The meetings they booked with the mentors, and how each went (2026-11-18). */}
+          <MeetingsBookedCard email={d.person.email} period={period} />
         </>
       )}
     </div>
