@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import type { CseDetail, EnrolmentFlow, MoneyByCurrency } from "@/lib/types";
 import { CseEnrolments } from "@/components/pending/EnrolmentFlow";
 import { MeetingsBookedCard } from "@/components/mentors/MeetingsBookedCard";
+import { PersonCallsCard } from "@/components/calls/PersonCallsCard";
 
 /**
  * One CSE (the user, 2026-10-11): their figures and the lists behind them —
@@ -236,7 +237,10 @@ export default function CsePage() {
             </Section>
           </div>
 
-          {/* The meetings they booked with the mentors, and how each went (2026-11-18). */}
+          {/* Their 3CX calls in the period, from CS Portal (2026-11-18). */}
+          <PersonCallsCard portal="commission" userId={userId} period={period} />
+
+          {/* The meetings they booked with the mentors, how each went, and the notes (2026-11-18). */}
           <MeetingsBookedCard email={d.person.email} period={period} />
         </>
       )}

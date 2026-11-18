@@ -16,6 +16,8 @@ import type { Range } from "@/components/reports/RangePicker";
  * the meetings they added and done"), in the page's period — by when the meeting was: booked, done, outcome not
  * filled (a CS Portal student meeting that is over, the mentor not yet saying how it went), upcoming, cancelled.
  * Every kind, from whichever portal they booked it in, matched by their email. Asked of the LMS through Root.
+ * With each one's notes (2026-11-18): what the booker wrote when booking it, and what the mentor wrote after it (the
+ * outcome's remark, the client's concern, why not interested) — and how many have any.
  */
 
 type Status = "upcoming" | "done" | "waiting" | "cancelled";
@@ -24,7 +26,9 @@ interface BookedMeeting {
   attendees: { name: string; email: string }[];
   mentor: { name: string; email: string };
   status: Status; cancelledAt: string | null; cancelReason: string; cancelledBy: string | null;
-  outcome: { stage: string; courseTitle?: string; remark?: string } | null;
+  /** What the booker wrote when booking it — absent from an LMS before 2026-11-18. */
+  notes?: string;
+  outcome: { stage: string; courseTitle?: string; remark?: string; concern?: string; reason?: string; filledByName?: string } | null;
 }
 interface BookedAnswer { from: string; to: string; clipped: boolean; total: number; counts: Record<Status, number>; meetings: BookedMeeting[] }
 
@@ -38,19 +42,30 @@ const ORDER: Status[] = ["done", "waiting", "upcoming", "cancelled"];
 const STAGE: Record<string, string> = { interested: "Interested", follow_up: "Follow-up", meeting_with: "Meeting with another mentor", revision: "Revision", not_interested: "Not interested" };
 const KIND: Record<string, string> = { student: "Student", client: "Client", staff: "Staff" };
 const BY: Record<string, string> = { student: "the student", mentor: "the mentor", cs: "the CS", other: "someone else" };
+/** The meeting's notes: the booker's, then the mentor's after it. */
+const notesOf = (m: BookedMeeting) => {
+  const out: { who: string; text: string }[] = [];
+  if (m.notes?.trim()) out.push({ who: "Booking note", text: m.notes.trim() });
+  const o = m.outcome;
+  if (o?.remark?.trim()) out.push({ who: `Mentor's notes${o.filledByName ? ` (${o.filledByName})` : ""}`, text: o.remark.trim() });
+  if (o?.concern?.trim()) out.push({ who: "Client's concern", text: o.concern.trim() });
+  if (o?.reason?.trim()) out.push({ who: "Why not interested", text: o.reason.trim() });
+  return out;
+};
 const when = (iso: string) =>
   new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }).format(new Date(iso)) + " GST";
 const day = (d: string) => new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${d}T00:00:00Z`));
 
 export function MeetingsBookedCard({ email, period }: { email: string; period: Range }) {
-  const [only, setOnly] = useState<Status | null>(null);
+  const [only, setOnly] = useState<Status | "notes" | null>(null);
   const q = useQuery({
     queryKey: ["meetings-booked", email, period],
     queryFn: async () => (await api.get("/meetings-booked", { params: { email, ...period } })).data.data as BookedAnswer,
     enabled: !!email,
   });
   const d = q.data;
-  const rows = (d?.meetings ?? []).filter((m) => !only || m.status === only);
+  const withNotes = (d?.meetings ?? []).filter((m) => notesOf(m).length).length;
+  const rows = (d?.meetings ?? []).filter((m) => !only || (only === "notes" ? notesOf(m).length > 0 : m.status === only));
   const err = q.error instanceof AxiosError ? ((q.error.response?.data as { message?: string })?.message ?? q.error.message) : q.error ? String(q.error) : "";
 
   return (
@@ -71,14 +86,23 @@ export function MeetingsBookedCard({ email, period }: { email: string; period: R
                 {STATUS[s].label} {d.counts[s] ?? 0}
               </button>
             ))}
+            <button type="button" onClick={() => setOnly(only === "notes" ? null : "notes")} disabled={!withNotes}
+              className={cn("rounded-full border px-2.5 py-0.5 text-xs disabled:opacity-40", only === "notes" ? "border-violet-500/30 bg-violet-500/10 text-violet-300" : "border-border text-muted-foreground hover:text-foreground")}>
+              With notes {withNotes}
+            </button>
           </div>
+        )}
+        {d && (
+          <p className="pt-1 text-xs text-muted-foreground">
+            {d.total} booked · {d.counts.done ?? 0} done · {withNotes} with notes{d.counts.waiting ? ` · ${d.counts.waiting} waiting for the mentor's outcome` : ""}
+          </p>
         )}
       </CardHeader>
       <CardContent className="max-h-[460px] overflow-auto">
         {!email ? <p className="py-6 text-center text-sm text-muted-foreground">No email on this person, so their meetings can&apos;t be found.</p>
           : q.isPending ? <div className="space-y-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-9 w-full" />)}</div>
           : err ? <p className="py-6 text-center text-sm text-amber-400">{err}</p>
-          : !rows.length ? <p className="py-6 text-center text-sm text-muted-foreground">{only ? `None ${STATUS[only].label.toLowerCase()} in this period.` : "No meetings booked with a mentor in this period."}</p>
+          : !rows.length ? <p className="py-6 text-center text-sm text-muted-foreground">{only === "notes" ? "No meeting with notes in this period." : only ? `None ${STATUS[only].label.toLowerCase()} in this period.` : "No meetings booked with a mentor in this period."}</p>
           : (
             <table className="w-full text-sm">
               <thead>
@@ -95,6 +119,11 @@ export function MeetingsBookedCard({ email, period }: { email: string; period: R
                     <td className="py-2 pr-2">
                       <div className="font-medium">{m.attendees.map((a) => a.name).join(", ") || "—"}</div>
                       <div className="text-xs text-muted-foreground">{[KIND[m.kind] ?? m.kind, m.title].filter(Boolean).join(" · ")}</div>
+                      {notesOf(m).map((n, i) => (
+                        <p key={i} className="mt-1 whitespace-pre-line rounded bg-muted/40 px-2 py-1 text-xs">
+                          <span className="font-medium text-muted-foreground">{n.who}: </span>{n.text}
+                        </p>
+                      ))}
                     </td>
                     <td className="py-2">
                       <Badge variant="outline" className={cn("font-normal", STATUS[m.status]?.tone)}>{STATUS[m.status]?.label ?? m.status}</Badge>

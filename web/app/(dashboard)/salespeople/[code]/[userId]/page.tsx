@@ -18,6 +18,7 @@ import type { SalespersonDetail, SalespersonLead } from "@/lib/types";
 import { SalespersonBreakdown, type SalesCard } from "@/components/salespeople/SalespersonBreakdown";
 import { BreakdownHint, cardButton } from "@/components/common/Breakdown";
 import { MeetingsBookedCard } from "@/components/mentors/MeetingsBookedCard";
+import { PersonCallsCard } from "@/components/calls/PersonCallsCard";
 
 /**
  * One salesperson (the user, 2026-10-11): the leads that reached them in the
@@ -225,7 +226,10 @@ export default function SalespersonPage() {
             </Card>
           </div>
 
-          {/* The meetings they booked with the mentors, and how each went (2026-11-18). */}
+          {/* Their 3CX calls in the period, from their own CRM (2026-11-18). */}
+          <PersonCallsCard portal={code} userId={userId} period={period} />
+
+          {/* The meetings they booked with the mentors, how each went, and the notes (2026-11-18). */}
           <MeetingsBookedCard email={d.person.email} period={period} />
         </>
       )}
