@@ -43,6 +43,13 @@ const resolveSchema = z.object({
     sales: amount, tl: amount, sm: amount, creditUsd: amount.optional(),
     salesInr: rupees.optional(), tlInr: rupees.optional(), smInr: rupees.optional(),
   }).nullable().optional(),
+  // The mentor's meeting the sale was made with (2026-11-18): its fee comes off the lines.
+  meeting: z.object({
+    mentorEmail: z.string().trim().email().max(200),
+    mentorName: z.string().trim().max(120).nullable().optional(),
+    meetingId: z.string().trim().max(64).nullable().optional(),
+    at: z.string().trim().max(40).nullable().optional(),
+  }).nullable().optional(),
 });
 
 /* POST /service/commission/resolve — who earns what on one sale, under Root's plan. Nothing is written. */

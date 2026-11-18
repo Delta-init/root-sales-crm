@@ -443,9 +443,17 @@ export interface IPlanSlabVersion {
   updatedAt: Date | null;
   updatedByEmail: string;
 }
+/**
+ * A sale made with a mentor's meeting (the user, 2026-11-18: "the mentor who conducted the meeting gets commission, taken
+ * from the salesperson, TL and Sales Manager"): the mentor's fee, AED, and what comes off each position's line for it —
+ * `sales + tl + sm` = `mentor`. Draw pays no TL: its part is in `sales`.
+ */
+export interface IPlanMeeting { mentor: number; sales: number; tl: number; sm: number }
 export interface IPlanCourse {
   courseId: string;
   name: string;
+  /** The mentor's fee on a sale with a mentor's meeting, and where it comes from (2026-11-18); absent or null: none. */
+  meeting?: IPlanMeeting | null;
   sales: number;
   tl: number;
   sm: number;

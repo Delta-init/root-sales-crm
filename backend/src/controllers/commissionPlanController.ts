@@ -39,7 +39,9 @@ export const compare = async (req: AuthenticatedRequest, res: Response, next: Ne
 const AED = z.number().min(0, "Amounts can't be negative").max(1_000_000);
 /* The rupee amounts (2026-11-13) are left out by a page from before them: what is kept then stays as it is. */
 const INR = z.number().min(0, "Amounts can't be negative").max(100_000_000).optional();
-const courseSchema = z.object({ sales: AED, tl: AED, sm: AED, creditUsd: AED, salesInr: INR, tlInr: INR, smInr: INR });
+/* A mentor's meeting on a sale of the course (2026-11-18): the mentor's fee and what comes off each line; null: none. */
+const meetingSchema = z.object({ mentor: AED, sales: AED, tl: AED, sm: AED });
+const courseSchema = z.object({ sales: AED, tl: AED, sm: AED, creditUsd: AED, salesInr: INR, tlInr: INR, smInr: INR, meeting: meetingSchema.nullable().optional() });
 const slabRowSchema = z.object({
   name: z.string().trim().min(1, "Each level needs a name").max(40),
   target: z.number().min(0).max(100_000_000),

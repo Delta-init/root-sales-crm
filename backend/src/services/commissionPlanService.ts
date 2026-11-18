@@ -5,7 +5,7 @@ import { AuditLog } from "../models/AuditLog.js";
 import { compareSales, payRows, slabsOfMonth, PAY_FROM_MONTH, type EnginePayRow, type SaleCompare } from "./commissionEngine.js";
 import { payOf } from "./crmCommissionService.js";
 import type {
-  ICommissionPlan, IPlanCourse, IPlanPerson, IPlanSlabRow, IPlanSlabVersion, IPlanTeam, PlanPortal, PlanSlabRole, PlanTlRule,
+  ICommissionPlan, IPlanCourse, IPlanMeeting, IPlanPerson, IPlanSlabRow, IPlanSlabVersion, IPlanTeam, PlanPortal, PlanSlabRole, PlanTlRule,
 } from "../types/index.js";
 
 /*
@@ -33,6 +33,8 @@ export interface PlanRow {
   tl: number;
   sm: number;
   creditUsd: number;
+  /** A mentor's meeting on a sale of it (2026-11-18): the mentor's fee and what comes off each line; null: none. Root's plan only. */
+  meeting?: IPlanMeeting | null;
 }
 export interface SlabRow {
   name: string;
@@ -270,14 +272,14 @@ async function rootView(src: CrmSource | null, doc: ICommissionPlan): Promise<Ro
     const r = rows.get(id);
     return {
       id, name: String(c.name ?? r?.name ?? ""), fee: num(c.amount), status: String(c.status ?? ""),
-      sales: r?.sales ?? 0, tl: r?.tl ?? 0, sm: r?.sm ?? 0, creditUsd: r?.creditUsd ?? 0, ...inrOf({}, r),
+      sales: r?.sales ?? 0, tl: r?.tl ?? 0, sm: r?.sm ?? 0, creditUsd: r?.creditUsd ?? 0, ...inrOf({}, r), meeting: meetingOf(r),
       set: !!r, inCrm: true, updatedAt: iso(r?.updatedAt), updatedByEmail: r?.updatedByEmail ?? "",
     };
   });
   for (const r of doc.courses) {
     if (seen.has(r.courseId)) continue;
     courses.push({
-      id: r.courseId, name: r.name, fee: 0, status: "", sales: r.sales, tl: r.tl, sm: r.sm, creditUsd: r.creditUsd, ...inrOf({}, r),
+      id: r.courseId, name: r.name, fee: 0, status: "", sales: r.sales, tl: r.tl, sm: r.sm, creditUsd: r.creditUsd, ...inrOf({}, r), meeting: meetingOf(r),
       set: true, inCrm: !src, updatedAt: iso(r.updatedAt), updatedByEmail: r.updatedByEmail,
     });
   }
@@ -363,6 +365,14 @@ function inrOf(input: InrAmounts, row?: InrAmounts | null): { salesInr: number; 
     salesInr: input.salesInr ?? inrNum(row?.salesInr), tlInr: input.tlInr ?? inrNum(row?.tlInr), smInr: input.smInr ?? inrNum(row?.smInr),
   };
 }
+/* A mentor's meeting on a sale of the course (2026-11-18): the mentor's fee and what comes off each line for it. */
+/** The row's meeting amounts as stored; null when it has none (or a fee of 0). */
+export function meetingOf(r?: { meeting?: IPlanMeeting | null } | null): IPlanMeeting | null {
+  const m = r?.meeting;
+  return m && inrNum(m.mentor) > 0 ? { mentor: inrNum(m.mentor), sales: inrNum(m.sales), tl: inrNum(m.tl), sm: inrNum(m.sm) } : null;
+}
+const meetingFig = (m: IPlanMeeting | null) =>
+  m ? aedOf(m.mentor) + " to the mentor (" + [m.sales, m.tl, m.sm].map((n) => "-" + n).join(" / ") + " sales / TL / SM)" : "none";
 const hasInr = (r?: InrAmounts | null) => inrNum(r?.salesInr) + inrNum(r?.tlInr) + inrNum(r?.smInr) > 0;
 const inrFig = (r?: InrAmounts | null) =>
   hasInr(r) ? [r!.salesInr, r!.tlInr, r!.smInr].map((n) => `INR ${inrNum(n).toLocaleString("en-US")}`).join(" / ") : "none";
@@ -380,15 +390,31 @@ async function planDoc(code: string) {
   if (!doc) throw fail(409, "This CRM's plan has not been copied to Root yet");
   return doc;
 }
+/** How a change of the mentor's meeting amounts reads in the log; nothing when they are as they were. */
+const meetingChange = (before: IPlanMeeting | null, after: IPlanMeeting | null) =>
+  meetingFig(before) === meetingFig(after) ? "" : " · mentor's meeting: " + meetingFig(before) + " -> " + meetingFig(after);
 const nameOf = (code: PlanPortal) => ({ delta: "Sales CRM", draw: "Draw", remote: "Remote" })[code];
 
 /** One course's row: what a sale of it pays each position, and the MT5 credit. Only for sales counted from now on. */
 export async function saveCourse(
-  code: string, courseId: string, input: { sales: number; tl: number; sm: number; creditUsd: number } & InrAmounts, by: string,
+  code: string, courseId: string,
+  input: { sales: number; tl: number; sm: number; creditUsd: number } & InrAmounts & {
+    /** The mentor's meeting amounts (2026-11-18): null takes them off; left out keeps what the row has. */
+    meeting?: IPlanMeeting | null;
+  },
+  by: string,
 ): Promise<string> {
   const doc = await planDoc(code);
   const portal = doc.portal;
   if (doc.tlRule === "never" && (input.tl > 0 || (input.tlInr ?? 0) > 0)) throw fail(400, `${nameOf(portal)} pays team leaders nothing on a sale`);
+  if (input.meeting) {
+    const m = input.meeting;
+    if (!(m.mentor > 0)) throw fail(400, "The mentor's fee must be more than 0, or take the meeting fee off");
+    if (doc.tlRule === "never" && m.tl > 0) throw fail(400, nameOf(portal) + " has no team leader on a sale: take the TL's part off the salesperson");
+    if (Math.round((m.sales + m.tl + m.sm) * 100) !== Math.round(m.mentor * 100)) {
+      throw fail(400, "What comes off the lines (" + [m.sales, m.tl, m.sm].join(" + ") + ") must add up to the mentor's fee (" + m.mentor + ")");
+    }
+  }
   const row = doc.courses.find((c) => c.courseId === courseId);
   let name = row?.name ?? "";
   if (!row) {
@@ -402,12 +428,14 @@ export async function saveCourse(
   const before = row ? `${aedOf(row.sales)} / ${aedOf(row.tl)} / ${aedOf(row.sm)} / $${row.creditUsd}` : "not set";
   const inrBefore = row ? inrOf({}, row) : null;
   const inr = inrOf(input, row);
-  const next = { courseId, name, ...input, ...inr, updatedAt: new Date(), updatedByEmail: by };
+  const meetingBefore = meetingOf(row);
+  const meeting = input.meeting === undefined ? meetingBefore : input.meeting ? meetingOf({ meeting: input.meeting }) : null;
+  const next = { courseId, name, ...input, ...inr, meeting, updatedAt: new Date(), updatedByEmail: by };
   if (row) Object.assign(row, next);
   else doc.courses.push(next);
   doc.updatedByEmail = by;
   await doc.save();
-  return `${nameOf(portal)} · ${name}: ${before} → ${aedOf(input.sales)} / ${aedOf(input.tl)} / ${aedOf(input.sm)} / $${input.creditUsd} (sales / TL / SM / credit)${inrChange(inrBefore, inr)}`;
+  return `${nameOf(portal)} · ${name}: ${before} → ${aedOf(input.sales)} / ${aedOf(input.tl)} / ${aedOf(input.sm)} / $${input.creditUsd} (sales / TL / SM / credit)${inrChange(inrBefore, inr)}${meetingChange(meetingBefore, meeting)}`;
 }
 
 /** A position's slab rows, in force from this month (UAE) on; the other positions carried as they stand. */
@@ -691,7 +719,7 @@ export async function planForCrm(code: string, month: string) {
     tlPaidOnOwnClose: BUILT_IN[plan.portal].tlPaidOnOwnClose,
     salesManager: plan.salesManager,
     excluded: plan.excluded,
-    courses: plan.courses.map((c) => ({ courseId: c.courseId, name: c.name, sales: c.sales, tl: c.tl, sm: c.sm, creditUsd: c.creditUsd, ...inrOf({}, c) })),
+    courses: plan.courses.map((c) => ({ courseId: c.courseId, name: c.name, sales: c.sales, tl: c.tl, sm: c.sm, creditUsd: c.creditUsd, ...inrOf({}, c), meeting: meetingOf(c) })),
     month,
     slabsFrom: from,
     slabs,

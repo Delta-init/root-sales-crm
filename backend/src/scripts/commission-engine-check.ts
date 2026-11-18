@@ -17,6 +17,7 @@
  *                        compare view root admins only
  *   Case 6  apply-from   today's slabs applied to October: a preview of whose pay moves (nothing saved), then the
  *                        change — October's My Pay follows; refused before October 2026, this month, later; root admins
+ *   Case 10 meetings     a mentor's meeting on a sale (2026-11-18): the course's fee off the lines, to the mentor
  *   Case 8  team plans   a team on a plan of its own in the Sales CRM (2026-11-03): its course amounts on its sales
  *                        (others on the portal's), its Sales Staff / TL slabs from this month (past months as they
  *                        were, someone in two teams and the SM on the portal's), back on the portal's, refusals
@@ -386,6 +387,50 @@ async function main() {
   check("…the sale counted before the rupee amounts: all in dirhams", lineOf("IN-90003")?.amount === 1000 && lineOf("IN-90003").amountInr === 0 && lineOf("IN-90003").rupeeShare === 0, show(lineOf("IN-90003")));
   check("…the person's and the CRM's rupee totals; the payable from the CRM's My Pay", finRia?.amountInr === 5000 && finRia.payableInr === 2500 && finRia.amount === 1750
     && fin.totalInr === 7250 && fin.payableInrTotal === 2500, show({ amountInr: finRia?.amountInr, payableInr: finRia?.payableInr, amount: finRia?.amount, totalInr: fin?.totalInr, payableInrTotal: fin?.payableInrTotal }));
+
+  step("Case 10 — a mentor's meeting on a sale: the mentor's fee off the lines (2026-11-18)");
+  const meet = { mentorEmail: "Mentor.A@e2e.local", mentorName: "Mentor A", meetingId: "lms-m1", at: "2026-11-11T12:00:00.000Z" };
+  let mput = await call("PUT", `/commission-plans/delta/courses/${D.courses.mbt}`, root, { sales: 230, tl: 85, sm: 100, creditUsd: 500, meeting: { mentor: 35, sales: 25, tl: 5, sm: 5 } });
+  check("Root's plan keeps a course's meeting amounts: the mentor 35, off sales 25 / TL 5 / SM 5", mput.status === 200
+    && JSON.stringify(mput.body?.data?.find?.((p: Json) => p.code === "delta")?.root?.courses?.find((c: Json) => c.id === String(D.courses.mbt))?.meeting) === JSON.stringify({ mentor: 35, sales: 25, tl: 5, sm: 5 }), show(mput.body).slice(0, 300));
+  mput = await call("PUT", `/commission-plans/delta/courses/${D.courses.mbt}`, root, { sales: 230, tl: 85, sm: 100, creditUsd: 500, meeting: { mentor: 35, sales: 20, tl: 5, sm: 5 } });
+  check("…parts that don't add up to the fee: refused", mput.status === 400 && /add up/.test(mput.body?.message ?? ""), show(mput.body));
+  mput = await call("PUT", `/commission-plans/draw/courses/${W.courses.mbt}`, root, { sales: 230, tl: 0, sm: 100, creditUsd: 500, meeting: { mentor: 35, sales: 25, tl: 5, sm: 5 } });
+  check("…a TL part on Draw, which has no team leader: refused", mput.status === 400 && /team leader/.test(mput.body?.message ?? ""), show(mput.body));
+  mput = await call("PUT", `/commission-plans/delta/courses/${D.courses.mbt}`, member, { sales: 230, tl: 85, sm: 100, creditUsd: 500, meeting: null });
+  check("…not a root admin's to change", mput.status === 403, show(mput.body));
+  let m = await resolve("delta", { closer: String(D.users.ria), team: String(D.teams.glad), course: String(D.courses.mbt), meeting: meet });
+  check("a sale with a mentor's meeting: Ria 205, Lena 80, Abrar 95 — the mentor 35", m?.state === "counted" && lines(m) === "sales:Ria:205 tl:Lena:80 sm:Abrar:95"
+    && m.mentor?.amount === 35 && m.mentor.email === "mentor.a@e2e.local" && m.mentor.name === "Mentor A" && m.mentor.meetingId === "lms-m1", show(m));
+  check("…each line says what came off it", m?.lines?.every((l: Json) => l.mentorCut > 0 && /Mentor's meeting/.test(l.note ?? "")) && m.lines[0].mentorCut === 25, show(m?.lines));
+  m = await resolve("delta", { closer: String(D.users.ria), team: String(D.teams.glad), course: String(D.courses.mbt) });
+  check("…the same sale with no meeting: as before, no mentor", lines(m) === "sales:Ria:230 tl:Lena:85 sm:Abrar:100" && !m.mentor, show(m));
+  m = await resolve("delta", { closer: String(D.users.nina), team: String(D.teams.managers), course: String(D.courses.mbt), meeting: meet });
+  check("…a TL paid nothing (the Sales Manager's own team): the TL's part comes off the salesperson — Nina 200, the mentor still 35",
+    lines(m) === "sales:Nina:200 tl:Abrar:0 sm:Abrar:95" && m.mentor?.amount === 35, show(m));
+  m = await resolve("delta", { closer: String(D.users.ria), team: String(D.teams.glad), course: String(D.courses.dwt), meeting: meet });
+  check("…a course with no meeting fee: nothing comes off, no mentor", lines(m) === "sales:Ria:500 tl:Lena:200 sm:Abrar:300" && !m.mentor, show(m));
+  m = await resolve("delta", { closer: String(D.users.zed), team: null, course: String(D.courses.mbt), meeting: meet });
+  check("…a sale that waits: no mentor yet", m?.state === "waiting" && !m.mentor, show(m));
+  m = await resolve("delta", { closer: String(D.users.ria), team: String(D.teams.glad), course: String(D.courses.mbt), amounts: { sales: 20, tl: 85, sm: 100 }, meeting: meet });
+  check("…a line that can't carry its part: down to 0, the mentor gets only what was taken (20 + 5 + 5)", lines(m) === "sales:Ria:0 tl:Lena:80 sm:Abrar:95" && m.mentor?.amount === 30, show(m));
+  mput = await call("PUT", `/commission-plans/draw/courses/${W.courses.mbt}`, root, { sales: 230, tl: 0, sm: 100, creditUsd: 500, meeting: { mentor: 35, sales: 30, tl: 0, sm: 5 } });
+  m = await resolve("draw", { closer: String(W.users.zed), team: null, course: String(W.courses.mbt), meeting: meet });
+  check("Draw: the salesperson and the Sales Manager — Zed 200, Abrar 95, the mentor 35", mput.status === 200 && lines(m) === "sales:Zed:200 sm:Abrar:95" && m.mentor?.amount === 35, show(m));
+  m = await resolve("draw", { closer: String(W.users.ria), team: null, courses: [String(W.courses.mbt), String(W.courses.dwt)], meeting: meet });
+  check("…a bundle: one meeting, one fee — Ria 700, Abrar 395", lines(m) === "sales:Ria:700 sm:Abrar:395" && m.mentor?.amount === 35, show(m));
+  const crmPlan = (await call("GET", "/service/commission/plan?month=2026-11", as("delta"))).body?.data;
+  check("the CRM's plan from Root carries each course's meeting amounts", JSON.stringify(crmPlan?.courses?.find((c: Json) => c.courseId === String(D.courses.mbt))?.meeting) === JSON.stringify({ mentor: 35, sales: 25, tl: 5, sm: 5 }), show(crmPlan?.courses));
+  mput = await call("PUT", `/commission-plans/delta/courses/${D.courses.mbt}`, root, { sales: 240, tl: 85, sm: 100, creditUsd: 500 });
+  m = await resolve("delta", { closer: String(D.users.ria), team: String(D.teams.glad), course: String(D.courses.mbt), meeting: meet });
+  check("a save that leaves the meeting out keeps it (a page from before it)", mput.status === 200 && lines(m) === "sales:Ria:215 tl:Lena:80 sm:Abrar:95", show(m));
+  mput = await call("PUT", `/commission-plans/delta/courses/${D.courses.mbt}`, root, { sales: 230, tl: 85, sm: 100, creditUsd: 500, meeting: null });
+  m = await resolve("delta", { closer: String(D.users.ria), team: String(D.teams.glad), course: String(D.courses.mbt), meeting: meet });
+  check("…taken off: the meeting pays nothing again", lines(m) === "sales:Ria:230 tl:Lena:85 sm:Abrar:100" && !m.mentor, show(m));
+  const log = await mongoose.connection.db!.collection("auditlogs").find({ action: "commission_plan_changed", org: "delta" }).sort({ createdAt: -1 }).limit(4).toArray();
+  check("the changes are in the plan's log, the meeting amounts said", log.some((l) => /mentor's meeting: none -> AED 35/.test(String(l.detail ?? ""))), show(log.map((l) => l.detail)));
+  const bad = await call("POST", "/service/commission/resolve", as("delta"), { closer: String(D.users.ria), course: String(D.courses.mbt), meeting: { mentorEmail: "not-an-email" } });
+  check("a meeting without a mentor's email → 400", bad.status === 400, show(bad.body));
 
   console.log(`\n${checks - failures}/${checks} checks passed`);
   crmApi.close();

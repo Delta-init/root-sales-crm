@@ -1,6 +1,6 @@
 import { Types, type Connection } from "mongoose";
 import { BUILT_IN, slabsInForce } from "./commissionPlanService.js";
-import type { ICommissionPlan, IPlanSlabRow, IPlanTeam, PlanSlabRole } from "../types/index.js";
+import type { ICommissionPlan, IPlanMeeting, IPlanSlabRow, IPlanTeam, PlanSlabRole } from "../types/index.js";
 
 /*
  * The one commission logic, worked out in Root from Root's plan (the user, 2026-11-01: "one function used by every
@@ -63,7 +63,18 @@ export type SaleState = "counted" | "waiting" | "excluded";
  * the line pays, in rupees, for the part of the fee the client paid in rupees — the course's own rupee amount, never
  * `amount` converted. 0: none set, and that part is paid at `amount` like the rest.
  */
-export interface EngineLine { role: PlanSlabRole; user: string; userName: string; amount: number; amountInr: number; note?: string }
+export interface EngineLine {
+  role: PlanSlabRole; user: string; userName: string; amount: number; amountInr: number; note?: string;
+  /** What came off this line for the mentor's meeting (2026-11-18), AED; absent: nothing. */
+  mentorCut?: number;
+}
+/** A mentor's meeting on a sale, as the CRM's close form recorded it (2026-11-18). */
+export interface SaleMeeting { mentorEmail: string; mentorName?: string | null; meetingId?: string | null; at?: string | null }
+/**
+ * What the mentor earns on a sale (2026-11-18): what was taken off its lines for the meeting — the course's fee, unless
+ * the lines could not carry it all — with the course's row it came from. The mentor is not one of the CRM's people.
+ */
+export interface EngineMentor { email: string; name: string; meetingId: string; at: string; amount: number; plan: IPlanMeeting }
 type Row = { sales: number; tl: number; sm: number; creditUsd: number; salesInr: number; tlInr: number; smInr: number };
 export interface Resolved {
   state: SaleState;
@@ -73,6 +84,48 @@ export interface Resolved {
   lines: EngineLine[];
   /** The course's row the amounts were taken from. */
   plan: Row;
+  /** The mentor's fee on a counted sale made with a mentor's meeting (2026-11-18); absent: none. */
+  mentor?: EngineMentor | null;
+}
+
+/**
+ * The mentor's row for a sale (2026-11-18): its course's; a bundle (Draw) the course with the highest fee — one meeting,
+ * one fee. Null when no course of the sale has one.
+ */
+export function meetingRow(plan: ICommissionPlan, input: { course?: string | null; courses?: string[] | null }): IPlanMeeting | null {
+  const ids = input.courses?.length ? input.courses.map(idOf) : [idOf(input.course)];
+  let best: IPlanMeeting | null = null;
+  for (const id of ids) {
+    const m = plan.courses.find((c) => c.courseId === id)?.meeting;
+    if (!m || !(positive(m.mentor) > 0)) continue;
+    if (!best || positive(m.mentor) > best.mentor) best = { mentor: positive(m.mentor), sales: positive(m.sales), tl: positive(m.tl), sm: positive(m.sm) };
+  }
+  return best;
+}
+
+/**
+ * The mentor's fee taken off a sale's lines (2026-11-18): the TL's and the Sales Manager's parts off theirs, the rest
+ * off the salesperson's — and off the salesperson too, whatever a line could not carry (a TL paid nothing on the sale;
+ * Draw, which has no TL line). A line never goes below 0; the mentor gets what was taken, never more than the fee.
+ * Only the dirham amount: the rupee amount of a line stays as it is.
+ */
+export function applyMeeting(lines: EngineLine[], m: IPlanMeeting): { lines: EngineLine[]; taken: number } {
+  const out = lines.map((l) => ({ ...l }));
+  let taken = 0;
+  const cut = (l: EngineLine | undefined, want: number): number => {
+    if (!l || !(want > 0)) return Math.max(0, want);
+    const c = round2(Math.min(positive(l.amount), want));
+    if (c > 0) {
+      l.amount = round2(l.amount - c);
+      l.mentorCut = round2((l.mentorCut ?? 0) + c);
+      l.note = [l.note, `Mentor's meeting −AED ${c.toLocaleString("en-US")}`].filter(Boolean).join(" · ");
+      taken += c;
+    }
+    return round2(want - c);
+  };
+  const short = cut(out.find((l) => l.role === "tl"), m.tl) + cut(out.find((l) => l.role === "sm"), m.sm);
+  cut(out.find((l) => l.role === "sales"), round2(m.sales + short));
+  return { lines: out, taken: round2(Math.min(taken, m.mentor)) };
 }
 
 type TeamDoc = { _id: Types.ObjectId; name?: string; status?: string; leaders?: unknown[]; members?: unknown[] };
@@ -161,9 +214,25 @@ export async function resolveSale(
     courses?: string[] | null;
     /** The amounts a held sale was held at (2026-11-01, stage 3): used instead of the course's row. */
     amounts?: { sales: number; tl: number; sm: number; creditUsd?: number; salesInr?: number; tlInr?: number; smInr?: number } | null;
+    /** The mentor's meeting the sale was made with (2026-11-18): its fee comes off the lines once it counts. */
+    meeting?: SaleMeeting | null;
   },
   names: Names = new Names(db),
 ): Promise<Resolved> {
+  // A counted sale with a mentor's meeting (2026-11-18): the fee off its lines, to the mentor.
+  const withMeeting = (r: Resolved): Resolved => {
+    const email = String(input.meeting?.mentorEmail ?? "").trim().toLowerCase();
+    const m = r.state === "counted" && email ? meetingRow(plan, input) : null;
+    if (!m) return r;
+    const { lines, taken } = applyMeeting(r.lines, m);
+    return {
+      ...r, lines,
+      mentor: {
+        email, name: String(input.meeting?.mentorName ?? "").trim(), meetingId: String(input.meeting?.meetingId ?? ""),
+        at: String(input.meeting?.at ?? ""), amount: taken, plan: m,
+      },
+    };
+  };
   // The amounts on the sale's team: its own row where it has one (2026-11-03), so worked out once the team is known.
   const rowOn = (teamId: string): Row => input.amounts
     ? {
@@ -195,7 +264,7 @@ export async function resolveSale(
   if (rules.tlRule === "never") {
     const shown = { team: team ? String(team._id) : null, teamName: team?.name ?? "", lines: [] as EngineLine[], plan: row };
     if (!sm) return { ...shown, state: "waiting", reason: "No Sales Manager is set on the commission plan" };
-    return { ...shown, state: "counted", reason: "", lines: [await line("sales", closer, row.sales, row.salesInr), await line("sm", sm, row.sm, row.smInr)] };
+    return withMeeting({ ...shown, state: "counted", reason: "", lines: [await line("sales", closer, row.sales, row.salesInr), await line("sm", sm, row.sm, row.smInr)] });
   }
 
   if (!team) return { ...none, state: "waiting", reason: reason ?? "No team" };
@@ -213,7 +282,7 @@ export async function resolveSale(
   const tlIsSm = tl === sm && rules.tlRule === "zero_if_sm";
   const tlClosedIt = tl === closer && !rules.tlPaidOnOwnClose;
   const tlNote = tlIsSm ? "Leads this team as Sales Manager — paid as SM" : tlClosedIt ? "Closed it themselves — paid as Sales Staff" : undefined;
-  return {
+  return withMeeting({
     ...onTeam,
     state: "counted",
     reason: "",
@@ -222,7 +291,7 @@ export async function resolveSale(
       await line("tl", tl, tlIsSm || tlClosedIt ? 0 : row.tl, tlIsSm || tlClosedIt ? 0 : row.tlInr, tlNote),
       await line("sm", sm, row.sm, row.smInr),
     ],
-  };
+  });
 }
 
 /* ── My Pay ───────────────────────────────────────────────────────────────────────────────────────────────────── */

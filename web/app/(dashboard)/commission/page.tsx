@@ -371,6 +371,7 @@ function RootPlanSection({ code, name, tlPaid, crm, root }: { code: string; name
                 <th className="pb-2 pr-3 text-right font-medium">Sales Staff</th>
                 {tlPaid && <th className="pb-2 pr-3 text-right font-medium">Team Leader</th>}
                 <th className="pb-2 pr-3 text-right font-medium">Sales Manager</th>
+                <th className="pb-2 pr-3 text-right font-medium" title="A sale made with a mentor's meeting: the mentor's fee, and what comes off each line for it">Mentor meeting</th>
                 <th className="pb-2 pr-3 text-right font-medium">MT5 credit</th>
                 <th className="pb-2" />
               </tr>
@@ -394,6 +395,16 @@ function RootPlanSection({ code, name, tlPaid, crm, root }: { code: string; name
                     <td className="whitespace-nowrap py-2.5 pr-3 text-right">{aed(c.sales)}<Differs crm={theirs?.sales} root={c.sales} fmt={aed} /><Inr n={c.salesInr} /></td>
                     {tlPaid && <td className="whitespace-nowrap py-2.5 pr-3 text-right">{aed(c.tl)}<Differs crm={theirs?.tl} root={c.tl} fmt={aed} /><Inr n={c.tlInr} /></td>}
                     <td className="whitespace-nowrap py-2.5 pr-3 text-right">{aed(c.sm)}<Differs crm={theirs?.sm} root={c.sm} fmt={aed} /><Inr n={c.smInr} /></td>
+                    <td className="whitespace-nowrap py-2.5 pr-3 text-right">
+                      {c.meeting ? (
+                        <>
+                          {aed(c.meeting.mentor)}
+                          <span className="block text-[11px] text-muted-foreground">
+                            {[`−${money(c.meeting.sales)} sales`, ...(tlPaid ? [`−${money(c.meeting.tl)} TL`] : []), `−${money(c.meeting.sm)} SM`].join(" · ")}
+                          </span>
+                        </>
+                      ) : "—"}
+                    </td>
                     <td className="whitespace-nowrap py-2.5 pr-3 text-right">
                       {c.creditUsd ? `$${money(c.creditUsd)}` : "—"}<Differs crm={theirs?.creditUsd} root={c.creditUsd} fmt={(n) => (n ? `$${money(n)}` : "—")} />
                     </td>
@@ -482,7 +493,16 @@ function CourseDialog({ code, tlPaid, course, onClose }: { code: string; tlPaid:
     { key: "smInr", label: "Sales Manager (INR)" },
   ];
   const values = Object.fromEntries(Object.entries(form).map(([k, v]) => [k, Number(v)])) as Record<keyof typeof form, number>;
-  const bad = Object.values(values).some((n) => !Number.isFinite(n) || n < 0);
+  // A mentor's meeting on a sale (2026-11-18): the mentor's fee, taken off the lines.
+  const [meetingOn, setMeetingOn] = useState(!!course.meeting);
+  const [meet, setMeet] = useState({
+    mentor: String(course.meeting?.mentor ?? 0), sales: String(course.meeting?.sales ?? 0), tl: String(course.meeting?.tl ?? 0), sm: String(course.meeting?.sm ?? 0),
+  });
+  const m = { mentor: Number(meet.mentor), sales: Number(meet.sales), tl: tlPaid ? Number(meet.tl) : 0, sm: Number(meet.sm) };
+  const meetBad = meetingOn && (Object.values(m).some((n) => !Number.isFinite(n) || n < 0) || !(m.mentor > 0));
+  const meetSum = Math.round((m.sales + m.tl + m.sm) * 100) / 100;
+  const meetOff = meetingOn && !meetBad && Math.round(meetSum * 100) !== Math.round(m.mentor * 100);
+  const bad = Object.values(values).some((n) => !Number.isFinite(n) || n < 0) || meetBad || meetOff;
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="sm:max-w-md">
@@ -499,11 +519,33 @@ function CourseDialog({ code, tlPaid, course, onClose }: { code: string; tlPaid:
           ))}
         </div>
         <InrFields idPrefix="course" fields={inrFields} form={form} onChange={(k, v) => setForm((s) => ({ ...s, [k]: v }))} />
-        {bad && <p className="text-sm text-destructive">Amounts are numbers, 0 or more.</p>}
+        <div className="space-y-2 rounded-md border border-border p-3">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input type="checkbox" checked={meetingOn} onChange={(e) => setMeetingOn(e.target.checked)} />
+            A mentor&apos;s meeting on a sale pays the mentor
+          </label>
+          {meetingOn && (
+            <>
+              <p className="text-xs text-muted-foreground">
+                When the close says which mentor held the meeting, the mentor earns this, taken off the lines below.{!tlPaid && " No team leader here: the TL's part comes off the salesperson."}
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {([["mentor", "Mentor gets (AED)"], ["sales", "Off Sales Staff (AED)"], ...(tlPaid ? [["tl", "Off Team Leader (AED)"]] : []), ["sm", "Off Sales Manager (AED)"]] as Array<[keyof typeof meet, string]>).map(([k, label]) => (
+                  <div key={k} className="space-y-1.5">
+                    <Label htmlFor={`meet-${k}`}>{label}</Label>
+                    <Input id={`meet-${k}`} inputMode="decimal" value={meet[k]} onChange={(e) => setMeet((s) => ({ ...s, [k]: e.target.value }))} />
+                  </div>
+                ))}
+              </div>
+              {meetOff && <p className="text-xs text-destructive">What comes off the lines ({meetSum}) must add up to the mentor&apos;s fee ({m.mentor}).</p>}
+            </>
+          )}
+        </div>
+        {bad && !meetOff && <p className="text-sm text-destructive">Amounts are numbers, 0 or more{meetingOn ? ", and the mentor's fee more than 0" : ""}.</p>}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button disabled={bad || save.isPending}
-            onClick={() => save.mutate({ path: `courses/${course.id}`, body: { ...values, tl: tlPaid ? values.tl : 0, tlInr: tlPaid ? values.tlInr : 0 } })}>
+            onClick={() => save.mutate({ path: `courses/${course.id}`, body: { ...values, tl: tlPaid ? values.tl : 0, tlInr: tlPaid ? values.tlInr : 0, meeting: meetingOn ? m : null } })}>
             {save.isPending ? "Saving…" : "Save"}
           </Button>
         </DialogFooter>

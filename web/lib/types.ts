@@ -584,6 +584,8 @@ export interface PendingOverview {
 }
 
 /** One course's commission in a sales CRM, in AED per sale (creditUsd: the MT5 credit). */
+/** A mentor's meeting on a sale (2026-11-18): the mentor's fee, AED, and what comes off each position's line for it. */
+export interface CommissionMeeting { mentor: number; sales: number; tl: number; sm: number }
 export interface CommissionPlanRow {
   id: string;
   name: string;
@@ -593,6 +595,8 @@ export interface CommissionPlanRow {
   tl: number;
   sm: number;
   creditUsd: number;
+  /** Root's plan only (2026-11-18): the mentor's meeting fee on a sale of it; null or absent: none. */
+  meeting?: CommissionMeeting | null;
 }
 export interface CommissionSlabRow {
   name: string;

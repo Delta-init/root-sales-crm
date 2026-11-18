@@ -40,10 +40,22 @@ const slabVersionSchema = new Schema(
  * be different") are what the same sale pays for the part of its fee the client paid in rupees — amounts of their
  * own, typed here, never the AED ones converted. 0: none set, and that part is paid at the AED amount.
  */
+/** A mentor's meeting on a sale (2026-11-18): the mentor's fee and what comes off each position's line for it. */
+const meetingSchema = new Schema(
+  {
+    mentor: { type: Number, default: 0, min: 0 },
+    sales: { type: Number, default: 0, min: 0 },
+    tl: { type: Number, default: 0, min: 0 },
+    sm: { type: Number, default: 0, min: 0 },
+  },
+  { _id: false }
+);
+
 const courseRowSchema = new Schema(
   {
     courseId: { type: String, required: true },
     name: { type: String, default: "" },
+    meeting: { type: meetingSchema, default: null },
     sales: { type: Number, default: 0, min: 0 },
     tl: { type: Number, default: 0, min: 0 },
     sm: { type: Number, default: 0, min: 0 },
