@@ -1,4 +1,5 @@
 import { callTarget, resolveTarget, httpError } from "../lib/targetClient.js";
+import { bookerNames, type Booker } from "./bookerNames.js";
 
 /**
  * When the academy's mentors are free, and what is already in the diary.
@@ -37,6 +38,8 @@ export interface MentorMeeting {
   attendeeNames: string[];
   /** Who arranged it; the screen decides from this who may change it. */
   bookedByEmail: string;
+  /** That person by name, where they work and their role (2026-11-18, the "Booked by" filter) — null when unknown. */
+  bookedBy?: { name: string; where: string; role: string | null } | null;
 }
 
 export interface Mentor {
@@ -96,11 +99,21 @@ export const mentorService = {
       { method: "GET", verb: "list its mentors" },
     );
 
+    const mentors = (data.mentors ?? []).map((m) => ({ ...m, meetings: m.meetings ?? [] }));
+    // Each booker by name (2026-11-18): a few seconds at most — past that, the calendar shows addresses.
+    const emails = mentors.flatMap((m) => m.meetings.map((v) => v.bookedByEmail));
+    const names = await Promise.race<Map<string, Booker>>([
+      bookerNames(emails).catch(() => new Map<string, Booker>()),
+      new Promise((ok) => setTimeout(() => ok(new Map<string, Booker>()), 4_000)),
+    ]);
     return {
       timezone: data.timezone || "",
       from: data.from || from.toISOString(),
       to: data.to || to.toISOString(),
-      mentors: (data.mentors ?? []).map((m) => ({ ...m, meetings: m.meetings ?? [] })),
+      mentors: mentors.map((m) => ({
+        ...m,
+        meetings: m.meetings.map((v) => ({ ...v, bookedBy: names.get(String(v.bookedByEmail ?? "").toLowerCase()) ?? null })),
+      })),
     };
   },
 

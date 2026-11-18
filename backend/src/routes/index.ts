@@ -24,6 +24,7 @@ import tvMediaRoutes from "./tvMediaRoutes.js";
 import csTvAmountsRoutes from "./csTvAmountsRoutes.js";
 import classTvRoutes from "./classTvRoutes.js";
 import mentorsTvRoutes from "./mentorsTvRoutes.js";
+import bookedMeetingsRoutes from "./bookedMeetingsRoutes.js";
 import csMentorsTvRoutes from "./csMentorsTvRoutes.js";
 import walletRoutes from "./walletRoutes.js";
 import rewardRoutes from "./rewardRoutes.js";
@@ -49,6 +50,8 @@ router.use("/salespeople", salespersonRoutes);
 // Every portal's 3CX calls and recordings (2026-10-14).
 router.use("/calls", callRoutes);
 router.use("/cses", cseRoutes);
+// The meetings a salesperson or CS booked with the mentors (2026-11-18) — their pages' Meetings card.
+router.use("/meetings-booked", bookedMeetingsRoutes);
 router.use("/commission-plans", commissionPlanRoutes);
 // Every portal's database, into R2 twice a day (2026-10-16).
 router.use("/backups", backupRoutes);
