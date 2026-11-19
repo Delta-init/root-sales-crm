@@ -59,6 +59,9 @@ const auditLogSchema = new Schema<IAuditLog>(
         "mentor_kpi_correction_decided",
         "mentor_kpi_portal_changed",
         "traffic_rules_changed",
+        // Leads moved between the sales CRMs from Root's Lead moves page, and one undone (2026-11-19).
+        "crm_leads_moved",
+        "crm_lead_move_undone",
         "traffic_lead_retried",
         "traffic_access_changed",
         "pending_access_changed",

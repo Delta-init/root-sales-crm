@@ -8,7 +8,7 @@
  */
 import type { LucideIcon } from "lucide-react";
 import {
-  BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, Columns2, DatabaseBackup, FileBarChart, Gauge, Gift, GraduationCap, Headset, Images, Inbox, LayoutGrid, Phone, MonitorPlay, MonitorUp, Shuffle, Tv, Users2,
+  ArrowRightLeft, BarChart3, CalendarDays, ClipboardCheck, ClipboardList, Coins, Columns2, DatabaseBackup, FileBarChart, Gauge, Gift, GraduationCap, Headset, Images, Inbox, LayoutGrid, Phone, MonitorPlay, MonitorUp, Shuffle, Tv, Users2,
   WalletCards,
 } from "lucide-react";
 
@@ -85,6 +85,8 @@ export const NAV: NavItem[] = [
       // Where the Meta lead sheet's leads go: split between Delta and Draw.
       // Also for anybody a root admin has given lead-traffic access.
       { href: "/traffic", label: "Lead traffic", icon: Shuffle, traffic: true },
+      // Moving leads between the Sales, Draw and Remote CRMs, and every move (2026-11-19). Lead-traffic access.
+      { href: "/lead-moves", label: "Lead moves", icon: ArrowRightLeft, traffic: true },
       // Each sales CRM's commission plan, read only — nobody edits it any more (2026-10-09).
       { href: "/commission", label: "Commission plans", icon: Coins, rootOnly: true },
     ],

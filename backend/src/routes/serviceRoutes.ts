@@ -6,7 +6,8 @@ import * as engine from "../controllers/commissionEngineController.js";
 import { servicePortalCorrection, servicePortalMentor, servicePortalScores } from "../controllers/mentorKpiController.js";
 import { authenticateAnyPortal, authenticateOrgService, authenticatePortalService } from "../middleware/orgServiceAuth.js";
 import { serviceClaim, serviceRewards } from "../services/rewardsService.js";
-import { sendSuccess } from "../utils/response.js";
+import { sendError, sendSuccess } from "../utils/response.js";
+import { listMoves, moveLeads, moveTargets, undoMove } from "../services/crmLeadMoveService.js";
 import type { AuthenticatedRequest } from "../types/index.js";
 import type { NextFunction, Response } from "express";
 
@@ -62,5 +63,23 @@ router.post("/rewards/claims", async (req: AuthenticatedRequest, res: Response, 
     next(error);
   }
 });
+
+// Moving leads between the sales CRMs (2026-11-19): the CRM a lead leaves asks; Root hands it to the other CRM. Which
+// CRM is asking is the secret that matched.
+const moving = (message: string, fn: (req: AuthenticatedRequest) => Promise<unknown>, created = false) =>
+  async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+      sendSuccess(res, message, await fn(req), created ? 201 : 200);
+    } catch (error) {
+      const status = (error as { statusCode?: number }).statusCode;
+      if (status) return sendError(res, (error as Error).message, status);
+      next(error);
+    }
+  };
+router.get("/lead-moves/targets", moving("Where leads can go", (req) => moveTargets(req.serviceOrg!.code)));
+router.get("/lead-moves", moving("Moves", (req) => listMoves({ crm: req.serviceOrg!.code, limit: Number(req.query.limit) || 100 })));
+router.post("/lead-moves", moving("Leads moved", (req) => moveLeads(req.serviceOrg!.code, req.body ?? {}), true));
+router.post("/lead-moves/:id/undo", moving("Move undone", (req) =>
+  undoMove(req.serviceOrg!.code, req.params.id!, String((req.body ?? {}).byName ?? ""))));
 
 export default router;

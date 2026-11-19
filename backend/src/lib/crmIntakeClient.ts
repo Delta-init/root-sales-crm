@@ -95,3 +95,30 @@ export async function postIntakeBatch(code: string, rows: IntakeRow[]): Promise<
     clearTimeout(timer);
   }
 }
+
+/** One call to a CRM's sheet door other than the batch (lead moves, 2026-11-19). Throws like postIntakeBatch. */
+export async function postToCrm<T>(code: string, path: string, body: unknown, timeoutMs = TIMEOUT_MS): Promise<T> {
+  const { base, key, missing } = intakeConfig(code);
+  if (missing.length) throw new Error(`not configured on this server — set ${missing.join(" and ")}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${base}/api/v1/sheets${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": key },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const answer = (await res.json().catch(() => ({}))) as { success?: boolean; message?: string; data?: T };
+    if (!res.ok || answer.success === false) {
+      throw Object.assign(new Error(res.status === 404 ? "is on an older version that can't take moved leads yet" : `answered ${res.status}: ${answer.message ?? "no message"}`), { crmStatus: res.status });
+    }
+    return answer.data as T;
+  } catch (error) {
+    if ((error as Error).name === "AbortError") throw new Error(`did not answer within ${timeoutMs / 1000}s`);
+    if (error instanceof TypeError) throw new Error(`could not be reached (${error.message})`);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}

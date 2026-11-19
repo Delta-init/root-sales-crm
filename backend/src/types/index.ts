@@ -211,6 +211,8 @@ export type AuditAction =
   // Opened to the CS Portal (the 60-day observation starts), or closed.
   | "mentor_kpi_portal_changed"
   | "traffic_rules_changed"
+  | "crm_leads_moved"
+  | "crm_lead_move_undone"
   | "traffic_lead_retried"
   | "traffic_access_changed"
   | "pending_access_changed"
