@@ -11,9 +11,9 @@ import { Bars } from "@/components/common/Breakdown";
 import { RangePicker, resolveRange, REPORT_TZ_LABEL, type Range, type RangeKey } from "@/components/reports/RangePicker";
 import { Recording } from "@/components/calls/Recording";
 import { api } from "@/lib/axios";
-import { cn } from "@/lib/utils";
+import { aedInrText, cn, showsInr } from "@/lib/utils";
 import { talkTime } from "@/lib/calls";
-import { ReportBody, n0, pct, when, type Group, type Row, type Section } from "@/components/portal-reports/ReportBody";
+import { ReportBody, aed, inr, n0, pct, when, type Group, type Row, type Section } from "@/components/portal-reports/ReportBody";
 import { LeadWorkflowSection } from "@/components/portal-reports/LeadWorkflow";
 
 /**
@@ -105,13 +105,18 @@ function sectionsFor(currency: string): Section<SectionKey>[] {
         r.recordings > 0 ? <Recording key="p" call={{ portal: r.portal, id: r.id }} /> : <span key="p" className="text-xs text-muted-foreground/60">None</span>],
     },
     {
+      // In AED, the part clients paid in rupees apart in INR (commission_inr) — never one summed number (2026-11-20).
       key: "commission", label: "Commission", icon: Coins, accent: "amber",
-      headline: (t) => money(t.commission), headlineHint: (t) => `${n0(t.sales)} sales counted`,
-      cards: (t) => [{ title: "Commission counted", value: money(t.commission), hint: `${n0(t.sales)} sales made in the period` }],
-      cols: [{ key: "sales", label: "Sales" }, { key: "commission", label: "Commission", fmt: "money" }],
+      headline: (t) => aedInrText(t.commission ?? 0, t.commission_inr), headlineHint: (t) => `${n0(t.sales)} sales counted`,
+      cards: (t) => [
+        { title: "Commission counted", value: aed(t.commission), hint: `${n0(t.sales)} sales made in the period` },
+        ...(showsInr(t.commission_inr) ? [{ title: "Commission in INR", value: inr(t.commission_inr), hint: "on the part clients paid in rupees" }] : []),
+      ],
+      cols: [{ key: "sales", label: "Sales" }, { key: "commission", label: "Commission", fmt: "aed", sub: { key: "commission_inr", fmt: "inr" } }],
       rowHead: ["Sale", "Student", "To", "Role", "Commission"],
       row: (r) => [when(r.at), <div key="s"><div className="font-medium">{r.student}</div>{r.course ? <div className="text-xs text-muted-foreground">{r.course}</div> : null}</div>,
-        ownerCell(r), String(r.role || "").toUpperCase() || "—", <span key="a" className="tabular-nums">{money(r.amount)}</span>],
+        ownerCell(r), String(r.role || "").toUpperCase() || "—",
+        <span key="a" className="tabular-nums">{aed(r.amount)}{showsInr(r.amount_inr) ? <span className="block text-xs text-amber-600 dark:text-amber-400">+ {inr(r.amount_inr)}</span> : null}</span>],
     },
   ];
 }

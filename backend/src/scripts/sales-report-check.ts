@@ -8,6 +8,8 @@
  *                        person filters; a CRM with no calls system
  *   Case 3  errors       a CRM that can't be read, an unknown one, bad dates
  *   Case 4  permission   no session, an admin who is not a root admin
+ *   Case 5  rupees       a sale partly paid in rupees (2026-11-20): commission in AED and, apart, in INR — per
+ *                        person, team, month, the total and each row, as the CRMs split it
  *
  * Run through scripts/sales-report-check.sh. Scratch databases on 127.0.0.1 only.
  */
@@ -138,6 +140,29 @@ async function main() {
   step("Case 4 — root admins only");
   check("no session: 401", (await call("/portal-reports/sales/delta")).status === 401);
   check("not a root admin: 403", (await call("/portal-reports/sales/delta", member)).status === 403);
+
+  step("Case 5 — a sale partly paid in rupees (2026-11-20): AED and INR apart, never added together");
+  // A quarter in rupees: each line earns a quarter of its rupee amount in INR, the rest of its AED one. And a sale paid
+  // in rupees but counted before the rupee amounts: its line has none, so all of it in AED.
+  await deltaDb.collection("commissionsales").insertMany([
+    { studentName: "Rupee Part", courseName: "MBT", saleDate: days(1), state: "counted",
+      collections: [{ paidAt: days(1), share: 0.25, aed: 5000, inr: true }, { paidAt: days(1), share: 0.75, aed: 15000 }],
+      lines: [{ role: "sales", user: asha, amount: 1000, amountInr: 20000 }, { role: "tl", user: bina, amount: 300, amountInr: 6000 }] },
+    { studentName: "Old Lines", courseName: "MBT", saleDate: days(1), state: "counted", collections: [{ paidAt: days(1), share: 1, aed: 4000, inr: true }],
+      lines: [{ role: "sales", user: asha, amount: 100 }] },
+  ]);
+  const inr = (await call(`/portal-reports/sales/delta${P}`, root)).body?.data ?? {};
+  const k = (id: Types.ObjectId) => (inr.commission?.people ?? []).find((p: Json) => p.id === String(id)) ?? {};
+  same("per person: Asha AED 1,150 (300 + 750 + 100) + INR 5,000; Bina AED 275 + INR 1,500",
+    [k(asha).commission, k(asha).commission_inr, k(bina).commission, k(bina).commission_inr], [1150, 5000, 275, 1500]);
+  same("the total: AED 1,425 + INR 6,500 — never 7,925", [inr.commission?.total?.commission, inr.commission?.total?.commission_inr, inr.commission?.total?.sales], [1425, 6500, 5]);
+  same("by team: Falcons (Asha) INR 5,000, Eagles (Bina) INR 1,500",
+    (inr.commission?.teams ?? []).map((t: Json) => [t.team, t.commission, t.commission_inr]).sort(), [["Eagles", 275, 1500], ["Falcons", 1150, 5000]]);
+  same("by month: the INR beside the AED", (inr.commission?.months ?? []).reduce((n: number, m: Json) => n + (m.commission_inr ?? 0), 0), 6500);
+  const kr = (student: string, owner: string) => (inr.commission?.rows ?? []).find((x: Json) => x.student === student && x.owner === owner) ?? {};
+  same("each row: the rupee sale's AED and INR parts; the older one all AED; the first sale as before",
+    [kr("Rupee Part", "Asha").amount, kr("Rupee Part", "Asha").amount_inr, kr("Rupee Part", "Bina").amount, kr("Rupee Part", "Bina").amount_inr,
+      kr("Old Lines", "Asha").amount, kr("Old Lines", "Asha").amount_inr, kr("Won Wes", "Asha").amount, kr("Won Wes", "Asha").amount_inr], [750, 5000, 225, 1500, 100, 0, 300, 0]);
   console.log(`\n${checks - failures}/${checks} checks passed`);
 }
 

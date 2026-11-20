@@ -3,6 +3,7 @@ import { getSources } from "./crmConnections.js";
 import { COUNTED_PAYMENT, COUNTED_STUDENT, bangaloreUnion } from "./bangaloreRevenue.js";
 import { CALL_PORTALS, callsOverview } from "./callsService.js";
 import { markedOf } from "./salesPendingService.js";
+import { rupeeShareOf, splitByCurrency } from "./commissionEngine.js";
 import { resolveTarget, callTarget } from "../lib/targetClient.js";
 import { targetConfig } from "../config/targets.js";
 
@@ -25,6 +26,8 @@ import { targetConfig } from "../config/targets.js";
  *               period, against the lead's owner
  *   calls       their calls: connected, talk time, recordings (3CX)
  *   commission  commission counted on sales made in the period
+ *               (2026-11-20: in AED, and apart in INR the part clients paid
+ *               in rupees, at the lines' rupee amounts — never added together)
  *
  * Read-only.
  */
@@ -122,7 +125,7 @@ export async function salesReport(code: string, q: { from?: unknown; to?: unknow
     leads.find({ status: { $in: ["lost", "not_connected"] }, ...(from ? { updatedAt: { $gte: from } } : {}) },
       { projection: { name: 1, phone: 1, source: 1, status: 1, lostReason: 1, lostNotes: 1, assignedTo: 1, updatedAt: 1, activityLogs: 1 }, maxTimeMS: QUERY_MS }).limit(20_000).toArray(),
     src.conn.collection("commissionsales").find({ state: "counted", ...within("saleDate") },
-      { projection: { studentName: 1, courseName: 1, saleDate: 1, lines: 1, fee: 1 }, maxTimeMS: QUERY_MS }).toArray().catch(() => []),
+      { projection: { studentName: 1, courseName: 1, saleDate: 1, lines: 1, fee: 1, "collections.share": 1, "collections.inr": 1 }, maxTimeMS: QUERY_MS }).toArray().catch(() => []),
     CALL_PORTALS[code]
       ? callsOverview({ portal: code, ...(from ? { from: new Date(from.getTime() + UAE_MS).toISOString().slice(0, 10) } : {}),
           ...(to ? { to: new Date(to.getTime() + UAE_MS).toISOString().slice(0, 10) } : {}), page: "1", limit: "200" })
@@ -233,16 +236,18 @@ export async function salesReport(code: string, q: { from?: unknown; to?: unknow
     }).filter((r) => !person || r.owner_id === person);
   } else if (calls && "error" in calls) callsInfo = { ...callsInfo, message: calls.error };
 
-  /* Commission */
-  const kg = grouper(() => ({ sales: 0, commission: 0 }));
+  /* Commission — `commission` in AED, `commission_inr` the part paid in rupees (2026-11-20), as each CRM splits it */
+  const kg = grouper(() => ({ sales: 0, commission: 0, commission_inr: 0 }));
   const commissionRows: Record<string, unknown>[] = [];
   for (const sale of commission as Record<string, any>[]) {
+    const rupeeShare = rupeeShareOf(sale);
     for (const line of sale.lines ?? []) {
       const p = who(line.user);
       if (!counts(p)) continue;
-      kg.add(p, sale.saleDate, { sales: 1, commission: Number(line.amount) || 0 });
+      const by = splitByCurrency(Number(line.amount) || 0, Number(line.amountInr) || 0, rupeeShare);
+      kg.add(p, sale.saleDate, { sales: 1, commission: by.aed, commission_inr: by.inr });
       commissionRows.push({ at: new Date(sale.saleDate).toISOString(), student: String(sale.studentName ?? ""), course: String(sale.courseName ?? ""), role: String(line.role ?? ""),
-        amount: Number(line.amount) || 0, ...tag(p) });
+        amount: by.aed, amount_inr: by.inr, ...tag(p) });
     }
   }
 

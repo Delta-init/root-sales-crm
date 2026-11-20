@@ -502,25 +502,30 @@ export async function payRows(db: Connection, plan: ICommissionPlan, month: stri
 
 /* ── Old and new, side by side ────────────────────────────────────────────────────────────────────────────────── */
 
+/** A line as the compare shows it: its AED amount and its rupee amount (0: none), apart (2026-11-20). */
+export interface CompareLine { role: string; userName: string; amount: number; amountInr: number }
 export interface SaleCompare {
   saleId: string;
   student: string;
   course: string;
   saleDate: string | null;
-  crm: { state: string; lines: Array<{ role: string; userName: string; amount: number }> };
-  root: { state: SaleState; reason: string; lines: Array<{ role: string; userName: string; amount: number }> };
+  /** The share of what the sale has received that came in rupees, 0–1 (2026-11-20) — the part its lines' INR amounts pay. */
+  rupeeShare: number;
+  crm: { state: string; lines: CompareLine[] };
+  root: { state: SaleState; reason: string; lines: CompareLine[] };
   same: boolean;
 }
 
 /**
  * Each of a month's decided sales (counted, held or excluded): who earns what as the CRM recorded it, and as Root's
  * plan gives it now. A sale counted before a plan change keeps its amounts in the CRM, so a difference there is the
- * change, not a fault.
+ * change, not a fault. The lines' rupee amounts are compared too (2026-11-20): a sale whose lines differ only in INR
+ * differs; a line the CRM recorded with no rupee amount (counted before them) has none.
  */
 export async function compareSales(db: Connection, plan: ICommissionPlan, month: string): Promise<SaleCompare[]> {
   const sales = await db.collection("commissionsales").find(
     { month, state: { $in: ["counted", "waiting", "excluded"] } },
-    { projection: { student: 1, studentName: 1, courseName: 1, course: 1, closer: 1, team: 1, state: 1, lines: 1, saleDate: 1 }, maxTimeMS: QUERY_MS },
+    { projection: { student: 1, studentName: 1, courseName: 1, course: 1, closer: 1, team: 1, state: 1, lines: 1, saleDate: 1, "collections.share": 1, "collections.inr": 1 }, maxTimeMS: QUERY_MS },
   ).sort({ saleDate: 1 }).toArray();
   const ids = sales.map((s) => s.student).filter(Boolean) as Types.ObjectId[];
   const students = ids.length
@@ -533,16 +538,18 @@ export async function compareSales(db: Connection, plan: ICommissionPlan, month:
     const st = studentOf.get(String(s.student));
     // As the CRM decides it: the student's closer and team, else what the sale recorded.
     const r = await resolveSale(db, plan, { closer: idOf(st?.assignedTo) || idOf(s.closer), team: idOf(st?.team) || idOf(s.team), course: idOf(s.course) }, names);
-    const crmLines = ((s.lines as Array<{ role?: string; userName?: string; amount?: number; user?: unknown }> | undefined) ?? [])
-      .map((l) => ({ role: String(l.role ?? ""), userName: String(l.userName ?? ""), amount: Number(l.amount) || 0, user: idOf(l.user) }));
-    const key = (ls: Array<{ role: string; amount: number; user: string }>) => JSON.stringify(ls.map((l) => [l.role, l.user, l.amount]).sort());
+    const crmLines = ((s.lines as Array<{ role?: string; userName?: string; amount?: number; amountInr?: number; user?: unknown }> | undefined) ?? [])
+      .map((l) => ({ role: String(l.role ?? ""), userName: String(l.userName ?? ""), amount: Number(l.amount) || 0, amountInr: Number(l.amountInr) || 0, user: idOf(l.user) }));
+    const key = (ls: Array<{ role: string; amount: number; amountInr: number; user: string }>) => JSON.stringify(ls.map((l) => [l.role, l.user, l.amount, l.amountInr]).sort());
+    const shown = (l: CompareLine): CompareLine => ({ role: l.role, userName: l.userName, amount: l.amount, amountInr: l.amountInr });
     out.push({
       saleId: String(s._id),
       student: String(s.studentName ?? ""),
       course: String(s.courseName ?? ""),
       saleDate: s.saleDate ? new Date(s.saleDate).toISOString() : null,
-      crm: { state: String(s.state), lines: crmLines.map(({ role, userName, amount }) => ({ role, userName, amount })) },
-      root: { state: r.state, reason: r.reason, lines: r.lines.map((l) => ({ role: l.role, userName: l.userName, amount: l.amount })) },
+      rupeeShare: rupeeShareOf(s as { collections?: Collection[] | null }),
+      crm: { state: String(s.state), lines: crmLines.map(shown) },
+      root: { state: r.state, reason: r.reason, lines: r.lines.map(shown) },
       same: String(s.state) === r.state && key(crmLines) === key(r.lines),
     });
   }

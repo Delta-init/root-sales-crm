@@ -18,6 +18,9 @@
  *   Case 6  apply-from   today's slabs applied to October: a preview of whose pay moves (nothing saved), then the
  *                        change — October's My Pay follows; refused before October 2026, this month, later; root admins
  *   Case 10 meetings     a mentor's meeting on a sale (2026-11-18): the course's fee off the lines, to the mentor
+ *   Case 11 compare INR  the compare with the lines' rupee amounts (2026-11-20): a sale differing only in INR differs, one
+ *                        the same in both is the same; My Pay's INR parts beside the AED ones, compared where the CRM
+ *                        gives them
  *   Case 8  team plans   a team on a plan of its own in the Sales CRM (2026-11-03): its course amounts on its sales
  *                        (others on the portal's), its Sales Staff / TL slabs from this month (past months as they
  *                        were, someone in two teams and the SM on the portal's), back on the portal's, refusals
@@ -431,6 +434,46 @@ async function main() {
   check("the changes are in the plan's log, the meeting amounts said", log.some((l) => /mentor's meeting: none -> AED 35/.test(String(l.detail ?? ""))), show(log.map((l) => l.detail)));
   const bad = await call("POST", "/service/commission/resolve", as("delta"), { closer: String(D.users.ria), course: String(D.courses.mbt), meeting: { mentorEmail: "not-an-email" } });
   check("a meeting without a mentor's email → 400", bad.status === 400, show(bad.body));
+
+  step("Case 11 — the compare with the lines' rupee amounts (2026-11-20)");
+  put = await call("PUT", `/commission-plans/delta/courses/${D.courses.mbt}`, root, { sales: 230, tl: 85, sm: 100, creditUsd: 500, salesInr: 5000, tlInr: 2000, smInr: 2500 });
+  // Two of this month's Gladiators MBT sales, half paid in rupees: one recorded with the salesperson's rupee amount off
+  // (INR 4,000, Root's plan 5,000) and the AED all the same; one recorded exactly as Root's plan gives it.
+  const glad = (salesInr: number) => [
+    inrLine("sales", D.users.ria, "Ria", 230, salesInr), inrLine("tl", D.users.lena, "Lena", 85, 2000), inrLine("sm", D.users.abrar, "Abrar", 100, 2500),
+  ];
+  const halfInRupees = [{ paidAt: paidNow, share: 0.5, aed: 2500, inr: true }, { paidAt: paidNow, share: 0.5, aed: 2500 }];
+  await dbs.delta.collection("commissionsales").insertMany([
+    { ...saleBase, student: new Types.ObjectId(), studentName: "INR differs", invoiceNumber: "IN-90011", fee: 5000, owedShare: 0, collections: halfInRupees, lines: glad(4000) },
+    { ...saleBase, student: new Types.ObjectId(), studentName: "INR same", invoiceNumber: "IN-90012", fee: 5000, owedShare: 0, collections: halfInRupees, lines: glad(5000) },
+  ]);
+  const rootPay = row((await call("GET", `/service/commission/pay?month=${month}`, as("delta"))).body?.data, "Ria");
+  const crmRia = (inr: { earnedInr?: number; payableInr?: number }) => [{
+    user: String(D.users.ria), name: "Ria", role: rootPay?.role, level: rootPay?.level?.name, percent: rootPay?.percent,
+    earned: rootPay?.commission?.earned, balance: rootPay?.commission?.balance, payable: rootPay?.commission?.payable, ...inr,
+  }];
+  PAY.delta = crmRia({ earnedInr: rootPay?.commission?.earnedInr, payableInr: rootPay?.commission?.payableInr });
+  cmp = await call("GET", `/commission-plans/delta/compare?month=${month}`, root);
+  const sale11 = (n: string) => cmp.body?.data?.sales?.list?.find((x: Json) => x.student === n);
+  const inrOf = (ls: Json) => (ls ?? []).map((l: Json) => `${l.role}:${l.amount}:${l.amountInr}`).join(" ");
+  check("a sale whose lines differ only in INR differs: the CRM's Sales Staff INR 4,000, Root's 5,000, the AED the same", put.status === 200 && sale11("INR differs")?.same === false
+    && inrOf(sale11("INR differs").crm.lines) === "sales:230:4000 tl:85:2000 sm:100:2500" && inrOf(sale11("INR differs").root.lines) === "sales:230:5000 tl:85:2000 sm:100:2500",
+    show(sale11("INR differs")));
+  check("…one recorded as Root's plan gives it, rupee amounts and all, is the same", sale11("INR same")?.same === true
+    && inrOf(sale11("INR same").root.lines) === "sales:230:5000 tl:85:2000 sm:100:2500", show(sale11("INR same")));
+  check("…each sale says the share paid in rupees", sale11("INR differs")?.rupeeShare === 0.5 && sale11("INR same").rupeeShare === 0.5, show([sale11("INR differs")?.rupeeShare, sale11("INR same")?.rupeeShare]));
+  check("My Pay: Root's INR parts beside the AED ones; the CRM saying the same INR → the same", pp("Ria")?.same === true && rootPay?.commission?.earnedInr > 0
+    && pp("Ria").root.earnedInr === rootPay.commission.earnedInr && pp("Ria").root.payableInr === rootPay.commission.payableInr && pp("Ria").crm.earnedInr === rootPay.commission.earnedInr,
+    show({ ria: pp("Ria"), rootPay: rootPay?.commission }));
+  PAY.delta = crmRia({ earnedInr: (rootPay?.commission?.earnedInr ?? 0) + 100, payableInr: rootPay?.commission?.payableInr });
+  cmp = await call("GET", `/commission-plans/delta/compare?month=${month}`, root);
+  check("…the CRM's earned INR off by 100, the AED all the same → differs", pp("Ria")?.same === false && pp("Ria").crm.earned === pp("Ria").root.earned
+    && pp("Ria").crm.earnedInr === pp("Ria").root.earnedInr + 100, show(pp("Ria")));
+  PAY.delta = crmRia({});
+  cmp = await call("GET", `/commission-plans/delta/compare?month=${month}`, root);
+  check("…a CRM whose My Pay says nothing in INR (from before): not held against Root's", pp("Ria")?.same === true && pp("Ria").crm.earnedInr === null && pp("Ria").crm.payableInr === null,
+    show(pp("Ria")));
+  PAY.delta = [];
 
   console.log(`\n${checks - failures}/${checks} checks passed`);
   crmApi.close();

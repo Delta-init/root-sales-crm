@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RangePicker, resolveRange, REPORT_TZ_LABEL, type Range, type RangeKey } from "@/components/reports/RangePicker";
 import { api } from "@/lib/axios";
-import { cn } from "@/lib/utils";
+import { aedInrText, cn } from "@/lib/utils";
 import type { SalespersonDetail, SalespersonLead } from "@/lib/types";
 import { SalespersonBreakdown, type SalesCard } from "@/components/salespeople/SalespersonBreakdown";
 import { BreakdownHint, cardButton } from "@/components/common/Breakdown";
@@ -107,7 +107,8 @@ export default function SalespersonPage() {
               hint={`${d.pendingNow.newLeads} new leads · ${d.pendingNow.reminders} reminders${d.pendingNow.overdue ? ` · ${d.pendingNow.overdue} overdue` : ""}`}
               tone={d.pendingNow.overdue ? "text-rose-500" : undefined} />
             {d.commission && (
-              <Stat icon={Coins} label="Commission" value={money(d.commission.earned, "AED")} tone="text-emerald-500" onClick={() => setCard("commission")}
+              // In AED, the part paid in rupees beside it in INR — never one summed number (2026-11-20).
+              <Stat icon={Coins} label="Commission" value={aedInrText(d.commission.earned, d.commission.earnedInr)} tone="text-emerald-500" onClick={() => setCard("commission")}
                 hint={`${d.commission.sales} sale${d.commission.sales === 1 ? "" : "s"} counted${d.commission.notCounted ? ` · ${d.commission.notCounted} not yet` : ""}`} />
             )}
           </div>

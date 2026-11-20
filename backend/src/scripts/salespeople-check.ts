@@ -10,6 +10,8 @@
  *                        that cannot be read
  *   Case 3  errors       bad dates, from after to, an unknown CRM or person
  *   Case 4  permission   no session, an admin who is not a root admin
+ *   Case 7  rupees       a sale partly paid in rupees (2026-11-20): its lines' AED and INR parts apart, as the CRMs
+ *                        split them — in the list, the person's page and the commission breakdown
  *
  * Run through scripts/salespeople-check.sh. Scratch databases on 127.0.0.1 only.
  */
@@ -170,12 +172,12 @@ async function main() {
   check("the list: commission credited for October's sales — Ria AED 100, Gopika (her TL) AED 30, not September's", dl?.people?.find((p: Json) => p.id === String(ria))?.commission === 100
     && dl.people.find((p: Json) => p.id === String(gopika))?.commission === 30, show(dl?.people?.map((p: Json) => [p.name, p.commission])));
   r = await call("GET", `/salespeople/delta/${ria}?${OCT}`, root);
-  check("her page: AED 100 from 1 sale; 2 of her closes not counted (finishing steps, left out)", show(r.body?.data?.commission) === show({ earned: 100, sales: 1, notCounted: 2 }), show(r.body?.data?.commission));
+  check("her page: AED 100 from 1 sale; 2 of her closes not counted (finishing steps, left out)", show(r.body?.data?.commission) === show({ earned: 100, earnedInr: 0, sales: 1, notCounted: 2 }), show(r.body?.data?.commission));
   r = await call("GET", `/salespeople/delta/${ria}/breakdown/commission?${OCT}`, root);
   let cb = r.body?.data;
   check("the breakdown: the sale with course, invoice, fee, her role and amount; by month; by role; the two not counted with why", r.status === 200 && cb?.rows?.length === 1
     && cb.rows[0].student === "Asha" && cb.rows[0].role === "sales" && cb.rows[0].amount === 100 && cb.rows[0].fee === 2250 && cb.rows[0].invoiceNumber === "IN-00001"
-    && show(cb.byMonth) === show([{ key: "2026-10", label: "2026-10", amount: 100 }]) && cb.byRole[0].key === "sales"
+    && show(cb.byMonth) === show([{ key: "2026-10", label: "2026-10", amount: 100, amountInr: 0 }]) && cb.byRole[0].key === "sales"
     && cb.notCounted.length === 2 && cb.notCounted.some((x: Json) => x.state === "excluded" && x.reason === "Not a commissioned course"), show(cb));
   r = await call("GET", `/salespeople/delta/${gopika}/breakdown/commission?${OCT}`, root);
   cb = r.body?.data;
@@ -199,6 +201,44 @@ async function main() {
     && b.reminders[0].name === "Bilal", show(b));
   check("an unknown breakdown: 400; a member: 403", (await call("GET", `/salespeople/delta/${ria}/breakdown/nope`, root)).status === 400
     && (await call("GET", `/salespeople/delta/${ria}/breakdown/leads`, member)).status === 403);
+
+  step("Case 7 — a sale partly paid in rupees (2026-11-20): the AED and INR parts apart, never added together");
+  // A quarter of the fee came in rupees: the line earns a quarter of its rupee amount in INR, the rest of its AED one.
+  // And a sale paid all in rupees but counted before the rupee amounts: its lines have none, so all of it in AED.
+  await deltaDb.collection("commissionsales").insertMany([
+    { student: new Types.ObjectId(), studentName: "Rupee Part", invoiceNumber: "IN-00003", courseName: "MBT", closer: ria, closerName: "Ria", saleDate: z("2026-10-15T08:00:00Z"),
+      month: "2026-10", fee: 20000, state: "counted", countedAt: z("2026-10-20T08:00:00Z"),
+      collections: [{ paidAt: z("2026-10-15T08:00:00Z"), share: 0.25, aed: 5000, inr: true }, { paidAt: z("2026-10-16T08:00:00Z"), share: 0.75, aed: 15000 }],
+      lines: [{ role: "sales", user: ria, userName: "Ria", amount: 1000, amountInr: 20000 }, { role: "tl", user: gopika, userName: "Gopika", amount: 300, amountInr: 6000 }] },
+    { student: new Types.ObjectId(), studentName: "Old Lines", invoiceNumber: "IN-00004", courseName: "DWT", closer: ria, closerName: "Ria", saleDate: z("2026-10-16T08:00:00Z"),
+      month: "2026-10", fee: 4000, state: "counted", countedAt: z("2026-10-21T08:00:00Z"),
+      collections: [{ paidAt: z("2026-10-16T08:00:00Z"), share: 1, aed: 4000, inr: true }],
+      lines: [{ role: "sales", user: ria, userName: "Ria", amount: 200 }] },
+  ]);
+  r = await call("GET", `/salespeople?${OCT}`, root);
+  const dr = (r.body?.data?.crms ?? []).find((c: Json) => c.code === "delta");
+  const inList = (id: Types.ObjectId) => dr?.people?.find((p: Json) => p.id === String(id));
+  check("the list: Ria AED 1,050 (100 + 750 + 200) and INR 5,000 apart; Gopika AED 255 and INR 1,500",
+    inList(ria)?.commission === 1050 && inList(ria)?.commissionInr === 5000 && inList(gopika)?.commission === 255 && inList(gopika)?.commissionInr === 1500,
+    show(dr?.people?.map((p: Json) => [p.name, p.commission, p.commissionInr])));
+  check("…someone with no rupee part: INR 0", inList(gone)?.commissionInr === 0 && inList(gone)?.commission === 0, show(inList(gone)));
+  r = await call("GET", `/salespeople/delta/${ria}?${OCT}`, root);
+  check("her page: AED 1,050 + INR 5,000 from 3 sales — never 6,050", show(r.body?.data?.commission) === show({ earned: 1050, earnedInr: 5000, sales: 3, notCounted: 2 }), show(r.body?.data?.commission));
+  r = await call("GET", `/salespeople/delta/${ria}/breakdown/commission?${OCT}`, root);
+  cb = r.body?.data;
+  const sale = (inv: string) => cb?.rows?.find((x: Json) => x.invoiceNumber === inv);
+  check("the breakdown: the rupee sale AED 750 + INR 5,000, a quarter in rupees", sale("IN-00003")?.amount === 750 && sale("IN-00003").amountInr === 5000
+    && sale("IN-00003").rupeeShare === 0.25, show(sale("IN-00003")));
+  check("…the sale counted before the rupee amounts: all AED 200, though paid in rupees", sale("IN-00004")?.amount === 200 && sale("IN-00004").amountInr === 0
+    && sale("IN-00004").rupeeShare === 0, show(sale("IN-00004")));
+  check("…the sale with no rupee payment: as before", sale("IN-00001")?.amount === 100 && sale("IN-00001").amountInr === 0, show(sale("IN-00001")));
+  check("…totals, by month and by role: AED and INR apart", cb?.earned === 1050 && cb.earnedInr === 5000
+    && show(cb.byMonth) === show([{ key: "2026-10", label: "2026-10", amount: 1050, amountInr: 5000 }])
+    && show(cb.byRole) === show([{ key: "sales", amount: 1050, amountInr: 5000, count: 3 }]), show({ earned: cb?.earned, earnedInr: cb?.earnedInr, byMonth: cb?.byMonth, byRole: cb?.byRole }));
+  r = await call("GET", `/salespeople/delta/${gopika}/breakdown/commission?${OCT}`, root);
+  cb = r.body?.data;
+  check("her TL: AED 225 + INR 1,500 on the rupee sale; AED 255 + INR 1,500 in all", cb?.rows?.find((x: Json) => x.invoiceNumber === "IN-00003")?.amount === 225
+    && cb.rows.find((x: Json) => x.invoiceNumber === "IN-00003").amountInr === 1500 && cb.earned === 255 && cb.earnedInr === 1500, show(cb));
 
   console.log(`\n${checks - failures}/${checks} checks passed`);
   await mongoose.disconnect();

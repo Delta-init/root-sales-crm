@@ -659,11 +659,16 @@ export async function engineInputs(code: string): Promise<{ plan: ICommissionPla
   return { plan, src };
 }
 
+/**
+ * `earnedInr` / `payableInr` (2026-11-20): the part earned in rupees and what the level pays of it, apart from the
+ * AED `earned` / `payable` — on the CRM's side null when its My Pay doesn't say (a CRM from before them), and then not
+ * compared.
+ */
 export interface PayCompare {
   user: string;
   name: string;
-  crm: { role: string; level: string; percent: number; earned: number; balance: number; payable: number } | null;
-  root: { role: string; level: string; percent: number; salary: number; target: number; earned: number; balance: number; payable: number } | null;
+  crm: { role: string; level: string; percent: number; earned: number; balance: number; payable: number; earnedInr: number | null; payableInr: number | null } | null;
+  root: { role: string; level: string; percent: number; salary: number; target: number; earned: number; balance: number; payable: number; earnedInr: number; payableInr: number } | null;
   same: boolean;
 }
 
@@ -684,19 +689,26 @@ export async function compareMonth(code: string, month: string) {
   for (const r of rootRows as EnginePayRow[]) {
     byUser.set(r.user, {
       user: r.user, name: r.name, crm: null,
-      root: { role: r.role, level: r.level.name, percent: r.percent, salary: r.salary, target: r.sales.value, earned: r.commission.earned, balance: r.commission.balance, payable: r.commission.payable },
+      root: {
+        role: r.role, level: r.level.name, percent: r.percent, salary: r.salary, target: r.sales.value, earned: r.commission.earned, balance: r.commission.balance, payable: r.commission.payable,
+        earnedInr: r.commission.earnedInr, payableInr: r.commission.payableInr,
+      },
       same: false,
     });
   }
   for (const p of crmPeople ?? []) {
     const row = byUser.get(String(p.user)) ?? { user: String(p.user), name: p.name, crm: null, root: null, same: false };
-    row.crm = { role: String(p.role ?? ""), level: String(p.level ?? ""), percent: r2(p.percent), earned: r2(p.earned), balance: r2(p.balance), payable: r2(p.payable) };
+    row.crm = {
+      role: String(p.role ?? ""), level: String(p.level ?? ""), percent: r2(p.percent), earned: r2(p.earned), balance: r2(p.balance), payable: r2(p.payable),
+      earnedInr: typeof p.earnedInr === "number" ? r2(p.earnedInr) : null, payableInr: typeof p.payableInr === "number" ? r2(p.payableInr) : null,
+    };
     byUser.set(row.user, row);
   }
   const people = [...byUser.values()].map((p) => ({
     ...p,
     same: !!p.crm && !!p.root && p.crm.role === p.root.role && p.crm.level === p.root.level && p.crm.percent === p.root.percent
-      && p.crm.earned === p.root.earned && p.crm.balance === p.root.balance && p.crm.payable === p.root.payable,
+      && p.crm.earned === p.root.earned && p.crm.balance === p.root.balance && p.crm.payable === p.root.payable
+      && (p.crm.earnedInr === null || p.crm.earnedInr === p.root.earnedInr) && (p.crm.payableInr === null || p.crm.payableInr === p.root.payableInr),
   }));
   const { from } = slabsOfMonth(plan, month);
   return {

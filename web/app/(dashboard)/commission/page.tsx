@@ -14,7 +14,8 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { api, apiErrorMessage } from "@/lib/axios";
-import type { CommissionCompare, CommissionSlabRow, CommissionTeamPlan, CrmCommissionPlan, RootCommissionPlan } from "@/lib/types";
+import { inrText, showsInr } from "@/lib/utils";
+import type { CommissionCompare, CommissionCompareLine, CommissionSlabRow, CommissionTeamPlan, CrmCommissionPlan, RootCommissionPlan } from "@/lib/types";
 
 /**
  * Commission plans. Each sales CRM's own plan, read only (the user, 2026-10-09), and — since 2026-11-01 ("one plan,
@@ -862,8 +863,9 @@ function payMonths(): string[] {
   }
   return out;
 }
-const linesText = (ls: Array<{ role: string; userName: string; amount: number }>) =>
-  ls.length ? ls.map((l) => `${ROLE_SHORT[l.role] ?? l.role} ${l.userName} ${aed(l.amount)}`).join(" · ") : "nobody";
+/** A sale's lines, each with its rupee amount beside the AED one where it has one (2026-11-20) — "AED 230 / INR 5,000". */
+const linesText = (ls: CommissionCompareLine[]) =>
+  ls.length ? ls.map((l) => `${ROLE_SHORT[l.role] ?? l.role} ${l.userName} ${aed(l.amount)}${showsInr(l.amountInr) ? ` / ${inrText(l.amountInr ?? 0)}` : ""}`).join(" · ") : "nobody";
 
 function CompareCard({ code, name }: { code: string; name: string }) {
   const months = payMonths();
@@ -886,6 +888,16 @@ function CompareCard({ code, name }: { code: string; name: string }) {
     </td>
   );
   const money2 = (v: number | string) => aed(Number(v));
+  // Earned and payable: AED, with the INR part under it (2026-11-20) — the CRM's beside each where it differs; a CRM
+  // whose My Pay says nothing in INR (null) is not held against Root's.
+  const moneyCell = (crm: number | undefined, crmInr: number | null | undefined, root: number | undefined, rootInr: number | undefined) => (
+    <td className="whitespace-nowrap py-2 pr-3 text-right">
+      {root === undefined ? "—" : aed(root)}
+      {showsInr(rootInr) && <span className="block text-[11px] text-muted-foreground">+ {inrText(rootInr ?? 0)}</span>}
+      {crm !== undefined && crm !== root && <span className="block text-[11px] text-amber-600 dark:text-amber-400">CRM: {aed(crm)}</span>}
+      {crmInr != null && crmInr !== (rootInr ?? 0) && <span className="block text-[11px] text-amber-600 dark:text-amber-400">CRM: {inrText(crmInr)}</span>}
+    </td>
+  );
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -946,9 +958,9 @@ function CompareCard({ code, name }: { code: string; name: string }) {
                         <td className="whitespace-nowrap py-2 pr-3 text-right">{p.root ? aed(p.root.target) : "—"}</td>
                         {cell(p.crm?.level, p.root?.level)}
                         {cell(p.crm?.percent, p.root?.percent, (v) => `${v}%`)}
-                        {cell(p.crm?.earned, p.root?.earned, money2)}
+                        {moneyCell(p.crm?.earned, p.crm?.earnedInr, p.root?.earned, p.root?.earnedInr)}
                         {cell(p.crm?.balance, p.root?.balance, money2)}
-                        {cell(p.crm?.payable, p.root?.payable, money2)}
+                        {moneyCell(p.crm?.payable, p.crm?.payableInr, p.root?.payable, p.root?.payableInr)}
                       </tr>
                     ))}
                   </tbody>
@@ -961,7 +973,7 @@ function CompareCard({ code, name }: { code: string; name: string }) {
                 <ul className="space-y-2 text-sm">
                   {sales.map((s) => (
                     <li key={s.saleId} className="rounded-md border border-border p-2.5">
-                      <p className="font-medium">{s.student} <span className="font-normal text-muted-foreground">· {s.course}{s.saleDate ? ` · ${s.saleDate.slice(0, 10)}` : ""}</span></p>
+                      <p className="font-medium">{s.student} <span className="font-normal text-muted-foreground">· {s.course}{s.saleDate ? ` · ${s.saleDate.slice(0, 10)}` : ""}{s.rupeeShare ? ` · ${Math.round(s.rupeeShare * 100)}% paid in rupees` : ""}</span></p>
                       <p className="mt-1 text-xs"><span className="text-muted-foreground">CRM ({s.crm.state}):</span> {linesText(s.crm.lines)}</p>
                       <p className={`text-xs ${s.same ? "" : "text-amber-600 dark:text-amber-400"}`}>
                         <span className="text-muted-foreground">Root ({s.root.state}):</span> {linesText(s.root.lines)}{s.root.reason ? ` — ${s.root.reason}` : ""}
@@ -970,6 +982,7 @@ function CompareCard({ code, name }: { code: string; name: string }) {
                   ))}
                 </ul>
                 <p className="text-xs text-muted-foreground">A sale keeps the amounts of the plan it was counted under, so a plan change since shows here as a difference — expected, not a fault.</p>
+                <p className="text-xs text-muted-foreground">AED / INR: a line&apos;s two amounts, as in the plan above — the part of the fee paid in rupees earns the INR one, the rest the AED one. A sale counted before the rupee amounts has none, so it differs where the course now has them.</p>
               </div>
             )}
             {!people.length && !sales.length && <p className="text-sm text-muted-foreground">{onlyDiff ? "No differences." : "Nothing this month."}</p>}

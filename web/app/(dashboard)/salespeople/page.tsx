@@ -12,13 +12,14 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RangePicker, resolveRange, REPORT_TZ_LABEL, type Range, type RangeKey } from "@/components/reports/RangePicker";
 import { api } from "@/lib/axios";
-import { cn } from "@/lib/utils";
+import { cn, inrText, showsInr } from "@/lib/utils";
 import type { SalespeopleList } from "@/lib/types";
 
 /**
  * Salespeople (the user, 2026-10-11): everyone in the sales CRMs — Delta,
  * Banglore, Draw and Remote — with the period's leads, closings and revenue
- * and the commission credited for the period's sales (2026-10-14, AED),
+ * and the commission credited for the period's sales (2026-10-14, AED; the
+ * part clients paid in rupees under it in INR, never added in — 2026-11-20),
  * each opening their own page. Cut in Gulf time. Root admins only.
  */
 
@@ -132,7 +133,10 @@ export default function SalespeoplePage() {
                     <td className="py-2.5 pr-3 text-right tabular-nums">{p.leads || <span className="text-muted-foreground/60">—</span>}</td>
                     <td className="py-2.5 pr-3 text-right font-semibold tabular-nums">{p.closings || <span className="font-normal text-muted-foreground/60">—</span>}</td>
                     <td className="py-2.5 pr-3 text-right tabular-nums">{p.revenue ? money(p.revenue, p.crm.currency) : <span className="text-muted-foreground/60">—</span>}</td>
-                    <td className="py-2.5 pr-3 text-right tabular-nums text-emerald-500">{p.commission ? money(p.commission, "AED") : <span className="text-muted-foreground/60">—</span>}</td>
+                    <td className="py-2.5 pr-3 text-right tabular-nums text-emerald-500">
+                      {p.commission || showsInr(p.commissionInr) ? money(p.commission ?? 0, "AED") : <span className="text-muted-foreground/60">—</span>}
+                      {showsInr(p.commissionInr) && <span className="block text-xs text-amber-600 dark:text-amber-400">+ {inrText(p.commissionInr ?? 0)}</span>}
+                    </td>
                     <td className="py-2.5 text-right">
                       <Link href={`/salespeople/${p.crm.code}/${p.id}`} aria-label={`Open ${p.name}`}><ChevronRight className="h-4 w-4 text-muted-foreground" /></Link>
                     </td>

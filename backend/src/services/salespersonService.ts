@@ -1,6 +1,7 @@
 import { Types } from "mongoose";
 import { getSources, type CrmSource } from "./crmConnections.js";
 import { COUNTED_PAYMENT, COUNTED_STUDENT, bangaloreUnion } from "./bangaloreRevenue.js";
+import { rupeeShareOf, splitByCurrency } from "./commissionEngine.js";
 
 /*
  * A salesperson, from Root (the user, 2026-10-11): everyone in the sales CRMs —
@@ -62,6 +63,20 @@ async function teamsOf(src: CrmSource, ids: Types.ObjectId[]): Promise<Map<strin
 }
 
 const byId = (rows: { _id: unknown; n: number }[]) => new Map(rows.filter((r) => r._id).map((r) => [String(r._id), r.n]));
+const cents = (n: number) => Math.round(n * 100) / 100;
+
+type SaleCollections = { collections?: Array<{ share?: number; inr?: boolean }> | null };
+/**
+ * A counted sale's line in AED and INR apart (2026-11-20: the INR part shown on its own, not the whole in AED): the
+ * part of the fee the client paid in rupees earns the line's rupee amount, the rest its AED amount — the CRMs' own
+ * split (commissionEngine's splitByCurrency). No rupee amount on the line, or nothing paid in rupees: all of it in
+ * AED, as before. The rupees are never added into the AED.
+ */
+function lineByCurrency(sale: SaleCollections, line: { amount?: unknown; amountInr?: unknown }) {
+  const plan = Number(line.amount) || 0, planInr = Number(line.amountInr) || 0, share = rupeeShareOf(sale);
+  const by = splitByCurrency(plan, planInr, share);
+  return { aed: by.aed, inr: by.inr, plan, planInr, rupeeShare: planInr > 0 ? share : 0 };
+}
 
 /**
  * Everyone in every sales CRM, with the period's leads, closings and revenue
@@ -89,15 +104,24 @@ export async function listSalespeople(period: Period) {
         { $match: within("payments.paidAt", period) },
         { $group: { _id: "$assignedTo", n: { $sum: "$payments.amount" } } },
       ], { maxTimeMS: QUERY_MS }).toArray(),
-      // Commission credited for the sales closed in the period (2026-10-14) — a CRM without commission has none.
-      src.conn.collection("commissionsales").aggregate<{ _id: unknown; n: number }>([
-        { $match: { state: "counted", ...within("saleDate", period) } },
-        { $unwind: "$lines" },
-        { $group: { _id: "$lines.user", n: { $sum: "$lines.amount" } } },
-      ], { maxTimeMS: QUERY_MS }).toArray(),
+      // Commission credited for the sales closed in the period (2026-10-14) — a CRM without commission has none. The
+      // part paid in rupees apart, in INR (2026-11-20), so each sale's payments are read with its lines.
+      src.conn.collection("commissionsales").find(
+        { state: "counted", ...within("saleDate", period) },
+        { projection: { "lines.user": 1, "lines.amount": 1, "lines.amountInr": 1, "collections.share": 1, "collections.inr": 1 }, maxTimeMS: QUERY_MS },
+      ).toArray(),
     ]);
     const teams = await teamsOf(src, users.map((u) => u._id as Types.ObjectId));
-    const l = byId(leadRows), c = byId(closingRows), r = byId(revenueRows), k = byId(commissionRows);
+    const l = byId(leadRows), c = byId(closingRows), r = byId(revenueRows);
+    const k = new Map<string, { aed: number; inr: number }>();
+    for (const sale of commissionRows) {
+      for (const line of (sale.lines ?? []) as Array<{ user?: unknown; amount?: unknown; amountInr?: unknown }>) {
+        if (!line.user) continue;
+        const by = lineByCurrency(sale as SaleCollections, line);
+        const mine = k.get(String(line.user)) ?? { aed: 0, inr: 0 };
+        k.set(String(line.user), { aed: mine.aed + by.aed, inr: mine.inr + by.inr });
+      }
+    }
     return {
       code: src.org.code,
       name: src.org.name,
@@ -113,7 +137,9 @@ export async function listSalespeople(period: Period) {
           leads: l.get(id) ?? 0,
           closings: c.get(id) ?? 0,
           revenue: Math.round((r.get(id) ?? 0) * 100) / 100,
-          commission: Math.round((k.get(id) ?? 0) * 100) / 100,
+          // In AED; the rupee part apart in commissionInr (2026-11-20).
+          commission: cents(k.get(id)?.aed ?? 0),
+          commissionInr: cents(k.get(id)?.inr ?? 0),
         };
       }),
     };
@@ -199,8 +225,9 @@ export async function getSalesperson(code: string, userId: string, period: Perio
     },
     pendingNow: { newLeads: pendingLeads, reminders: reminders[0]?.n ?? 0, overdue: reminders[0]?.overdue ?? 0 },
     // Commission (2026-10-14): credited for sales closed in the period, and their own sales not counted yet. Absent where the CRM has none.
+    // `earned` in AED, the part paid in rupees apart in `earnedInr` (2026-11-20).
     commission: commission.has
-      ? { earned: commission.earned, sales: commission.lines.length, notCounted: commission.notCounted.length }
+      ? { earned: commission.earned, earnedInr: commission.earnedInr, sales: commission.lines.length, notCounted: commission.notCounted.length }
       : null,
     statuses: statuses.map((s) => ({ ...s, percent: totalLeads ? Math.round((s.count / totalLeads) * 1000) / 10 : 0 })),
     closings: closings.map((s) => ({
@@ -245,25 +272,42 @@ export async function salespersonLeads(code: string, userId: string, status: str
  * amount, in AED as the plans are. A sale counts in the period it was closed in
  * (saleDate), as My Pay counts it. Not counted yet: their own closes still
  * finishing their steps (progress, waiting), and those left out (excluded,
- * with why). The Banglore CRM has no commission. */
+ * with why). The Banglore CRM has no commission.
+ *
+ * The part of a sale the client paid in rupees (2026-11-20): each line's
+ * `amount` is then only the AED part and `amountInr` the INR part, at the
+ * line's rupee amount — never added together (lineByCurrency); `plan` /
+ * `planInr` are the line's whole amounts, `rupeeShare` the share paid in rupees. */
+type CommissionLine = Record<string, any> & { amount: number; amountInr: number; plan: number; planInr: number; rupeeShare: number };
 async function commissionOf(src: CrmSource, uid: Types.ObjectId, period: Period) {
   const col = src.conn.collection("commissionsales");
   const has = (await src.conn.db!.listCollections({ name: "commissionsales" }, { nameOnly: true }).toArray()).length > 0;
-  if (!has) return { has: false, earned: 0, lines: [] as Record<string, any>[], notCounted: [] as Record<string, any>[] };
-  const [lines, notCounted] = await Promise.all([
+  if (!has) return { has: false, earned: 0, earnedInr: 0, lines: [] as CommissionLine[], notCounted: [] as Record<string, any>[] };
+  const [raw, notCounted] = await Promise.all([
     col.aggregate<Record<string, any>>([
       { $match: { state: "counted", "lines.user": uid, ...within("saleDate", period) } },
       { $unwind: "$lines" },
       { $match: { "lines.user": uid } },
       { $project: { _id: 0, id: "$_id", studentName: 1, enrollmentNumber: 1, invoiceNumber: 1, courseName: 1, closerName: 1, teamName: 1, saleDate: 1, month: 1,
-        fee: 1, countedAt: 1, role: "$lines.role", amount: "$lines.amount", note: "$lines.note" } },
+        fee: 1, countedAt: 1, role: "$lines.role", amount: "$lines.amount", amountInr: "$lines.amountInr", note: "$lines.note",
+        "collections.share": 1, "collections.inr": 1 } },
       { $sort: { saleDate: -1 } },
     ], { maxTimeMS: QUERY_MS }).toArray(),
     col.find({ closer: uid, state: { $in: ["progress", "waiting", "excluded"] }, ...within("saleDate", period) },
       { projection: { studentName: 1, invoiceNumber: 1, courseName: 1, saleDate: 1, month: 1, fee: 1, state: 1, reason: 1 }, maxTimeMS: QUERY_MS })
       .sort({ saleDate: -1 }).toArray(),
   ]);
-  return { has, earned: Math.round(lines.reduce((n, x) => n + (Number(x.amount) || 0), 0) * 100) / 100, lines, notCounted };
+  const lines = raw.map(({ collections, ...x }): CommissionLine => {
+    const by = lineByCurrency({ collections }, x);
+    return { ...x, amount: by.aed, amountInr: by.inr, plan: by.plan, planInr: by.planInr, rupeeShare: by.rupeeShare };
+  });
+  return {
+    has,
+    earned: cents(lines.reduce((n, x) => n + x.amount, 0)),
+    earnedInr: cents(lines.reduce((n, x) => n + x.amountInr, 0)),
+    lines,
+    notCounted,
+  };
 }
 
 /* ── A stat card's breakdown (the user, 2026-10-14: "when click on the stats card it need to show the breakdown") ── */
@@ -366,19 +410,26 @@ export async function salespersonBreakdown(code: string, userId: string, kind: s
   if (kind === "commission") {
     const c = await commissionOf(src, uid, period);
     const iso = (v: unknown) => (v ? new Date(v as string).toISOString() : null);
-    const byMonth = new Map<string, number>();
-    for (const x of c.lines) byMonth.set(String(x.month ?? ""), (byMonth.get(String(x.month ?? "")) ?? 0) + (Number(x.amount) || 0));
+    // AED and INR summed apart (2026-11-20).
+    const byMonth = new Map<string, { aed: number; inr: number }>();
+    for (const x of c.lines) {
+      const m = byMonth.get(String(x.month ?? "")) ?? { aed: 0, inr: 0 };
+      byMonth.set(String(x.month ?? ""), { aed: m.aed + x.amount, inr: m.inr + x.amountInr });
+    }
+    const ofRole = (role: string) => c.lines.filter((x) => x.role === role);
     return {
       kind,
       has: c.has,
       earned: c.earned,
-      byMonth: [...byMonth].map(([month, amount]) => ({ key: month, label: month, amount: Math.round(amount * 100) / 100 })).sort((a, b) => a.key.localeCompare(b.key)),
-      byRole: ["sales", "tl", "sm"].map((role) => ({ key: role, amount: Math.round(c.lines.filter((x) => x.role === role).reduce((n, x) => n + (Number(x.amount) || 0), 0) * 100) / 100,
-        count: c.lines.filter((x) => x.role === role).length })).filter((x) => x.count),
+      earnedInr: c.earnedInr,
+      byMonth: [...byMonth].map(([month, m]) => ({ key: month, label: month, amount: cents(m.aed), amountInr: cents(m.inr) })).sort((a, b) => a.key.localeCompare(b.key)),
+      byRole: ["sales", "tl", "sm"].map((role) => ({
+        key: role, amount: cents(ofRole(role).reduce((n, x) => n + x.amount, 0)), amountInr: cents(ofRole(role).reduce((n, x) => n + x.amountInr, 0)), count: ofRole(role).length,
+      })).filter((x) => x.count),
       rows: c.lines.map((x) => ({
         id: `${x.id}:${x.role}`, student: String(x.studentName ?? ""), enrollmentNumber: String(x.enrollmentNumber ?? ""), invoiceNumber: String(x.invoiceNumber ?? ""),
         course: String(x.courseName ?? ""), closer: String(x.closerName ?? ""), team: String(x.teamName ?? ""), saleDate: iso(x.saleDate), countedAt: iso(x.countedAt),
-        fee: Number(x.fee) || 0, role: String(x.role ?? ""), amount: Number(x.amount) || 0, note: String(x.note ?? ""),
+        fee: Number(x.fee) || 0, role: String(x.role ?? ""), amount: x.amount, amountInr: x.amountInr, rupeeShare: x.rupeeShare, note: String(x.note ?? ""),
       })),
       notCounted: c.notCounted.map((x) => ({
         id: String(x._id), student: String(x.studentName ?? ""), invoiceNumber: String(x.invoiceNumber ?? ""), course: String(x.courseName ?? ""),

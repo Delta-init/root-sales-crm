@@ -662,6 +662,8 @@ export interface SalespersonRow {
   revenue: number;
   /** AED credited for the period's sales (2026-10-14); missing from a server before. */
   commission?: number;
+  /** The part of it paid in rupees, in INR, apart from `commission` (2026-11-20); missing from a server before. */
+  commissionInr?: number;
 }
 
 export interface SalespeopleList {
@@ -675,8 +677,11 @@ export interface SalespersonDetail {
   period: { from: string | null; to: string | null };
   summary: { leads: number; closings: number; revenue: number; followUps: number; conversion: number };
   pendingNow: { newLeads: number; reminders: number; overdue: number };
-  /** AED credited for their sales closed in the period, and their closes not counted yet (2026-10-14). Null: the CRM has no commission. */
-  commission?: { earned: number; sales: number; notCounted: number } | null;
+  /**
+   * AED credited for their sales closed in the period, and their closes not counted yet (2026-10-14). Null: the CRM has
+   * no commission. `earnedInr`: the part paid in rupees, in INR, apart (2026-11-20); missing from a server before.
+   */
+  commission?: { earned: number; earnedInr?: number; sales: number; notCounted: number } | null;
   statuses: { status: string; label: string; count: number; percent: number }[];
   closings: { id: string; name: string; course: string; fee: number; paid: number; balance: number; date: string | null; status: string }[];
   payments: { leadId: string; name: string; amount: number; date: string | null; note: string }[];
@@ -1159,8 +1164,9 @@ export interface CommissionCompare {
     people: Array<{
       user: string;
       name: string;
-      crm: { role: string; level: string; percent: number; earned: number; balance: number; payable: number } | null;
-      root: { role: string; level: string; percent: number; salary: number; target: number; earned: number; balance: number; payable: number } | null;
+      /** The INR parts apart (2026-11-20): the CRM's null when its My Pay doesn't say; missing from a server before. */
+      crm: { role: string; level: string; percent: number; earned: number; balance: number; payable: number; earnedInr?: number | null; payableInr?: number | null } | null;
+      root: { role: string; level: string; percent: number; salary: number; target: number; earned: number; balance: number; payable: number; earnedInr?: number; payableInr?: number } | null;
       same: boolean;
     }>;
   };
@@ -1171,9 +1177,13 @@ export interface CommissionCompare {
       student: string;
       course: string;
       saleDate: string | null;
-      crm: { state: string; lines: Array<{ role: string; userName: string; amount: number }> };
-      root: { state: string; reason: string; lines: Array<{ role: string; userName: string; amount: number }> };
+      /** The share of what the sale has received that came in rupees, 0–1 (2026-11-20); missing from a server before. */
+      rupeeShare?: number;
+      crm: { state: string; lines: CommissionCompareLine[] };
+      root: { state: string; reason: string; lines: CommissionCompareLine[] };
       same: boolean;
     }>;
   };
 }
+/** A sale's line in the compare: its AED amount and its rupee amount apart (2026-11-20; `amountInr` missing from a server before). */
+export interface CommissionCompareLine { role: string; userName: string; amount: number; amountInr?: number }

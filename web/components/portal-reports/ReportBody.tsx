@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CseStatCard, type StatAccent } from "@/components/cses/CseStatCard";
 import { BreakdownDialog, Bars, type BreakdownTab } from "@/components/common/Breakdown";
-import { cn } from "@/lib/utils";
+import { cn, inrText } from "@/lib/utils";
 import { talkTime } from "@/lib/calls";
 
 /*
@@ -23,8 +23,12 @@ export interface Group {
   total: Num; people: (Num & Record<string, any>)[]; teams: (Num & Record<string, any>)[]; months: (Num & { month: string })[]; rows: Row[];
   available?: boolean; message?: string;
 }
-export type Fmt = "n" | "usd" | "aed" | "secs" | "pct" | "money" | "mins";
-export interface Col { key: string; label: string; fmt?: Fmt }
+export type Fmt = "n" | "usd" | "aed" | "secs" | "pct" | "money" | "mins" | "inr";
+/**
+ * `sub` (2026-11-20): a second part of the same figure kept apart, shown under it as "+ …" — a commission's INR part
+ * under its AED, never added into it.
+ */
+export interface Col { key: string; label: string; fmt?: Fmt; sub?: { key: string; fmt?: Fmt } }
 export interface Section<K extends string = string> {
   key: K; label: string; icon: LucideIcon; accent: StatAccent;
   headline: (t: Num) => string; headlineHint: (t: Num) => string;
@@ -45,6 +49,8 @@ export interface Section<K extends string = string> {
 export const n0 = (v: number | undefined) => (v ?? 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
 export const usd = (v: number | undefined) => `$${n0(v)}`;
 export const aed = (v: number | undefined) => `AED ${n0(v)}`;
+/** Whole rupees, Indian grouping (2026-11-20). */
+export const inr = (v: number | undefined) => inrText(v ?? 0);
 export const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : "—");
 export const when = (iso: string) => {
   const d = new Date(iso);
@@ -53,7 +59,7 @@ export const when = (iso: string) => {
 export const minutes = (v: number | undefined) => { const m = Math.round(v ?? 0); return m < 60 ? `${m} min` : `${Math.floor(m / 60)}h ${m % 60 ? `${m % 60}m` : ""}`.trim(); };
 export const monthName = (ym: string) => new Intl.DateTimeFormat("en-GB", { month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${ym}-01T00:00:00Z`));
 const fmtOf = (currency: string) => (v: number | undefined, f: Fmt = "n") =>
-  f === "usd" ? usd(v) : f === "aed" ? aed(v) : f === "money" ? `${currency} ${n0(v)}` : f === "secs" ? talkTime(v ?? 0) : f === "pct" ? `${n0(v)}%` : f === "mins" ? minutes(v) : n0(v);
+  f === "usd" ? usd(v) : f === "aed" ? aed(v) : f === "inr" ? inr(v) : f === "money" ? `${currency} ${n0(v)}` : f === "secs" ? talkTime(v ?? 0) : f === "pct" ? `${n0(v)}%` : f === "mins" ? minutes(v) : n0(v);
 
 type View = "people" | "teams" | "months" | "rows";
 
@@ -167,7 +173,15 @@ function GroupTable({ view, cols, g, fmt, heads, onPerson }: {
                 {view === "people" && <div className="text-xs text-muted-foreground">{x.team}{x.location === "bangalore" ? " · Bangalore" : ""}{x.active === false ? " · left" : ""}</div>}
                 {view === "teams" && x.location === "bangalore" && <div className="text-xs text-muted-foreground">Bangalore</div>}
               </td>
-              {cols.map((c) => <td key={c.key} className={cn("py-2 pr-3 text-right tabular-nums", !x[c.key] && "text-muted-foreground/60", x[c.key] < 0 && "text-rose-500")}>{x[c.key] ? fmt(x[c.key], c.fmt) : "—"}</td>)}
+              {cols.map((c) => {
+                const sub = c.sub && Math.round(x[c.sub.key] ?? 0) ? x[c.sub.key] : 0;
+                return (
+                  <td key={c.key} className={cn("py-2 pr-3 text-right tabular-nums", !x[c.key] && !sub && "text-muted-foreground/60", x[c.key] < 0 && "text-rose-500")}>
+                    {x[c.key] || sub ? fmt(x[c.key], c.fmt) : "—"}
+                    {sub ? <span className="block text-xs text-amber-600 dark:text-amber-400">+ {fmt(sub, c.sub!.fmt)}</span> : null}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
@@ -175,7 +189,12 @@ function GroupTable({ view, cols, g, fmt, heads, onPerson }: {
           <tfoot>
             <tr className="border-t border-border/60 font-semibold">
               <td className="pt-2 pr-3">Total</td>
-              {cols.map((c) => <td key={c.key} className="pt-2 pr-3 text-right tabular-nums">{fmt(g.total[c.key], c.fmt)}</td>)}
+              {cols.map((c) => (
+                <td key={c.key} className="pt-2 pr-3 text-right tabular-nums">
+                  {fmt(g.total[c.key], c.fmt)}
+                  {c.sub && Math.round(g.total[c.sub.key] ?? 0) ? <span className="block text-xs text-amber-600 dark:text-amber-400">+ {fmt(g.total[c.sub.key], c.sub.fmt)}</span> : null}
+                </td>
+              ))}
             </tr>
           </tfoot>
         )}

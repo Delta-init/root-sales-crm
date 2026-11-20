@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { BreakdownDialog, Bars, ListTable, type BreakdownTab } from "@/components/common/Breakdown";
 import { api } from "@/lib/axios";
 import type { SalespersonDetail } from "@/lib/types";
+import { aedInrText, inrText, showsInr } from "@/lib/utils";
 
 /*
  * The salesperson page's cards, each opened into what it is made of (the user,
@@ -21,11 +22,17 @@ type LeadsBreakdown = { bySource: Group[]; byStatus: Group[]; byDay: Group[]; tr
   rows: { id: string; name: string; phone: string; source: string; statusLabel: string; at: string | null; updatedAt: string | null }[] };
 type FollowupsBreakdown = { byDay: Group[]; byStatus: Group[]; truncated: boolean;
   rows: { id: string; name: string; phone: string; statusLabel: string; at: string | null; note: string; next: string | null }[] };
+/**
+ * `amount` in AED; `amountInr` the part clients paid in rupees, in INR, kept apart (2026-11-20; missing from a server
+ * before) — on a sale, `rupeeShare` of the fee came in rupees.
+ */
 type CommissionBreakdown = {
   earned: number;
-  byMonth: { key: string; label: string; amount: number }[];
-  byRole: { key: string; amount: number; count: number }[];
-  rows: { id: string; student: string; invoiceNumber: string; course: string; closer: string; team: string; saleDate: string | null; countedAt: string | null; fee: number; role: string; amount: number; note: string }[];
+  earnedInr?: number;
+  byMonth: { key: string; label: string; amount: number; amountInr?: number }[];
+  byRole: { key: string; amount: number; amountInr?: number; count: number }[];
+  rows: { id: string; student: string; invoiceNumber: string; course: string; closer: string; team: string; saleDate: string | null; countedAt: string | null; fee: number; role: string;
+    amount: number; amountInr?: number; rupeeShare?: number; note: string }[];
   notCounted: { id: string; student: string; invoiceNumber: string; course: string; saleDate: string | null; fee: number; state: string; reason: string }[];
 };
 const ROLE: Record<string, string> = { sales: "Sales", tl: "Team leader", sm: "Sales manager" };
@@ -139,16 +146,22 @@ export function SalespersonBreakdown({ card, d, code, userId, period, money, onC
   if (card === "commission") {
     const b = q.data as CommissionBreakdown | undefined;
     const aed = (n: number) => `AED ${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
-    title = `Commission · ${aed(d.commission?.earned ?? 0)}`;
-    description = "Credited for their sales closed in the period, once each finished its five steps (finance → LMS → CS → onboarded → MT5 bonus) — as the CRM's My Pay counts it. In AED.";
+    title = `Commission · ${aedInrText(d.commission?.earned ?? 0, d.commission?.earnedInr)}`;
+    description = "Credited for their sales closed in the period, once each finished its five steps (finance → LMS → CS → onboarded → MT5 bonus) — as the CRM's My Pay counts it. "
+      + "In AED; the part a client paid in rupees earns the course's INR amount instead, shown apart in INR.";
     tabs = [
       { key: "sales", label: "Each sale", content: ready && b ? (
         <ListTable head={["Student", "Course", "Their role", "Commission", "Fee", "Closed", "Counted"]}
           rows={b.rows.map((x) => [<span key="n" className="font-medium">{x.student || "—"}<span className="block text-xs font-normal text-muted-foreground">{[x.invoiceNumber, x.role !== "sales" && x.closer ? `closed by ${x.closer}` : ""].filter(Boolean).join(" · ")}</span></span>,
-            x.course || "—", ROLE[x.role] ?? x.role, <span key="a" className="font-medium text-emerald-500">{aed(x.amount)}</span>, aed(x.fee), gst(x.saleDate, false), gst(x.countedAt, false)])} empty="No commission credited for this period's sales yet." />
+            x.course || "—", ROLE[x.role] ?? x.role,
+            <span key="a" className="font-medium text-emerald-500">{aed(x.amount)}
+              {showsInr(x.amountInr) && <span className="block text-xs font-normal text-amber-600 dark:text-amber-400">+ {inrText(x.amountInr ?? 0)}</span>}
+              {!!x.rupeeShare && <span className="block text-xs font-normal text-muted-foreground">{Math.round(x.rupeeShare * 100)}% paid in rupees</span>}
+            </span>,
+            aed(x.fee), gst(x.saleDate, false), gst(x.countedAt, false)])} empty="No commission credited for this period's sales yet." />
       ) : waiting },
-      { key: "month", label: "By month", content: ready && b ? <Bars sort={false} rows={b.byMonth.map((x) => ({ key: x.key, label: x.label, value: x.amount, display: aed(x.amount) }))} empty="None yet." /> : waiting },
-      { key: "role", label: "By role", content: ready && b ? <Bars rows={b.byRole.map((x) => ({ key: x.key, label: ROLE[x.key] ?? x.key, value: x.amount, display: aed(x.amount), sub: `${x.count} sale${x.count === 1 ? "" : "s"}` }))} empty="None yet." /> : waiting },
+      { key: "month", label: "By month", content: ready && b ? <Bars sort={false} rows={b.byMonth.map((x) => ({ key: x.key, label: x.label, value: x.amount, display: aedInrText(x.amount, x.amountInr) }))} empty="None yet." /> : waiting },
+      { key: "role", label: "By role", content: ready && b ? <Bars rows={b.byRole.map((x) => ({ key: x.key, label: ROLE[x.key] ?? x.key, value: x.amount, display: aedInrText(x.amount, x.amountInr), sub: `${x.count} sale${x.count === 1 ? "" : "s"}` }))} empty="None yet." /> : waiting },
       { key: "waiting", label: `Not counted yet · ${d.commission?.notCounted ?? 0}`, content: ready && b ? (
         <ListTable head={["Student", "Course", "Fee", "Closed", "Why not yet"]}
           rows={b.notCounted.map((x) => [<span key="n" className="font-medium">{x.student || "—"}<span className="block text-xs font-normal text-muted-foreground">{x.invoiceNumber}</span></span>,
