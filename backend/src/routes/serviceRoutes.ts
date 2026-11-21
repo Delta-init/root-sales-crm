@@ -4,6 +4,7 @@ import { crmLeads } from "../controllers/crmLeadsController.js";
 import { crmCommissionForFinance } from "../controllers/crmCommissionController.js";
 import * as engine from "../controllers/commissionEngineController.js";
 import { servicePortalCorrection, servicePortalMentor, servicePortalScores } from "../controllers/mentorKpiController.js";
+import { dgoAchieverMetrics } from "../controllers/dgoAchieverController.js";
 import { authenticateAnyPortal, authenticateOrgService, authenticatePortalService } from "../middleware/orgServiceAuth.js";
 import { serviceClaim, serviceRewards } from "../services/rewardsService.js";
 import { sendError, sendSuccess } from "../utils/response.js";
@@ -32,6 +33,11 @@ const kpiPortals = authenticateAnyPortal(["commission", "lms"]);
 router.get("/mentor-kpis/scores", kpiPortals, servicePortalScores);
 router.get("/mentor-kpis/mentor", kpiPortals, servicePortalMentor);
 router.post("/mentor-kpis/corrections", kpiPortals, servicePortalCorrection);
+
+// DGO Points' monthly achievers in HRMS (2026-11-21): each person's month — Dubai sales and team totals as gift rewards
+// count them, who took a gift, CS course payments, mentor KPI scores. HRMS proves itself with the secret Root shares
+// with it (HRMS_SSO_SECRET, its ROOT_ERP_SECRET). Read-only.
+router.get("/dgo/achiever-metrics", authenticatePortalService("hrms"), dgoAchieverMetrics);
 
 // Server-to-server only: a CRM backend acting for its own signed-in user.
 // Never reachable from a browser — the secret lives in the CRM's environment.
