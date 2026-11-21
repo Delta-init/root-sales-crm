@@ -5,6 +5,7 @@ import { crmCommissionForFinance } from "../controllers/crmCommissionController.
 import * as engine from "../controllers/commissionEngineController.js";
 import { servicePortalCorrection, servicePortalMentor, servicePortalScores } from "../controllers/mentorKpiController.js";
 import { dgoAchieverMetrics } from "../controllers/dgoAchieverController.js";
+import { dgoKpiFacts } from "../controllers/dgoKpiFactsController.js";
 import { authenticateAnyPortal, authenticateOrgService, authenticatePortalService } from "../middleware/orgServiceAuth.js";
 import { serviceClaim, serviceRewards } from "../services/rewardsService.js";
 import { sendError, sendSuccess } from "../utils/response.js";
@@ -38,6 +39,9 @@ router.post("/mentor-kpis/corrections", kpiPortals, servicePortalCorrection);
 // count them, who took a gift, CS course payments, mentor KPI scores. HRMS proves itself with the secret Root shares
 // with it (HRMS_SSO_SECRET, its ROOT_ERP_SECRET). Read-only.
 router.get("/dgo/achiever-metrics", authenticatePortalService("hrms"), dgoAchieverMetrics);
+// DGO Points' automatic sales KPI points and review suggestions in HRMS (2026-11-21): one Dubai day of the daily
+// tracker per salesperson (Delta, Draw, Remote) and that day's five-star LMS reviews. The same door as above. Read-only.
+router.get("/dgo/kpi-facts", authenticatePortalService("hrms"), dgoKpiFacts);
 
 // Server-to-server only: a CRM backend acting for its own signed-in user.
 // Never reachable from a browser — the secret lives in the CRM's environment.
