@@ -22,9 +22,10 @@ import type {
  *
  * Each sheet posts its new rows here instead of into a CRM, and says which
  * sheet it is. Every lead is put in its segment of that sheet — Abhin's Meta
- * sheet is split by tab into UK, GCC and Hindi; Shoaib's Forex sheet and
- * TRADING-LEADS NITRO are split as one — checked against everyone already sent
- * or already in either CRM,
+ * sheet is split by tab into UK, GCC and Hindi; Shoaib's Forex sheet,
+ * TRADING-LEADS NITRO and the Digital Lead sheet are split as one — checked
+ * against everyone already sent or already in a CRM (for the Digital Lead
+ * sheet, Remote CRM only),
  * and given to whichever team is furthest behind its share of that segment.
  * It is then posted into that team's CRM through the CRM's own sheet intake,
  * which shares it out across its teams exactly as it did when the sheet
@@ -34,7 +35,7 @@ import type {
  */
 
 export const ORGS: TrafficOrg[] = ["delta", "draw", "remote"];
-export const SHEETS: TrafficSheet[] = ["abhin", "shoaib", "trading-leads-nitro"];
+export const SHEETS: TrafficSheet[] = ["abhin", "shoaib", "trading-leads-nitro", "digital-lead"];
 const SHORT: Record<TrafficOrg, string> = { delta: "Delta", draw: "Draw", remote: "Remote" };
 
 export const isSheet = (v: unknown): v is TrafficSheet => SHEETS.includes(v as TrafficSheet);
@@ -57,13 +58,18 @@ interface SheetConfig {
   /** The segment a row from this sheet belongs to, from the tab it is on. */
   segmentOf: (tab: string) => string;
   /** What the CRM is told about where the lead came from, in its ad_creative field. */
-  creative: (lead: Pick<ITrafficLead, "adName" | "adset" | "knowledge">) => string;
+  creative: (lead: Pick<ITrafficLead, "adName" | "adset" | "knowledge" | "contactTime">) => string;
   /** The split the first time, before anybody has changed it. */
   teams: Record<string, TrafficShare[]>;
   /** Who each CRM is told added its leads, where not the account the first two sheets' scripts named. */
   reporters?: Partial<Record<TrafficOrg, string>>;
   /** Rows without a created time are taken, dated when they reach Root — rows typed into the sheet by hand. */
   undated?: boolean;
+  /**
+   * The CRMs that count as already having the person — every CRM unless set. A number found only in another CRM
+   * is not a duplicate for this sheet: it is split as a new lead.
+   */
+  checkOrgs?: TrafficOrg[];
 }
 
 const team = (
@@ -154,6 +160,27 @@ export const SHEET_CONFIG: Record<TrafficSheet, SheetConfig> = {
     teams: { all: [team("delta", TEAM_NAME.delta, "delta", 100)] },
     reporters: { delta: "" },
     undated: true,
+  },
+  /*
+   * The Digital Lead sheet (the user, 2026-11-23): Meta's Digital Academy UAE form, every lead to Remote CRM with
+   * nobody named, labelled DIGITAL LEAD — Remote CRM's own source rule (its Teams page) gives that source to the
+   * Digital Academy team only. Someone already in Delta or Draw is still a new lead here: only Remote CRM, and
+   * leads this route sent there, count as having them. The form's "when can we contact you" answer goes into the
+   * lead's note.
+   */
+  "digital-lead": {
+    name: "Digital Lead",
+    about: "Meta's Digital Academy form — every lead to Remote CRM's Digital Academy team.",
+    segments: [{ key: "all", label: "All leads", source: "DIGITAL LEAD" }],
+    segmentOf: () => "all",
+    creative: (lead) =>
+      [
+        lead.contactTime && `Best time to contact: ${lead.contactTime}`,
+        lead.adName && `Ad: ${lead.adName}`,
+        lead.adset && `Ad set: ${lead.adset}`,
+      ].filter(Boolean).join("\n"),
+    teams: { all: [team("digital-academy", "Digital Academy team", "remote", 100)] },
+    checkOrgs: ["remote"],
   },
 };
 
@@ -315,6 +342,8 @@ export const intakeRowSchema = z.object({
   adset_name: text(300),
   /** The form's "current level of trading knowledge" answer, where it asks. */
   knowledge: text(300),
+  /** The form's "when can we contact you" answer, where it asks. */
+  contact_time: text(300),
   is_organic: text(10),
 });
 
@@ -333,6 +362,7 @@ interface ParsedRow {
   adName: string;
   adset: string;
   knowledge: string;
+  contactTime: string;
   isOrganic: boolean;
   createdTime: Date | null;
   /** Why the lead cannot be sent, if it cannot. */
@@ -380,6 +410,7 @@ function parseRow(raw: z.output<typeof intakeRowSchema>, sheet: TrafficSheet): P
     adName: raw.ad_name,
     adset: raw.adset_name,
     knowledge: isTest(raw.knowledge) ? "" : raw.knowledge,
+    contactTime: isTest(raw.contact_time) ? "" : raw.contact_time,
     isOrganic: raw.is_organic.toLowerCase() === "true",
     createdTime,
     problem,
@@ -446,18 +477,21 @@ interface KnownLead {
  * they filled in a form again. A CRM that cannot be read is named rather than
  * guessed about: its own duplicate check still runs when the lead is posted.
  */
-async function knownInCrms(tails: string[]): Promise<{ known: Map<string, KnownLead>; unreadable: TrafficOrg[] }> {
+async function knownInCrms(
+  tails: string[],
+  orgs: TrafficOrg[] = ORGS,
+): Promise<{ known: Map<string, KnownLead>; unreadable: TrafficOrg[] }> {
   const known = new Map<string, KnownLead>();
   const unreadable: TrafficOrg[] = [];
   const wanted = [...new Set(tails.filter((t) => t.length === 9))];
   if (!wanted.length) return { known, unreadable };
 
   const { sources, failures } = await getSources();
-  for (const f of failures) if ((ORGS as string[]).includes(f.code)) unreadable.push(f.code as TrafficOrg);
+  for (const f of failures) if ((orgs as string[]).includes(f.code)) unreadable.push(f.code as TrafficOrg);
 
   await Promise.all(
     sources
-      .filter((s) => (ORGS as string[]).includes(s.org.code))
+      .filter((s) => (orgs as string[]).includes(s.org.code))
       .map(async (s) => {
         const org = s.org.code as TrafficOrg;
         try {
@@ -536,7 +570,9 @@ export async function intake(
     const rule = await getRule(sheet);
     const parsed = rows.map((r) => intakeRowSchema.safeParse(r));
     const tails = parsed.flatMap((p) => (p.success ? [phoneTail(cleanPhone(p.data.phone_number))] : []));
-    const { known, unreadable } = await knownInCrms(tails);
+    // Who counts as already having the person: every CRM, unless this sheet names some.
+    const checkOrgs = SHEET_CONFIG[sheet].checkOrgs ?? ORGS;
+    const { known, unreadable } = await knownInCrms(tails, checkOrgs);
     const counts: Record<string, Record<string, number>> = {};
 
     for (let i = 0; i < parsed.length; i++) {
@@ -560,7 +596,7 @@ export async function intake(
         sheet, sourceKey: row.sourceKey, metaId: row.metaId, tab: row.tab, segment: row.segment, source: row.source,
         name: row.name, phone: row.phone, phone9: row.phone9, email: row.email, platform: row.platform,
         campaign: row.campaign, adName: row.adName, adset: row.adset, knowledge: row.knowledge,
-        isOrganic: row.isOrganic, createdTime: row.createdTime,
+        contactTime: row.contactTime, isOrganic: row.isOrganic, createdTime: row.createdTime,
       };
       // Every field a decision sets, so a row decided again keeps nothing from last time.
       const none = { share: "", destination: null, assignTo: null, ruleVersion: 0, crmLeadId: "", claimedAt: null };
@@ -572,7 +608,7 @@ export async function intake(
         // Whichever sheet they came in on before: one person, one CRM.
         const prior = await TrafficLead.findOne({
           phone9: row.phone9,
-          destination: { $ne: null },
+          destination: { $ne: null, $in: checkOrgs },
           status: { $ne: "invalid" },
           sourceKey: { $ne: row.sourceKey },
         }).sort({ receivedAt: -1 });

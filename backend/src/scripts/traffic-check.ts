@@ -93,6 +93,16 @@ async function call(method: string, path: string, body?: unknown, headers: Recor
   return { status: r.status, body: await r.json().catch(() => ({})) };
 }
 const post = (body: unknown, key = SHEET_KEY) => call("POST", "/traffic/intake", body, key ? { "x-traffic-key": key } : {});
+/**
+ * The sheet endpoints allow 60 calls a minute (routes/trafficRoutes.ts). Before a section that needs `n` of them, wait
+ * out the window if fewer are left, so the checks never depend on how fast the run before them went.
+ */
+async function sheetBudget(n: number): Promise<void> {
+  const r = await fetch(`${ROOT}/traffic/intake/ping`, { headers: { "x-traffic-key": SHEET_KEY } });
+  const left = Number(r.headers.get("ratelimit-remaining") ?? 60);
+  const reset = Number(r.headers.get("ratelimit-reset") ?? 0);
+  if (left < n) await sleep((reset + 1) * 1000);
+}
 /** As Abhin's deployed script posts: without naming the sheet. */
 const abhin = (rows: unknown, key = SHEET_KEY) => post({ rows }, key);
 const shoaib = (rows: unknown) => post({ sheet: "shoaib", rows });
@@ -701,7 +711,7 @@ async function main() {
   const dsRules = (await call("GET", "/traffic/rules", undefined, root)).body?.data;
   const ds = sheetIn(dsRules, "trading-leads-nitro");
   check("it is the third sheet, TRADING-LEADS NITRO: one split, all of it to the Delta sales team, with its own source label",
-    dsRules?.sheets?.map((s: Json) => s.key).join(",") === "abhin,shoaib,trading-leads-nitro" && ds?.name === "TRADING-LEADS NITRO"
+    dsRules?.sheets?.map((s: Json) => s.key).slice(0, 3).join(",") === "abhin,shoaib,trading-leads-nitro" && ds?.name === "TRADING-LEADS NITRO"
     && ds?.segments?.length === 1 && segOf(ds, "all")?.source === "TRADING-LEADS NITRO" && show(ds?.uses) === show(["delta"])
     && show(segOf(ds, "all")?.shares?.map((s: Json) => [s.name, s.org, s.percent])) === show([["Delta sales team", "delta", 100]]), show(ds));
   const dsRule = await db.collection("trafficrules").findOne({ key: "trading-leads-nitro" });
@@ -763,6 +773,73 @@ async function main() {
   const shoaibNoDate = await shoaib([srow("+966540000099", { created_time: "" })]);
   check("Shoaib's sheet still turns a row without a created time away", shoaibNoDate.body?.data?.results?.[0]?.label === "❌ Invalid: No created time", show(shoaibNoDate.body));
 
+  // ── The Digital Lead sheet (2026-11-23) ─────────────────────────────────────
+  step("The Digital Lead sheet — every lead to Remote CRM for its Digital Academy team; only Remote counts as having them");
+  await sheetBudget(10);
+  const dlRules = (await call("GET", "/traffic/rules", undefined, root)).body?.data;
+  const dl = sheetIn(dlRules, "digital-lead");
+  check("it is the fourth sheet, Digital Lead: one split, all of it to Remote CRM's Digital Academy team, source DIGITAL LEAD",
+    dlRules?.sheets?.map((s: Json) => s.key).join(",") === "abhin,shoaib,trading-leads-nitro,digital-lead" && dl?.name === "Digital Lead"
+    && dl?.segments?.length === 1 && segOf(dl, "all")?.source === "DIGITAL LEAD" && show(dl?.uses) === show(["remote"])
+    && show(segOf(dl, "all")?.shares?.map((s: Json) => [s.name, s.org, s.percent, s.assignTo ?? null])) === show([["Digital Academy team", "remote", 100, null]]), show(dl));
+  const dlPing = await call("GET", "/traffic/intake/ping?sheet=digital-lead", undefined, { "x-traffic-key": SHEET_KEY });
+  check("its connection test names it, and only Remote CRM", dlPing.status === 200 && dlPing.body?.data?.name === "Digital Lead"
+    && show(dlPing.body?.data?.crms?.map((c: Json) => c.code)) === show(["remote"]), show(dlPing.body));
+  // As sheets/lead-traffic.gs builds them from Meta's Digital Academy form: its available-time answer as contact_time.
+  const dlRow = (n: number, extra: Record<string, unknown> = {}) => ({
+    id: `l:88000${n}`, tab: "Sheet1", created_time: `2026-11-21T0${n}:17:22-05:00`, full_name: `Digital ${n}`,
+    phone_number: `p:+97155880000${n}`, email: "", platform: "ig", campaign_name: "Digital Academy UAE 21-11-2026",
+    ad_name: "Digital Academy UAE 21-11-2026 - Copy", adset_name: "Digital Academy UAE 21-11-2026", knowledge: "",
+    contact_time: "Nov 28, 2026 at 5:00 PM GST", is_organic: "false", ...extra,
+  });
+  const dlTest = dlRow(0, {
+    id: "l:880009", full_name: "<test lead: dummy data for full_name>", phone_number: "p:<test lead: dummy data for phone_number>",
+    contact_time: "<test lead: dummy data for what's_your_available_time_to_contact_you_?>", is_organic: "true", platform: "",
+  });
+  const dlPost = (rows: unknown[]) => post({ sheet: "digital-lead", rows });
+  const [deltaAtDl, drawAtDl, remoteAtDl] = [crm.delta.rows.length, crm.draw.rows.length, crm.remote.rows.length];
+  const dl1 = await dlPost([dlTest, dlRow(1), dlRow(2, { contact_time: "2026-11-21T23:25:50+0400" })]);
+  const dlRes = (dl1.body?.data?.results ?? []) as Json[];
+  check("Meta's test lead is turned away; the two real ones go to Remote CRM",
+    dl1.status === 200 && dlRes[0]?.label === "❌ Invalid: Meta test lead"
+    && dlRes.slice(1).every((r) => r.status === "sent" && r.destination === "remote" && r.label === "✅ Remote"), show(dl1.body));
+  check("…nothing to Delta or Draw", crm.delta.rows.length === deltaAtDl && crm.draw.rows.length === drawAtDl);
+  const toRemoteDl = crm.remote.rows.slice(remoteAtDl);
+  const d1 = toRemoteDl.find((r) => r.full_name === "Digital 1");
+  check("Remote CRM gets source DIGITAL LEAD and nobody named — its own source rule picks the Digital Academy team",
+    d1?.source === "DIGITAL LEAD" && !("assigned_to" in d1) && !("reporter" in d1) && d1?.phone_number === "+971558800001"
+    && d1?.id === "l:880001" && d1?.campaign_name === "Digital Academy UAE 21-11-2026" && d1?.platform === "instagram"
+    && d1?.created_time === new Date("2026-11-21T01:17:22-05:00").toISOString(), show(d1));
+  check("…with the time they asked to be contacted, the ad and the ad set in the lead's note",
+    d1?.ad_creative === "Best time to contact: Nov 28, 2026 at 5:00 PM GST\nAd: Digital Academy UAE 21-11-2026 - Copy\nAd set: Digital Academy UAE 21-11-2026",
+    show(d1?.ad_creative));
+  const dlKnown = await dlPost([
+    dlRow(3, { full_name: "Known to Delta", phone_number: "0501111111" }),
+    dlRow(4, { full_name: "Known to Draw", phone_number: "+971502222222" }),
+    dlRow(5, { full_name: "Nitro again", phone_number: "+971558770001" }),
+    dlRow(6, { full_name: "Known to Remote", phone_number: "+971509999001" }),
+  ]);
+  const dk = (dlKnown.body?.data?.results ?? []) as Json[];
+  check("somebody only Delta or Draw has — even one Root sent to Delta from another sheet — is a new lead here, sent to Remote",
+    dk.slice(0, 3).every((r) => r.status === "sent" && r.label === "✅ Remote")
+    && crm.delta.rows.length === deltaAtDl && crm.draw.rows.length === drawAtDl, show(dk));
+  check("somebody Remote CRM already has is a duplicate there — passed on to Remote, nowhere else",
+    dk[3]?.status === "duplicate" && dk[3]?.destination === "remote" && dk[3]?.label === "🔁 Came in again · Remote"
+    && crm.remote.rows.length === remoteAtDl + 6, show(dk[3]));
+  const dlAgain = await dlPost([dlRow(1), dlRow(2)]);
+  check("sent again: the same answers, nothing posted twice",
+    (dlAgain.body?.data?.results ?? []).every((r: Json) => r.label === "✅ Remote") && crm.remote.rows.length === remoteAtDl + 6, show(dlAgain.body));
+  const otherSheet = await shoaib([srow("+971558800002")]);
+  check("the other sheets still count Remote CRM: the same person through Shoaib's sheet stays Remote's",
+    otherSheet.body?.data?.results?.[0]?.destination === "remote" && otherSheet.body?.data?.results?.[0]?.status === "duplicate", show(otherSheet.body));
+  const dlSum = (await call("GET", "/traffic/summary?sheet=digital-lead", undefined, root)).body?.data;
+  const dlTeam = seg(dlSum, "all")?.shares?.find((x: Json) => x.key === "digital-academy");
+  check("the page counts them: 5 to the Digital Academy team (100% of its 100%), 1 duplicate, 1 invalid",
+    dlSum?.totals?.sent === 5 && dlTeam?.split === 5 && dlTeam?.actual === 100 && dlTeam?.target === 100
+    && dlSum?.totals?.duplicates === 1 && dlSum?.totals?.invalid === 1, show(dlSum?.totals));
+  const dlStored = await db.collection("trafficleads").findOne({ sourceKey: "meta:l:880002" });
+  check("Root keeps the contact time with the lead", dlStored?.contactTime === "2026-11-21T23:25:50+0400", show(dlStored?.contactTime));
+
   // ── The Leads list, by the page's dates ────────────────────────────────────
   step("The Leads list by date — the page's Today, 30 days, This month and Custom");
   const dated = (n: number, at: string, extra: Record<string, unknown> = {}) =>
@@ -802,7 +879,7 @@ async function main() {
   const gulfNow = new Date(Date.now() + 4 * 60 * 60_000).toISOString().slice(0, 10);
   const span = `from=2020-01-01&to=${gulfNow}`;
   const inSpan = { receivedAt: { $gte: new Date("2019-12-31T20:00:00Z"), $lt: new Date(Date.parse(`${gulfNow}T00:00:00+04:00`) + 24 * 60 * 60_000) } };
-  const KEYS = ["abhin", "shoaib", "trading-leads-nitro"];
+  const KEYS = ["abhin", "shoaib", "trading-leads-nitro", "digital-lead"];
   const TOTALS = ["received", "sent", "duplicates", "invalid", "waiting", "failed"];
   const leadsIn = (q: Record<string, unknown>) => db.collection("trafficleads").countDocuments({ sheet: { $in: KEYS }, ...inSpan, ...q });
   const allSum = (await call("GET", `/traffic/summary?sheet=all&${span}`, undefined, root)).body?.data;
@@ -895,6 +972,7 @@ async function main() {
   }
 
   step("Case 8 — each row's status in its CRM, for the sheet's CRM Status column (2026-11-16)");
+  await sheetBudget(15);
   {
     const statuses = (rows: unknown, extra: Record<string, unknown> = {}, key = SHEET_KEY) =>
       call("POST", "/traffic/statuses", { sheet: "shoaib", rows, ...extra }, key ? { "x-traffic-key": key } : {});

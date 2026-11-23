@@ -7,8 +7,10 @@
  * set for this sheet on Root's Lead traffic page, and says where each one
  * went. The sheet is told which it is by the SHEET_ID Script property:
  *
- *   abhin    Abhin's automated Meta lead sheet — split by tab: UK, GCC, Hindi
- *   shoaib   Shoaib's Forex leads sheet — one split for the whole sheet
+ *   abhin         Abhin's automated Meta lead sheet — split by tab: UK, GCC, Hindi
+ *   shoaib        Shoaib's Forex leads sheet — one split for the whole sheet
+ *   digital-lead  the Digital Lead sheet (Meta's Digital Academy form) — every
+ *                 lead to Remote CRM, source DIGITAL LEAD (2026-11-23)
  *
  * The DRAW LEAD SHEET (TRADING-LEADS NITRO) has a script of its own,
  * draw-lead-sheet.gs: its Meta rows are not laid out under its headers, so they
@@ -26,15 +28,15 @@
  * Columns are found BY HEADER NAME, so a tab whose columns are in another
  * order (the GCC tab has phone_number before email) works the same as the rest.
  * Any tab with full_name, a phone column and created_time is a lead tab. The
- * ad set (adset_name) and a trading-knowledge question column are sent too,
- * where a sheet has them.
+ * ad set (adset_name), a trading-knowledge question column and a "when can we
+ * contact you" (available time) column are sent too, where a sheet has them.
  *
  * Setup, once per sheet:
  *   1. Extensions → Apps Script: replace the old script's code with this file.
  *   2. Project Settings → Script properties:
  *        ROOT_API_URL   https://root-api-sales-crm.deltainstitutions.com
  *        TRAFFIC_KEY    the LEAD_TRAFFIC_SHEET_KEY set on the Root server
- *        SHEET_ID       abhin, or shoaib
+ *        SHEET_ID       abhin, shoaib or digital-lead
  *   3. Reload the sheet. 🔀 Lead traffic → Test connection (it names the
  *      sheet Root thinks this is), then Setup triggers (which also removes the
  *      old script's triggers).
@@ -114,6 +116,10 @@ function headerMap_(sheet) {
     ad: find(function (x) { return x === "ad_name"; }),
     adset: find(function (x) { return x === "adset_name"; }),
     knowledge: find(function (x) { return x.indexOf("knowledge") !== -1; }),
+    // Meta's "what's_your_available_time_to_contact_you_?" (the Digital Lead sheet), and the like.
+    contactTime: find(function (x) {
+      return x.indexOf("available_time") !== -1 || x.indexOf("time_to_contact") !== -1 || x.indexOf("best_time") !== -1;
+    }),
     organic: find(function (x) { return x === "is_organic"; }),
     sync: find(function (x) { return x === SYNC_HEADER.toLowerCase(); }),
     status: find(function (x) { return x === STATUS_HEADER.toLowerCase(); }),
@@ -172,6 +178,7 @@ function buildBatch_(sheet, pendingOnly, create) {
         ad_name: cell(row, m.ad),
         adset_name: cell(row, m.adset),
         knowledge: cell(row, m.knowledge),
+        contact_time: cell(row, m.contactTime),
         is_organic: cell(row, m.organic),
       },
     });

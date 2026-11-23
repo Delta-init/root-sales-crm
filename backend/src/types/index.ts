@@ -278,7 +278,7 @@ export interface IDailyEntry extends Document {
 
 // ─── Lead traffic ─────────────────────────────────────────────────────────────
 /** A lead sheet that posts into lead traffic. Each has its own split. */
-export type TrafficSheet = "abhin" | "shoaib" | "trading-leads-nitro";
+export type TrafficSheet = "abhin" | "shoaib" | "trading-leads-nitro" | "digital-lead";
 
 /** The CRMs a lead can be sent to. Registry codes, so names and addresses come from there. */
 export type TrafficOrg = "delta" | "draw" | "remote";
@@ -356,6 +356,8 @@ export interface ITrafficLead extends Document {
   /** The ad set, and the lead's answer to the form's trading-knowledge question, when the sheet has them. */
   adset: string;
   knowledge: string;
+  /** The form's "when can we contact you" answer, where it asks (the Digital Lead sheet, 2026-11-23). */
+  contactTime: string;
   isOrganic: boolean;
   createdTime: Date | null;
   /** The team the split gave it to; blank when it went where the person already was. */

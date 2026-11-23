@@ -17,7 +17,7 @@ const assigneeSchema = new Schema(
 const trafficLeadSchema = new Schema<ITrafficLead>(
   {
     // Leads from before there was more than one sheet were all Abhin's.
-    sheet: { type: String, enum: ["abhin", "shoaib", "trading-leads-nitro"], default: "abhin" },
+    sheet: { type: String, enum: ["abhin", "shoaib", "trading-leads-nitro", "digital-lead"], default: "abhin" },
     sourceKey: { type: String, required: true, unique: true },
     metaId: { type: String, default: "" },
     tab: { type: String, default: "" },
@@ -32,6 +32,7 @@ const trafficLeadSchema = new Schema<ITrafficLead>(
     adName: { type: String, default: "" },
     adset: { type: String, default: "" },
     knowledge: { type: String, default: "" },
+    contactTime: { type: String, default: "" },
     isOrganic: { type: Boolean, default: false },
     createdTime: { type: Date, default: null },
     // The team the split chose; blank when the lead went back to where the person already was.
