@@ -3,11 +3,13 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
-import { Copy, ExternalLink, MonitorPlay } from "lucide-react";
+import { Copy, ExternalLink, FileSpreadsheet, Loader2, MonitorPlay } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SalesTvBoard } from "@/components/sales-tv/SalesTvBoard";
 import { api } from "@/lib/axios";
 import type { SalesTvData, SalesTvFetcher } from "@/lib/salesTv";
+import { downloadXlsx } from "@/lib/xlsx";
+import { managerTvSheets, type ManagerTvExport } from "@/lib/managerTvExcel";
 
 /*
  * Manager TV, signed in (the user, 2026-10-23): the Sales TV — Dubai Sales, Draw and Remote — with the CS team as
@@ -33,6 +35,23 @@ export default function ManagerTvPage() {
     return () => window.removeEventListener("tv-month", at);
   }, []);
 
+  // Export Excel (2026-11-25): the month on screen — an overview with the TV's figures, then a sheet per person with
+  // their payments. Here only: the public link has none.
+  const [exporting, setExporting] = useState(false);
+  const exportExcel = async () => {
+    setExporting(true);
+    try {
+      const month = new URLSearchParams(window.location.search).get("month");
+      const { data } = await api.get<{ data: ManagerTvExport }>("/manager-tv/export", { params: month ? { month } : undefined, timeout: 120_000 });
+      downloadXlsx(`manager-tv-${data.data.month}`, managerTvSheets(data.data));
+      toast.success("Excel downloaded");
+    } catch (err) {
+      toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "The export didn't work — try again");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(link);
@@ -54,6 +73,9 @@ export default function ManagerTvPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={exportExcel} disabled={exporting}>
+            {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />} Export Excel
+          </Button>
           <Button variant="outline" size="sm" onClick={copy} disabled={!link}>
             <Copy className="h-4 w-4" /> Copy link
           </Button>
