@@ -1,5 +1,5 @@
-import crypto from "node:crypto";
 import { getSources } from "./crmConnections.js";
+import { callTarget, resolveTarget } from "../lib/targetClient.js";
 
 /*
  * Finance's old books on the Manager TV (the user, 2026-11-25): each CRM counts the old-books invoices whose
@@ -7,9 +7,8 @@ import { getSources } from "./crmConnections.js";
  * through the CRMs' answers). What no CRM can count — a salesperson who is no user in any CRM Root reads (Arya
  * Krishnan in November, AED 1,000) — is the Manager TV's own line, "Old books — no CRM user", and in its total.
  *
- * Asked of finance (GET /api/v1/integrations/old-books/payments?from=, signed like the CRMs' calls: FINANCE_API_URL —
- * else FINANCE_HQ_API_URL — FINANCE_CLIENT_ID and FINANCE_INTEGRATION_SECRET, the same client the CRMs use) at most
- * every five minutes per month. Finance away or not configured: the line is 0, with its reason, and the rest of the
+ * Asked of finance (its /service/old-books/payments?from=, as Root asks finance everything: FINANCE_HQ_API_URL and
+ * FINANCE_HQ_SSO_SECRET) at most every five minutes per month. Finance away or not configured: the line is 0, with its reason, and the rest of the
  * TV carries on. Only payments from OLD_BOOKS_FROM (default 1 Nov 2026) count, as in the CRMs.
  */
 
@@ -26,41 +25,20 @@ export interface OldBooksLine {
 }
 
 const EVERY_MS = 5 * 60_000;
-const TIMEOUT_MS = 8_000;
 const from = () => (/^\d{4}-\d{2}-\d{2}$/.test(process.env.OLD_BOOKS_FROM ?? "") ? process.env.OLD_BOOKS_FROM! : "2026-11-01");
-const base = () => (process.env.FINANCE_API_URL || process.env.FINANCE_HQ_API_URL || "").replace(/\/+$/, "").replace(/\/api\/v1$/, "");
-const configured = () => Boolean(base() && process.env.FINANCE_CLIENT_ID && process.env.FINANCE_INTEGRATION_SECRET);
-
-/** METHOD \n PATH_WITH_QUERY \n TIMESTAMP \n NONCE \n sha256(body) — finance's lib/signing.ts, as the CRMs sign. */
-export function signRequest(secret: string, method: string, url: string, timestamp: string, nonce: string, rawBody: string): string {
-  const bodyHash = crypto.createHash("sha256").update(rawBody).digest("hex");
-  return crypto.createHmac("sha256", secret).update([method.toUpperCase(), url, timestamp, nonce, bodyHash].join("\n")).digest("hex");
-}
-
+/**
+ * Finance is asked as Root asks it everything else (2026-11-25, the user: "it already has them — use these"): its
+ * finance-hq target — FINANCE_HQ_API_URL and the secret Root shares with it, FINANCE_HQ_SSO_SECRET — at finance's
+ * /service/old-books/payments. No other settings.
+ */
 async function fetchOldBooks(since: string): Promise<OldBooksInvoice[]> {
-  const path = `/api/v1/integrations/old-books/payments?from=${encodeURIComponent(since)}`;
-  const timestamp = String(Date.now());
-  const nonce = crypto.randomBytes(16).toString("hex");
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const target = await resolveTarget("finance-hq");
   try {
-    const res = await fetch(`${base()}${path}`, {
-      headers: {
-        "x-delta-client": process.env.FINANCE_CLIENT_ID!,
-        "x-delta-timestamp": timestamp,
-        "x-delta-nonce": nonce,
-        "x-delta-signature": signRequest(process.env.FINANCE_INTEGRATION_SECRET!, "GET", path, timestamp, nonce, ""),
-      },
-      signal: controller.signal,
-    });
-    if (res.status === 404) throw new Error("Finance's server needs updating — it has no old-books list yet");
-    if (!res.ok) throw new Error(`Finance answered ${res.status}`);
-    const body = (await res.json()) as { data?: OldBooksInvoice[] };
-    return Array.isArray(body.data) ? body.data : [];
+    return await callTarget<OldBooksInvoice[]>(target, `/old-books/payments?from=${encodeURIComponent(since)}`, { method: "GET", verb: "share its old books" });
   } catch (err) {
-    throw (err as Error)?.name === "AbortError" ? new Error("Finance didn't answer in time") : err;
-  } finally {
-    clearTimeout(timer);
+    const msg = (err as Error)?.message ?? "";
+    if (/refused with 404|Not found/i.test(msg)) throw new Error("Finance's server needs updating — it has no old-books list yet");
+    throw err;
   }
 }
 
@@ -87,9 +65,7 @@ export async function oldBooksNoCrmUser(month: string): Promise<OldBooksLine> {
   if (running) return running;
   const job = (async (): Promise<OldBooksLine> => {
     let line: OldBooksLine;
-    if (!configured()) {
-      line = { monthAed: 0, rows: [], status: "off", error: "Finance isn't configured on this server (FINANCE_API_URL, FINANCE_CLIENT_ID, FINANCE_INTEGRATION_SECRET)" };
-    } else {
+    {
       try {
         const start = `${month}-01` > from() ? `${month}-01` : from();
         const [list, emails] = await Promise.all([fetchOldBooks(start), crmEmails()]);

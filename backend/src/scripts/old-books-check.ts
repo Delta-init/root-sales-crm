@@ -30,29 +30,27 @@ function check(label: string, ok: boolean, detail: unknown = "") {
 }
 const section = (s: string) => console.log(`\n${s}`);
 
-/* ── A stand-in finance: the old books' list, signed as finance checks it ── */
+/* ── A stand-in finance: the old books' list, behind the secret Root shares with it ── */
 const SECRET = "root-old-books-check-secret-long";
-const CLIENT = "root-check";
 let invoices: any[] = [];
 let away = false, asked = 0, badSignatures = 0;
-const fin = Bun.serve({
+// Run by bun; typed here without bun's types, which Root doesn't install.
+const fin = (globalThis as unknown as { Bun: { serve(o: { port: number; fetch(req: Request): Response }): { port: number; stop(force?: boolean): void } } }).Bun.serve({
   port: 0,
-  fetch(req) {
+  fetch(req: Request) {
     const url = new URL(req.url);
-    const ts = req.headers.get("x-delta-timestamp") ?? "", nonce = req.headers.get("x-delta-nonce") ?? "";
-    const canonical = [req.method, url.pathname + url.search, ts, nonce, crypto.createHash("sha256").update("").digest("hex")].join("\n");
-    if (req.headers.get("x-delta-client") !== CLIENT || req.headers.get("x-delta-signature") !== crypto.createHmac("sha256", SECRET).update(canonical).digest("hex")) {
+    if (req.headers.get("x-portal-secret") !== SECRET) {
       badSignatures++;
-      return Response.json({ error: { message: "Bad signature" } }, { status: 401 });
+      return Response.json({ error: { message: "Bad secret" } }, { status: 401 });
     }
     if (away) return Response.json({ error: { message: "down" } }, { status: 503 });
-    if (url.pathname !== "/api/v1/integrations/old-books/payments") return Response.json({ error: "Not found" }, { status: 404 });
+    if (url.pathname !== "/api/v1/service/old-books/payments") return Response.json({ error: { message: "Not found" } }, { status: 404 });
     asked++;
     const from = url.searchParams.get("from") ?? "";
-    return Response.json({ data: invoices.filter((i) => i.payments.some((p: any) => p.paidOn >= from)) });
+    return Response.json({ success: true, data: invoices.filter((i) => i.payments.some((p: any) => p.paidOn >= from)) });
   },
 });
-Object.assign(process.env, { FINANCE_API_URL: `http://127.0.0.1:${fin.port}/api/v1`, FINANCE_CLIENT_ID: CLIENT, FINANCE_INTEGRATION_SECRET: SECRET, OLD_BOOKS_FROM: "" });
+Object.assign(process.env, { FINANCE_HQ_API_URL: `http://127.0.0.1:${fin.port}/api/v1`, FINANCE_HQ_SSO_SECRET: SECRET, OLD_BOOKS_FROM: "" });
 
 await mongoose.connect(process.env.MONGODB_URI!);
 await mongoose.connection.dropDatabase();
@@ -63,6 +61,7 @@ const { Organization } = await import("../models/Organization.js");
 for (const [code, name, currency, sortOrder] of [["delta", "Delta", "AED", 1], ["remote", "Remote", "AED", 2], ["banglore", "Banglore", "INR", 3]] as const) {
   await Organization.create({ code, kind: "crm", name, timezone: "Asia/Dubai", currency, fxToBase: currency === "INR" ? 0.044 : 1, isActive: true, sortOrder, accent: "#2563eb" });
 }
+await Organization.create({ code: "finance-hq", kind: "finance", name: "Finance HQ", timezone: "Asia/Dubai", currency: "AED", fxToBase: 1, isActive: true, sortOrder: 9, accent: "#2563eb" });
 
 const id = () => new Types.ObjectId();
 const now = new Date(Date.now() - 60_000);
@@ -130,14 +129,14 @@ check("October (before OLD_BOOKS_FROM): nothing", oct.monthAed === 0 && oct.stat
 resetOldBooksForTests();
 away = true;
 line = await oldBooksNoCrmUser("2026-11");
-check("finance away: 0, with its reason", line.monthAed === 0 && line.status === "error" && /503/.test(line.error ?? ""), line);
+check("finance away: 0, with its reason", line.monthAed === 0 && line.status === "error" && /down|503/.test(line.error ?? ""), line);
 away = false;
 resetOldBooksForTests();
-const secret = process.env.FINANCE_INTEGRATION_SECRET;
-delete process.env.FINANCE_INTEGRATION_SECRET;
+const secret = process.env.FINANCE_HQ_SSO_SECRET;
+delete process.env.FINANCE_HQ_SSO_SECRET;
 line = await oldBooksNoCrmUser("2026-11");
-check("not configured: 0, says what to set", line.status === "off" && line.monthAed === 0 && /FINANCE_INTEGRATION_SECRET/.test(line.error ?? ""), line);
-process.env.FINANCE_INTEGRATION_SECRET = secret;
+check("not configured: 0, says what to set", line.monthAed === 0 && /FINANCE_HQ_SSO_SECRET/.test(line.error ?? ""), line);
+process.env.FINANCE_HQ_SSO_SECRET = secret;
 resetOldBooksForTests();
 
 invoices.push(inv("DMDT009000", "Arya Krishnan", "arya@e2e.test", [[today, 700]]));
