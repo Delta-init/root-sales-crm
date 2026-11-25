@@ -1,5 +1,6 @@
 import { resolveTarget } from "../lib/targetClient.js";
 import { isPastTvMonth, salesTv, salesTvMonth, type SalesTvOptions } from "./salesTvService.js";
+import { oldBooksNoCrmUser, type OldBooksLine } from "./oldBooksService.js";
 
 /*
  * Manager TV (the user, 2026-10-23): "same as the Sales TV, only a new card for the CS, exactly like the CS
@@ -138,23 +139,44 @@ async function csMonth(month: string): Promise<{ data: CsAnswer | null; error: s
   return out;
 }
 
+/** The old-books line, waited for a few seconds at most: a slow finance never holds the screen (asked again next time). */
+const OB_WAITING: OldBooksLine = { monthAed: 0, rows: [], status: "error", error: "Finance didn't answer in time" };
+const oldBooksWithin = (month: string) => Promise.race([oldBooksNoCrmUser(month), new Promise<OldBooksLine>((ok) => setTimeout(() => ok(OB_WAITING), WAIT_MS))]);
+
+/** This month in Dubai, YYYY-MM. */
+const dubaiMonth = () => new Date(Date.now() + 4 * 3_600_000).toISOString().slice(0, 7);
+
+/**
+ * The old-books line (2026-11-25, oldBooksService.ts): finance's old books no CRM counts, in the header's total. A
+ * public screen gets the salesperson and the amount, not the invoice, and a plain sentence for an error.
+ */
+function oldBooksCard(line: OldBooksLine, pub: boolean) {
+  return {
+    name: "Old books — no CRM user",
+    status: line.status,
+    error: line.error ? (pub ? "The old-books figures can't be reached right now." : line.error) : null,
+    monthAed: line.monthAed,
+    rows: line.rows.map((r) => ({ salesperson: r.salesperson, amount: r.amount, paidOn: r.paidOn, ...(pub ? {} : { invoiceNumber: r.invoiceNumber }) })),
+  };
+}
+
 /**
  * The whole Manager TV: the Sales TV's answer, the CS card, and the CS payments among the closes. With `month` (a
  * month gone by, 2026-11-01: "switch months"), that month's standings as it ended — no closes, nothing of today.
  */
 export async function managerTv(opts: SalesTvOptions & { month?: unknown } = {}) {
   if (isPastTvMonth(opts.month)) {
-    const [sales, cs] = await Promise.all([salesTvMonth(opts.month, { ...opts, withBosses: true, hide: hidden() }), csMonth(opts.month)]);
-    return { ...sales, serverTime: new Date().toISOString(), past: true, cs: csCard(opts.publicView === true, cs) };
+    const [sales, cs, ob] = await Promise.all([salesTvMonth(opts.month, { ...opts, withBosses: true, hide: hidden() }), csMonth(opts.month), oldBooksWithin(opts.month)]);
+    return { ...sales, serverTime: new Date().toISOString(), past: true, cs: csCard(opts.publicView === true, cs), oldBooks: oldBooksCard(ob, opts.publicView === true) };
   }
   // Everybody in the CRMs' tables — dilshad, the Sales Managers and the team leaders too (2026-10-23); the Sales TV
   // hides them.
-  const [sales] = await Promise.all([salesTv({ ...opts, withBosses: true, hide: hidden() }), within(refreshCs(Date.now()), WAIT_MS)]);
+  const [sales, , ob] = await Promise.all([salesTv({ ...opts, withBosses: true, hide: hidden() }), within(refreshCs(Date.now()), WAIT_MS), oldBooksWithin(dubaiMonth())]);
   const since = validIso(opts.since) ? Date.parse(opts.since) : null;
   const closes = [...sales.closes, ...csCloses(since)].sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   // Stamped after both: a payment Root first saw while the Sales TV was answering is in this answer, so the
   // screen's next ?since= must not bring it again.
-  return { ...sales, serverTime: new Date().toISOString(), past: false, closes, cs: csCard(opts.publicView === true) };
+  return { ...sales, serverTime: new Date().toISOString(), past: false, closes, cs: csCard(opts.publicView === true), oldBooks: oldBooksCard(ob, opts.publicView === true) };
 }
 
 /** For the check script: forget what was asked. */

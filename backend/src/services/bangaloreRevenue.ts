@@ -98,15 +98,31 @@ function rupeesInAed(rate: number, payments = "$lead.payments", label = "Bangalo
 }
 
 /**
+ * Finance's old books (2026-11-25): each CRM keeps the old-books invoices whose salesperson is one of its users
+ * (`oldbookssales`, the CRM's services/oldBooks.ts) with only the payments that count there (from 1 Nov on, AED) — as
+ * a lead of theirs, so every revenue figure here takes them as the CRM's own figures do. A CRM from before it has no
+ * such collection: nothing is added.
+ */
+export const OLD_BOOKS_UNION: Document = {
+  $unionWith: {
+    coll: "oldbookssales",
+    pipeline: [
+      { $match: { assignedTo: { $ne: null }, "payments.0": { $exists: true } } },
+      { $project: { _id: "$financeInvoiceId", assignedTo: 1, team: 1, name: "$customerName", payments: 1, oldBooks: { $literal: true } } },
+    ],
+  },
+};
+
+/**
  * First stage(s) of a pipeline over the CRM's leads that unwinds their payments: beside the leads, one copy of each
  * Bangalore-enrolled lead carrying only its Bangalore money in AED — and in Remote one copy of every other lead with
- * rupee payments, carrying only those, in AED. Follow the $unwind with COUNTED_PAYMENT, which leaves the lead's own
- * rupee payments out. None for a CRM in rupees.
+ * rupee payments, carrying only those, in AED — and the CRM's old books (OLD_BOOKS_UNION). Follow the $unwind with
+ * COUNTED_PAYMENT, which leaves the lead's own rupee payments out. None for a CRM in rupees.
  */
 export async function bangaloreUnion(src: CrmSource): Promise<Document[]> {
   if (String(src.org.currency ?? "").toUpperCase() !== "AED") return [];
   const rate = await inrPerAed(src);
-  return [{
+  return [OLD_BOOKS_UNION, {
     $unionWith: {
       coll: "students",
       pipeline: [

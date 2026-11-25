@@ -97,6 +97,14 @@ export interface SalesTvCs {
   totals: { monthAed: number; todayAed: number; payments: number; meetings?: number | null };
 }
 
+export interface SalesTvOldBooks {
+  name: string;
+  status: "ok" | "error" | "off";
+  error: string | null;
+  monthAed: number;
+  rows: Array<{ salesperson: string; amount: number; paidOn: string; invoiceNumber?: string }>;
+}
+
 export interface SalesTvData {
   serverTime: string;
   crms: SalesTvCrm[];
@@ -104,6 +112,8 @@ export interface SalesTvData {
   closes: SalesTvClose[];
   /** Only on the Manager TV (the CS & Mentors TV's left half). */
   cs?: SalesTvCs;
+  /** The Manager TV (2026-11-25): finance's old books whose salesperson is no CRM user — in the header's total. */
+  oldBooks?: SalesTvOldBooks;
   /** The CS & Mentors TV's right half (2026-11-18): the mentors, in the CS card's shape. */
   mentors?: SalesTvCs;
   /** The Manager TV's month switch (2026-11-01): a month gone by, as it ended — no closes, nothing of today. */

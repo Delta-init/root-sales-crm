@@ -5,7 +5,7 @@ import { AlertTriangle, ChevronLeft, ChevronRight, Eye, EyeOff, Maximize, Minimi
 import { cn } from "@/lib/utils";
 import {
   breakLabel, crmTag, crmTone, fmtClock, fmtInt, fmtMoney, fmtRevenue, fmtShort, fmtTalk, initials, monthLabel, monthYearLabel, pastTvMonths,
-  type SalesTvBreak, type SalesTvClose, type SalesTvCrm, type SalesTvCs, type SalesTvCsPerson, type SalesTvFetcher, type SalesTvPerson,
+  type SalesTvBreak, type SalesTvClose, type SalesTvCrm, type SalesTvCs, type SalesTvCsPerson, type SalesTvFetcher, type SalesTvOldBooks, type SalesTvPerson,
 } from "@/lib/salesTv";
 import { setSoundPref, soundUnlocked, unlockSound, useSoundPref, useSoundUnlocked, type SaleClosed } from "@/lib/saleAnnouncement";
 import { SaleCelebration, celebrate } from "./SaleCelebration";
@@ -154,6 +154,7 @@ export function SalesTvBoard({
   const [crms, setCrms] = useState<SalesTvCrm[] | null>(null);
   const [cs, setCs] = useState<SalesTvCs | null>(null);
   const [mentors, setMentors] = useState<SalesTvCs | null>(null);
+  const [oldBooks, setOldBooks] = useState<SalesTvOldBooks | null>(null);
   const [onBreak, setOnBreak] = useState<SalesTvBreak[]>([]);
   const [closes, setCloses] = useState<SalesTvClose[]>([]);
   const [lastOk, setLastOk] = useState<number | null>(null);
@@ -226,6 +227,7 @@ export function SalesTvBoard({
         setCrms(d.crms);
         if (d.cs) setCs(d.cs);
         if (d.mentors) setMentors(d.mentors);
+        setOldBooks(d.oldBooks ?? null);
         setOnBreak(d.onBreak);
         setLastOk(Date.now());
         setFetchError(null);
@@ -263,8 +265,10 @@ export function SalesTvBoard({
     <div ref={root} className={cn("stv relative", boardFont.className, tv ? "stv-tv flex h-[100dvh] flex-col overflow-hidden p-[clamp(0.5rem,0.7vw,1.1rem)]" : "rounded-2xl p-3 sm:p-4")}>
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
       <Header tv={tv} serverNow={serverNow} lastOk={lastOk} now={now} fetchError={fetchError} rootRef={root} title={title} subtitle={subtitle}
-        totals={withCs && crms && !withMentors ? boardTotals(crms, cs, past) : null} months={months ? { month, pick: pickMonth } : null}
+        totals={withCs && crms && !withMentors ? boardTotals(crms, cs, past, oldBooks) : null} months={months ? { month, pick: pickMonth } : null}
         parts={withMentors ? [halfTotals(csLabels.person, cs, past), halfTotals(mentorLabels.title, mentors, past)] : null} />
+
+      {withCs && !withMentors && oldBooks && (oldBooks.monthAed > 0 || oldBooks.error) && <OldBooksStrip ob={oldBooks} />}
 
       <div
         className={cn(
@@ -335,8 +339,9 @@ const CS_PLACEHOLDER: SalesTvCs = {
  * The Manager TV's totals beside "Live" (the user, 2026-10-31): today's and this month's money — the three CRMs' (the
  * people not listed too) and the CS team's course payments, AED. Today is unknown while a CRM's today can't be read.
  */
-function boardTotals(crms: SalesTvCrm[], cs: SalesTvCs | null, past = false) {
-  const month = crms.reduce((a, c) => a + c.people.reduce((b, p) => b + (p.revenueMonth ?? 0), 0) + (c.hidden?.revenueMonth ?? 0), 0) + (cs?.totals.monthAed ?? 0);
+function boardTotals(crms: SalesTvCrm[], cs: SalesTvCs | null, past = false, oldBooks: SalesTvOldBooks | null = null) {
+  // Old books no CRM counts (2026-11-25) are in the month's total too; the CRMs' own old books are in their people's.
+  const month = crms.reduce((a, c) => a + c.people.reduce((b, p) => b + (p.revenueMonth ?? 0), 0) + (c.hidden?.revenueMonth ?? 0), 0) + (cs?.totals.monthAed ?? 0) + (oldBooks?.monthAed ?? 0);
   const known = crms.every((c) => typeof c.revenueToday === "number") && Boolean(cs);
   const today = known ? crms.reduce((a, c) => a + (c.revenueToday ?? 0), 0) + (cs?.totals.todayAed ?? 0) : null;
   // A month gone by has no today.
@@ -613,6 +618,28 @@ const CS_COLS = "grid grid-cols-[clamp(1.7rem,1.9vw,2.9rem)_minmax(0,1fr)_minmax
 
 /* With the mentors' meetings (2026-11-17): one more column. */
 const CS_COLS_M = "grid grid-cols-[clamp(1.7rem,1.9vw,2.9rem)_minmax(0,1fr)_minmax(0,clamp(3.6rem,4.2vw,6.2rem))_minmax(0,clamp(3rem,3.4vw,5rem))_minmax(0,clamp(1.9rem,2.1vw,3.1rem))_minmax(0,clamp(2.4rem,2.7vw,3.8rem))] items-center whitespace-nowrap gap-x-[clamp(0.15rem,0.25vw,0.45rem)]";
+
+/**
+ * The Manager TV's old-books line (2026-11-25): finance's old-books money this month whose salesperson is no user in
+ * any CRM — counted in the header's total; each CRM's own old books are already in its people's figures.
+ */
+function OldBooksStrip({ ob }: { ob: SalesTvOldBooks }) {
+  return (
+    <div className={cn("num mt-[clamp(0.4rem,0.6vw,0.9rem)] flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-[color:var(--line)] px-[clamp(0.8rem,1vw,1.4rem)] py-[clamp(0.3rem,0.45vw,0.7rem)]", T.small)} data-testid="old-books">
+      <span className="font-semibold text-[color:var(--ink2)]">{ob.name}</span>
+      {ob.error ? (
+        <span className="inline-flex items-center gap-1.5 text-[color:var(--warn)]"><AlertTriangle className="h-3.5 w-3.5" /> {ob.error}</span>
+      ) : (
+        <>
+          <b className="text-[color:var(--money)]" title={fmtRevenue(ob.monthAed)}>AED <Money n={ob.monthAed} /></b>
+          <span className="truncate text-[color:var(--mute)]">
+            {ob.rows.map((r) => `${r.salesperson} ${fmtRevenue(r.amount)}${r.invoiceNumber ? ` (${r.invoiceNumber})` : ""}`).join(" · ")}
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
 
 function CsColumn({ cs, tv, labels = CS_LABELS, teamStrip = false, testId = "cs" }: { cs: SalesTvCs; tv: boolean; labels?: CsLabels; teamStrip?: boolean; testId?: string }) {
   const body = useRef<HTMLDivElement>(null);
