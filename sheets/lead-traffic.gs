@@ -11,6 +11,9 @@
  *   shoaib        Shoaib's Forex leads sheet — one split for the whole sheet
  *   digital-lead  the Digital Lead sheet (Meta's Digital Academy form) — every
  *                 lead to Remote CRM, source DIGITAL LEAD (2026-11-23)
+ *   philippines-leads  the Philippines leads sheet (Meta's Philippines form) —
+ *                 every lead to Draw, straight to Rose, source PHILIPPINES LEADS
+ *                 (2026-11-25)
  *
  * The DRAW LEAD SHEET (TRADING-LEADS NITRO) has a script of its own,
  * draw-lead-sheet.gs: its Meta rows are not laid out under its headers, so they
@@ -36,7 +39,7 @@
  *   2. Project Settings → Script properties:
  *        ROOT_API_URL   https://root-api-sales-crm.deltainstitutions.com
  *        TRAFFIC_KEY    the LEAD_TRAFFIC_SHEET_KEY set on the Root server
- *        SHEET_ID       abhin, shoaib or digital-lead
+ *        SHEET_ID       abhin, shoaib, digital-lead or philippines-leads
  *   3. Reload the sheet. 🔀 Lead traffic → Test connection (it names the
  *      sheet Root thinks this is), then Setup triggers (which also removes the
  *      old script's triggers).

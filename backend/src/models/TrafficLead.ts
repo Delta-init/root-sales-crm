@@ -17,7 +17,7 @@ const assigneeSchema = new Schema(
 const trafficLeadSchema = new Schema<ITrafficLead>(
   {
     // Leads from before there was more than one sheet were all Abhin's.
-    sheet: { type: String, enum: ["abhin", "shoaib", "trading-leads-nitro", "digital-lead"], default: "abhin" },
+    sheet: { type: String, enum: ["abhin", "shoaib", "trading-leads-nitro", "digital-lead", "philippines-leads"], default: "abhin" },
     sourceKey: { type: String, required: true, unique: true },
     metaId: { type: String, default: "" },
     tab: { type: String, default: "" },

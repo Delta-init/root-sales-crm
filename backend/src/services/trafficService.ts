@@ -35,7 +35,7 @@ import type {
  */
 
 export const ORGS: TrafficOrg[] = ["delta", "draw", "remote"];
-export const SHEETS: TrafficSheet[] = ["abhin", "shoaib", "trading-leads-nitro", "digital-lead"];
+export const SHEETS: TrafficSheet[] = ["abhin", "shoaib", "trading-leads-nitro", "digital-lead", "philippines-leads"];
 const SHORT: Record<TrafficOrg, string> = { delta: "Delta", draw: "Draw", remote: "Remote" };
 
 export const isSheet = (v: unknown): v is TrafficSheet => SHEETS.includes(v as TrafficSheet);
@@ -181,6 +181,22 @@ export const SHEET_CONFIG: Record<TrafficSheet, SheetConfig> = {
       ].filter(Boolean).join("\n"),
     teams: { all: [team("digital-academy", "Digital Academy team", "remote", 100)] },
     checkOrgs: ["remote"],
+  },
+  /*
+   * The Philippines leads sheet (the user, 2026-11-25: "direct to Draw, to Rose only, through lead traffic"): Meta's
+   * Philippines form, every lead to Draw, straight to Rose — Valerie Rose Rivero, a Draw user — labelled PHILIPPINES
+   * LEADS. Only Draw counts as already having somebody ("draw only"): a number Delta or Remote has is still a new
+   * lead for Rose; one Draw has is passed on there as coming in again.
+   */
+  "philippines-leads": {
+    name: "Philippines leads",
+    about: "Meta's Philippines form — every lead to Draw, straight to Rose.",
+    segments: [{ key: "all", label: "All leads", source: "PHILIPPINES LEADS" }],
+    segmentOf: () => "all",
+    creative: (lead) =>
+      [lead.adName && `Ad: ${lead.adName}`, lead.adset && `Ad set: ${lead.adset}`].filter(Boolean).join("\n"),
+    teams: { all: [team("rose", "Rose", "draw", 100, { id: "6af84c64cbf5b6cb869f43fa", name: "Valerie Rose Rivero" })] },
+    checkOrgs: ["draw"],
   },
 };
 

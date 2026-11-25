@@ -779,7 +779,7 @@ async function main() {
   const dlRules = (await call("GET", "/traffic/rules", undefined, root)).body?.data;
   const dl = sheetIn(dlRules, "digital-lead");
   check("it is the fourth sheet, Digital Lead: one split, all of it to Remote CRM's Digital Academy team, source DIGITAL LEAD",
-    dlRules?.sheets?.map((s: Json) => s.key).join(",") === "abhin,shoaib,trading-leads-nitro,digital-lead" && dl?.name === "Digital Lead"
+    dlRules?.sheets?.map((s: Json) => s.key).slice(0, 4).join(",") === "abhin,shoaib,trading-leads-nitro,digital-lead" && dl?.name === "Digital Lead"
     && dl?.segments?.length === 1 && segOf(dl, "all")?.source === "DIGITAL LEAD" && show(dl?.uses) === show(["remote"])
     && show(segOf(dl, "all")?.shares?.map((s: Json) => [s.name, s.org, s.percent, s.assignTo ?? null])) === show([["Digital Academy team", "remote", 100, null]]), show(dl));
   const dlPing = await call("GET", "/traffic/intake/ping?sheet=digital-lead", undefined, { "x-traffic-key": SHEET_KEY });
@@ -840,6 +840,65 @@ async function main() {
   const dlStored = await db.collection("trafficleads").findOne({ sourceKey: "meta:l:880002" });
   check("Root keeps the contact time with the lead", dlStored?.contactTime === "2026-11-21T23:25:50+0400", show(dlStored?.contactTime));
 
+  // ── The Philippines leads sheet (2026-11-25) ────────────────────────────────
+  step("The Philippines leads sheet — every lead to Draw, straight to Rose; only Draw counts as having them");
+  await sheetBudget(10);
+  const ROSE = "6af84c64cbf5b6cb869f43fa";
+  const phRules = (await call("GET", "/traffic/rules", undefined, root)).body?.data;
+  const ph = sheetIn(phRules, "philippines-leads");
+  check("it is the fifth sheet, Philippines leads: one split, all of it to Draw straight to Rose, source PHILIPPINES LEADS",
+    phRules?.sheets?.map((s: Json) => s.key).join(",") === "abhin,shoaib,trading-leads-nitro,digital-lead,philippines-leads" && ph?.name === "Philippines leads"
+    && ph?.segments?.length === 1 && segOf(ph, "all")?.source === "PHILIPPINES LEADS" && show(ph?.uses) === show(["draw"])
+    && show(segOf(ph, "all")?.shares?.map((s: Json) => [s.name, s.org, s.percent, s.assignTo?.id ?? null])) === show([["Rose", "draw", 100, ROSE]]), show(ph));
+  const phPing = await call("GET", "/traffic/intake/ping?sheet=philippines-leads", undefined, { "x-traffic-key": SHEET_KEY });
+  check("its connection test names it, and only Draw", phPing.status === 200 && phPing.body?.data?.name === "Philippines leads"
+    && show(phPing.body?.data?.crms?.map((c: Json) => c.code)) === show(["draw"]), show(phPing.body));
+  // As sheets/lead-traffic.gs builds them from Meta's Philippines form (the attached sheet's columns).
+  const phRow = (n: number, extra: Record<string, unknown> = {}) => ({
+    id: `l:63100${n}`, tab: "Sheet1", created_time: `2026-11-24T0${n}:10:07-05:00`, full_name: `Philippines ${n}`,
+    phone_number: `p:+97156530000${n}`, email: `ph${n}@example.test`, platform: "fb", campaign_name: "philippines campaign 23-11-2026",
+    ad_name: "philippines campaign 23-11-2026 - Copy", adset_name: "philippines campaign 23-11-2026", knowledge: "", contact_time: "",
+    is_organic: "false", ...extra,
+  });
+  const phTest = phRow(0, {
+    id: "l:631009", full_name: "<test lead: dummy data for full_name>", phone_number: "p:<test lead: dummy data for phone_number>",
+    email: "test@meta.com", is_organic: "true", platform: "",
+  });
+  const phPost = (rows: unknown[]) => post({ sheet: "philippines-leads", rows });
+  const [deltaAtPh, drawAtPh, remoteAtPh] = [crm.delta.rows.length, crm.draw.rows.length, crm.remote.rows.length];
+  const ph1 = await phPost([phTest, phRow(1), phRow(2)]);
+  const phRes = (ph1.body?.data?.results ?? []) as Json[];
+  check("Meta's test lead is turned away; the two real ones go to Draw, to Rose",
+    ph1.status === 200 && phRes[0]?.label === "❌ Invalid: Meta test lead"
+    && phRes.slice(1).every((r) => r.status === "sent" && r.destination === "draw" && r.label === "✅ Draw → Valerie Rose Rivero"), show(ph1.body));
+  check("…nothing to Delta or Remote", crm.delta.rows.length === deltaAtPh && crm.remote.rows.length === remoteAtPh);
+  const phOne = crm.draw.rows.slice(drawAtPh).find((r) => r.full_name === "Philippines 1");
+  check("Draw gets source PHILIPPINES LEADS, assigned straight to Rose, with the ad and the ad set in the note",
+    phOne?.source === "PHILIPPINES LEADS" && phOne?.assigned_to === ROSE && phOne?.phone_number === "+971565300001" && phOne?.id === "l:631001"
+    && phOne?.ad_creative === "Ad: philippines campaign 23-11-2026 - Copy\nAd set: philippines campaign 23-11-2026"
+    && phOne?.created_time === new Date("2026-11-24T01:10:07-05:00").toISOString(), show(phOne));
+  const phKnown = await phPost([
+    phRow(3, { full_name: "Known to Delta", phone_number: "0501111111" }),
+    phRow(4, { full_name: "Known to Remote", phone_number: "+971509999001" }),
+    phRow(5, { full_name: "Known to Draw", phone_number: "+971502222222" }),
+  ]);
+  const pk = (phKnown.body?.data?.results ?? []) as Json[];
+  check("somebody only Delta or Remote has is a new lead here (draw only), sent to Rose",
+    pk.slice(0, 2).every((r) => r.status === "sent" && r.label === "✅ Draw → Valerie Rose Rivero")
+    && crm.delta.rows.length === deltaAtPh && crm.remote.rows.length === remoteAtPh, show(pk));
+  check("somebody Draw already has is a duplicate there — passed on to Draw, nowhere else",
+    pk[2]?.status === "duplicate" && pk[2]?.destination === "draw" && String(pk[2]?.label).startsWith("🔁 Came in again · Draw"), show(pk[2]));
+  const phAgain = await phPost([phRow(1), phRow(2)]);
+  const drawAfter = crm.draw.rows.length;
+  check("sent again: the same answers, nothing posted twice",
+    (phAgain.body?.data?.results ?? []).every((r: Json) => r.label === "✅ Draw → Valerie Rose Rivero")
+    && crm.draw.rows.length === drawAfter, show(phAgain.body));
+  const phSum = (await call("GET", "/traffic/summary?sheet=philippines-leads", undefined, root)).body?.data;
+  const rose = seg(phSum, "all")?.shares?.find((x: Json) => x.key === "rose");
+  check("the page counts them: 4 to Rose (100% of her 100%), 1 duplicate, 1 invalid",
+    phSum?.totals?.sent === 4 && rose?.split === 4 && rose?.actual === 100 && rose?.target === 100
+    && phSum?.totals?.duplicates === 1 && phSum?.totals?.invalid === 1, show(phSum?.totals));
+
   // ── The Leads list, by the page's dates ────────────────────────────────────
   step("The Leads list by date — the page's Today, 30 days, This month and Custom");
   const dated = (n: number, at: string, extra: Record<string, unknown> = {}) =>
@@ -879,7 +938,7 @@ async function main() {
   const gulfNow = new Date(Date.now() + 4 * 60 * 60_000).toISOString().slice(0, 10);
   const span = `from=2020-01-01&to=${gulfNow}`;
   const inSpan = { receivedAt: { $gte: new Date("2019-12-31T20:00:00Z"), $lt: new Date(Date.parse(`${gulfNow}T00:00:00+04:00`) + 24 * 60 * 60_000) } };
-  const KEYS = ["abhin", "shoaib", "trading-leads-nitro", "digital-lead"];
+  const KEYS = ["abhin", "shoaib", "trading-leads-nitro", "digital-lead", "philippines-leads"];
   const TOTALS = ["received", "sent", "duplicates", "invalid", "waiting", "failed"];
   const leadsIn = (q: Record<string, unknown>) => db.collection("trafficleads").countDocuments({ sheet: { $in: KEYS }, ...inSpan, ...q });
   const allSum = (await call("GET", `/traffic/summary?sheet=all&${span}`, undefined, root)).body?.data;
