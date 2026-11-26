@@ -847,7 +847,7 @@ async function main() {
   const phRules = (await call("GET", "/traffic/rules", undefined, root)).body?.data;
   const ph = sheetIn(phRules, "philippines-leads");
   check("it is the fifth sheet, Philippines leads: one split, all of it to Draw straight to Rose, source PHILIPPINES LEADS",
-    phRules?.sheets?.map((s: Json) => s.key).join(",") === "abhin,shoaib,trading-leads-nitro,digital-lead,philippines-leads" && ph?.name === "Philippines leads"
+    phRules?.sheets?.map((s: Json) => s.key).slice(0, 5).join(",") === "abhin,shoaib,trading-leads-nitro,digital-lead,philippines-leads" && ph?.name === "Philippines leads"
     && ph?.segments?.length === 1 && segOf(ph, "all")?.source === "PHILIPPINES LEADS" && show(ph?.uses) === show(["draw"])
     && show(segOf(ph, "all")?.shares?.map((s: Json) => [s.name, s.org, s.percent, s.assignTo?.id ?? null])) === show([["Rose", "draw", 100, ROSE]]), show(ph));
   const phPing = await call("GET", "/traffic/intake/ping?sheet=philippines-leads", undefined, { "x-traffic-key": SHEET_KEY });
@@ -899,6 +899,46 @@ async function main() {
     phSum?.totals?.sent === 4 && rose?.split === 4 && rose?.actual === 100 && rose?.target === 100
     && phSum?.totals?.duplicates === 1 && phSum?.totals?.invalid === 1, show(phSum?.totals));
 
+  // ── Dilshad sir's leads sheet (2026-11-26) ──────────────────────────────────
+  step("Dilshad sir Leads — every lead to Remote CRM, straight to dilshad; any CRM having them counts");
+  await sheetBudget(10);
+  const DILSHAD = "6abd18a2a21d01e2d21e0f77";
+  const dslRules = (await call("GET", "/traffic/rules", undefined, root)).body?.data;
+  const dslSheet = sheetIn(dslRules, "dilshad-sir-leads");
+  check("it is the sixth sheet, Dilshad sir Leads: one split, all of it to Remote straight to dilshad, source DILSHAD SIR LEADS",
+    dslRules?.sheets?.map((s: Json) => s.key).join(",") === "abhin,shoaib,trading-leads-nitro,digital-lead,philippines-leads,dilshad-sir-leads" && dslSheet?.name === "Dilshad sir Leads"
+    && dslSheet?.segments?.length === 1 && segOf(dslSheet, "all")?.source === "DILSHAD SIR LEADS"
+    && show(segOf(dslSheet, "all")?.shares?.map((s: Json) => [s.name, s.org, s.percent, s.assignTo?.id ?? null])) === show([["dilshad", "remote", 100, DILSHAD]]), show(dslSheet));
+  const dslPing = await call("GET", "/traffic/intake/ping?sheet=" + encodeURIComponent("Dilshad sir Leads"), undefined, { "x-traffic-key": SHEET_KEY });
+  check("its connection test answers to the name as the sheet's script has it, \"Dilshad sir Leads\"", dslPing.status === 200 && dslPing.body?.data?.name === "Dilshad sir Leads", show(dslPing.body));
+  const dslRow = (n: number, extra: Record<string, unknown> = {}) => ({
+    id: `l:64100${n}`, tab: "Sheet1", created_time: `2026-11-26T0${n}:10:07+04:00`, full_name: `Dilshad lead ${n}`,
+    phone_number: `p:+97156540000${n}`, email: `dsl${n}@example.test`, platform: "ig", campaign_name: "dilshad campaign",
+    ad_name: "dilshad ad", adset_name: "dilshad adset", knowledge: "", contact_time: "", is_organic: "false", ...extra,
+  });
+  const dslPost = (rows: unknown[]) => post({ sheet: "Dilshad sir Leads", rows });
+  const [deltaAtD, drawAtD, remoteAtD] = [crm.delta.rows.length, crm.draw.rows.length, crm.remote.rows.length];
+  const dslFirst = await dslPost([dslRow(1), dslRow(2)]);
+  const dslRes = (dslFirst.body?.data?.results ?? []) as Json[];
+  check("both go to Remote, to dilshad", dslFirst.status === 200 && dslRes.length === 2 && dslRes.every((r) => r.status === "sent" && r.destination === "remote" && r.label === "✅ Remote → dilshad"), show(dslFirst.body));
+  const dslOne = crm.remote.rows.slice(remoteAtD).find((r) => r.full_name === "Dilshad lead 1");
+  check("Remote gets source DILSHAD SIR LEADS, assigned straight to dilshad, with the ad and the ad set in the note",
+    dslOne?.source === "DILSHAD SIR LEADS" && dslOne?.assigned_to === DILSHAD && dslOne?.phone_number === "+971565400001"
+    && dslOne?.ad_creative === "Ad: dilshad ad\nAd set: dilshad adset", show(dslOne));
+  check("…nothing to Delta or Draw", crm.delta.rows.length === deltaAtD && crm.draw.rows.length === drawAtD);
+  const remoteBefore = crm.remote.rows.length;
+  const dslKnown = await dslPost([
+    dslRow(3, { full_name: "Known to Delta", phone_number: "0501111111" }),
+    dslRow(4, { full_name: "Known to Remote", phone_number: "+971509999001" }),
+    dslRow(5, { full_name: "Known to Draw", phone_number: "+971502222222" }),
+  ]);
+  const dslK = (dslKnown.body?.data?.results ?? []) as Json[];
+  // These three numbers are in Delta, Remote and Draw (and Rose's sheet sent them to Draw above): each is a duplicate.
+  check("a number any of the three CRMs has is a duplicate — passed on to the CRM holding it as coming in again, never a new lead for dilshad",
+    dslK.length === 3 && dslK.every((r) => r.status === "duplicate" && r.destination && String(r.label).startsWith("🔁 Came in again")), show(dslK));
+  const dslSum = (await call("GET", "/traffic/summary?sheet=dilshad-sir-leads", undefined, root)).body?.data;
+  check("the page counts them: 2 to dilshad, 3 duplicates", dslSum?.totals?.sent === 2 && dslSum?.totals?.duplicates === 3, show(dslSum?.totals));
+
   // ── The Leads list, by the page's dates ────────────────────────────────────
   step("The Leads list by date — the page's Today, 30 days, This month and Custom");
   const dated = (n: number, at: string, extra: Record<string, unknown> = {}) =>
@@ -938,7 +978,7 @@ async function main() {
   const gulfNow = new Date(Date.now() + 4 * 60 * 60_000).toISOString().slice(0, 10);
   const span = `from=2020-01-01&to=${gulfNow}`;
   const inSpan = { receivedAt: { $gte: new Date("2019-12-31T20:00:00Z"), $lt: new Date(Date.parse(`${gulfNow}T00:00:00+04:00`) + 24 * 60 * 60_000) } };
-  const KEYS = ["abhin", "shoaib", "trading-leads-nitro", "digital-lead", "philippines-leads"];
+  const KEYS = ["abhin", "shoaib", "trading-leads-nitro", "digital-lead", "philippines-leads", "dilshad-sir-leads"];
   const TOTALS = ["received", "sent", "duplicates", "invalid", "waiting", "failed"];
   const leadsIn = (q: Record<string, unknown>) => db.collection("trafficleads").countDocuments({ sheet: { $in: KEYS }, ...inSpan, ...q });
   const allSum = (await call("GET", `/traffic/summary?sheet=all&${span}`, undefined, root)).body?.data;

@@ -35,7 +35,7 @@ import type {
  */
 
 export const ORGS: TrafficOrg[] = ["delta", "draw", "remote"];
-export const SHEETS: TrafficSheet[] = ["abhin", "shoaib", "trading-leads-nitro", "digital-lead", "philippines-leads"];
+export const SHEETS: TrafficSheet[] = ["abhin", "shoaib", "trading-leads-nitro", "digital-lead", "philippines-leads", "dilshad-sir-leads"];
 const SHORT: Record<TrafficOrg, string> = { delta: "Delta", draw: "Draw", remote: "Remote" };
 
 export const isSheet = (v: unknown): v is TrafficSheet => SHEETS.includes(v as TrafficSheet);
@@ -197,6 +197,21 @@ export const SHEET_CONFIG: Record<TrafficSheet, SheetConfig> = {
       [lead.adName && `Ad: ${lead.adName}`, lead.adset && `Ad set: ${lead.adset}`].filter(Boolean).join("\n"),
     teams: { all: [team("rose", "Rose", "draw", 100, { id: "6af84c64cbf5b6cb869f43fa", name: "Valerie Rose Rivero" })] },
     checkOrgs: ["draw"],
+  },
+  /*
+   * Dilshad sir's leads sheet (the user, 2026-11-26: "add new as Dilshad sir Leads" — every lead to Remote CRM,
+   * straight to dilshad; a number any of the three CRMs has is a duplicate there). Labelled DILSHAD SIR LEADS; the
+   * note carries the ad and the ad set. Its script's SHEET_ID is "dilshad-sir-leads" ("Dilshad sir Leads" reads the
+   * same — spaces and case don't matter).
+   */
+  "dilshad-sir-leads": {
+    name: "Dilshad sir Leads",
+    about: "Every lead to Remote CRM, straight to dilshad.",
+    segments: [{ key: "all", label: "All leads", source: "DILSHAD SIR LEADS" }],
+    segmentOf: () => "all",
+    creative: (lead) =>
+      [lead.adName && `Ad: ${lead.adName}`, lead.adset && `Ad set: ${lead.adset}`].filter(Boolean).join("\n"),
+    teams: { all: [team("dilshad", "dilshad", "remote", 100, { id: "6abd18a2a21d01e2d21e0f77", name: "dilshad" })] },
   },
 };
 
