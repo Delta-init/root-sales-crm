@@ -23,6 +23,7 @@ import { api } from "@/lib/axios";
 import { cn, timeIn } from "@/lib/utils";
 import { useAuth } from "@/providers/AuthProvider";
 import { WalletCard } from "@/components/wallet/WalletCard";
+import { ReportOrgCard } from "@/components/report-org/ReportOrgCard";
 import type { Organization, TargetKind } from "@/lib/types";
 
 const containerVariants = {
@@ -201,6 +202,13 @@ export default function DashboardPage() {
           animate="show"
           className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
         >
+          {/* The Report Org: an org inside Root itself, so it opens Root's own pages rather than another
+              system (2026-11-26). Root admins only, like the pages behind it. */}
+          {admin?.role === "root_admin" && (
+            <motion.div variants={itemVariants}>
+              <ReportOrgCard />
+            </motion.div>
+          )}
           {orgs.map((org) => {
             return (
               <motion.div key={org.id} variants={itemVariants}>

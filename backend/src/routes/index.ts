@@ -29,6 +29,7 @@ import csMentorsTvRoutes from "./csMentorsTvRoutes.js";
 import walletRoutes from "./walletRoutes.js";
 import rewardRoutes from "./rewardRoutes.js";
 import mentorKpiRoutes from "./mentorKpiRoutes.js";
+import reportOrgRoutes from "./reportOrgRoutes.js";
 
 const router = Router();
 
@@ -46,6 +47,8 @@ router.use("/traffic", trafficRoutes);
 router.use("/pending", pendingRoutes);
 // Reports, a tab per portal — what got done in a period (2026-10-17).
 router.use("/portal-reports", portalReportRoutes);
+// The Report Org, the org inside Root: its Finance and revenue reports, read from finance (2026-11-26). Root admins.
+router.use("/report-org", reportOrgRoutes);
 router.use("/salespeople", salespersonRoutes);
 // Every portal's 3CX calls and recordings (2026-10-14).
 router.use("/calls", callRoutes);
