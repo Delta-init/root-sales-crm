@@ -105,6 +105,12 @@ export async function financeVat(q: Record<string, unknown>) {
 
 
 /** Profit & Loss: the statement with the period before (view=statement) or month by month (view=months), either basis. */
+/** The records behind one Profit & Loss line (?line=income | bills | expenses | cat:<category>, ?basis=). */
+export async function financePlLines(q: Record<string, unknown>) {
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/pl-lines${passOn(q, ["org", "from", "to", "basis", "line", "groupBy", "crm", "salesperson", "method", "month", "category", "subcategory", "department", ...PAGING])}`, "share the records behind a profit and loss line");
+  return { ...data, appUrl };
+}
+
 export async function financePl(q: Record<string, unknown>) {
   const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/pl${passOn(q, ["org", "from", "to", "basis", "view"])}`, "share its profit and loss");
   return { ...data, appUrl };

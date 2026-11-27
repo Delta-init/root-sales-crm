@@ -19,6 +19,7 @@ import { FinanceFilters, pickOrg, usePicks, type FilterDef } from "./FinanceFilt
 import { Select } from "./FilterSelect";
 import { ErrorCard, ForeignUnknown, dayText, monthText, periodText, saveCsv, timeText } from "./parts";
 import { StateBadge } from "./ReportCatalog";
+import { CardPopup } from "./CardPopup";
 
 /*
  * Report Org → Finance and revenue: the one viewer every report opens in.
@@ -713,6 +714,29 @@ interface LedgerShape {
 const GROUP_LABEL: Record<string, string> = { person: "Person", source: "CRM or CS", month: "Month", state: "State", kind: "Type", department: "Department", status: "Status", runState: "Payroll run", method: "Payment method", bank: "Bank account", vendor: "Vendor", crm: "CRM", salesperson: "Salesperson" };
 
 function ledgerShape(spec: LedgerSpec): LedgerShape {
+  if (spec.source === "pl-lines") {
+    const collected = spec.params?.basis === "collected";
+    if (spec.params?.line === "income") {
+      return {
+        space: "pl-income", noun: collected ? "Payments" : "Invoices",
+        filters: [{ key: "crm", label: "CRM" }, { key: "salesperson", label: "Salesperson" }, { key: "method", label: "Payment method" }, { key: "month", label: "Month" }],
+        sums: [["amountMinor", "Counted"], ["vatMinor", "VAT"], ["grossMinor", "With VAT"]],
+        first: ["date", collected ? "Paid on" : "Issued"],
+        fields: [["title", "Client"], ["crm", "CRM"], ["salesperson", "Salesperson"], ["method", "Payment method", !collected], ["detail", "Detail"], ["month", "Month", true]],
+        basis: collected ? "Each payment received in the period, its VAT taken out. Payments in another currency are apart on the profit and loss." : "Each invoice issued in the period, before VAT; any part paid in another currency is taken out and shown apart on the profit and loss.",
+        source: "finance's Profit & Loss",
+      };
+    }
+    return {
+      space: "pl-expenses", noun: "Records",
+      filters: [{ key: "category", label: "Category" }, { key: "subcategory", label: "Subcategory" }, { key: "department", label: "Department" }, { key: "method", label: "Payment method" }, { key: "month", label: "Month" }],
+      sums: [["amountMinor", "Counted"]],
+      first: ["date", collected ? "Paid on" : "Date"],
+      fields: [["title", "Description"], ["category", "Category"], ["subcategory", "Subcategory"], ["department", "Department"], ["method", "Payment method"], ["employee", "Submitted by", true], ["detail", "Detail"], ["month", "Month", true]],
+      basis: collected ? "Bills and expenses paid in the period; payroll in the month the pay is for." : "Bills and expenses dated in the period; payroll in the month the pay is for.",
+      source: "finance's Profit & Loss",
+    };
+  }
   if (spec.source === "vat") {
     const kind = spec.params?.kind ?? "output";
     if (kind === "input") {
@@ -818,7 +842,7 @@ export function LedgerTable({ report, spec }: { report: Titled; spec: LedgerSpec
     const [firstKey, firstHead] = shape.first;
     return [
       { key: firstKey, header: firstHead, fixed: true, sort: firstKey, cell: (r) => (firstKey === "date" ? dayText(r.date) : String(r[firstKey] ?? "")), text: (r) => String(r[firstKey] ?? ""), total: "Total", totalText: "Total" },
-      { key: "number", header: spec.source === "commission" ? "Expense" : spec.source === "vat" ? "Number" : "Run", cell: (r) => (r.number ? (r.href ? numberCell(appUrl, r) : <span className="font-medium">{r.number}</span>) : DASH), text: (r) => r.number },
+      { key: "number", header: spec.source === "commission" ? "Expense" : spec.source === "vat" || spec.source === "pl-lines" ? "Number" : "Run", cell: (r) => (r.number ? (r.href ? numberCell(appUrl, r) : <span className="font-medium">{r.number}</span>) : DASH), text: (r) => r.number },
       ...shape.fields.map(([key, header, hidden]): GridColumn<LedgerRow> => ({
         key, header, hidden: !!hidden, sort: key === "title" ? "title" : key === "detail" ? undefined : key,
         cell: (r) => (r[key] ? clip(String(r[key])) : DASH), text: (r) => String(r[key] ?? ""),
@@ -913,7 +937,7 @@ const PL_BASIS: Record<PlBasis, string> = {
   collected: "Income is payments received in the period, VAT taken out; expenses are those paid in it.",
 };
 
-interface PlRow { key: string; label: string; kind: "line" | "total" | "net"; amount: number; prior?: number | null }
+interface PlRow { key: string; label: string; kind: "line" | "total" | "net"; amount: number; prior?: number | null; /** The records behind it (2026-11-27). */ line?: string }
 
 export function PLTable({ report, spec }: { report: Titled; spec: PlSpec }) {
   const f = useReportOrgFilters();
@@ -921,6 +945,7 @@ export function PLTable({ report, spec }: { report: Titled; spec: PlSpec }) {
   const org = pickOrg(orgs.data, f.entity);
   useYearFor(spec.period, report.id);
   const [basis, setBasis] = useState<PlBasis>("invoiced");
+  const [linePick, setLinePick] = useState<PlRow | null>(null);
   const months = spec.view === "months";
   const statement = useFinancePl<PlStatement>(months ? undefined : org?.id, f.range, basis, "statement");
   const series = useFinancePl<PlMonths>(months ? org?.id : undefined, f.range, basis, "months");
@@ -935,17 +960,24 @@ export function PLTable({ report, spec }: { report: Titled; spec: PlSpec }) {
     // Lines only in the period before still show, at nothing now — so a cost that stopped is not hidden.
     const labels = (side: "income" | "expenses") => Array.from(new Set([...d[side].breakdown.map((x) => x.label), ...(compare && d.prior ? d.prior[side].breakdown.map((x) => x.label) : [])]));
     const now = (side: "income" | "expenses", label: string) => d[side].breakdown.find((x) => x.label === label)?.amountMinor ?? 0;
+    const keyOf = (side: "income" | "expenses", label: string) => (d[side].breakdown.find((x) => x.label === label) ?? d.prior?.[side].breakdown.find((x) => x.label === label))?.key;
     return [
-      ...labels("income").map((label): PlRow => ({ key: `i:${label}`, label, kind: "line", amount: now("income", label), prior: prior("income", label) })),
-      { key: "income", label: "Total income", kind: "total", amount: d.income.total, prior: d.prior?.income.total ?? null },
-      ...labels("expenses").map((label): PlRow => ({ key: `e:${label}`, label, kind: "line", amount: now("expenses", label), prior: prior("expenses", label) })),
-      { key: "expenses", label: "Total expenses", kind: "total", amount: d.expenses.total, prior: d.prior?.expenses.total ?? null },
-      { key: "net", label: "Net profit", kind: "net", amount: d.netProfitMinor, prior: d.prior?.netProfitMinor ?? null },
+      ...labels("income").map((label): PlRow => ({ key: `i:${label}`, label, kind: "line", amount: now("income", label), prior: prior("income", label), line: keyOf("income", label) })),
+      { key: "income", label: "Total income", kind: "total", amount: d.income.total, prior: d.prior?.income.total ?? null, line: "income" },
+      ...labels("expenses").map((label): PlRow => ({ key: `e:${label}`, label, kind: "line", amount: now("expenses", label), prior: prior("expenses", label), line: keyOf("expenses", label) })),
+      { key: "expenses", label: "Total expenses", kind: "total", amount: d.expenses.total, prior: d.prior?.expenses.total ?? null, line: "expenses" },
+      { key: "net", label: "Net profit", kind: "net", amount: d.netProfitMinor, prior: d.prior?.netProfitMinor ?? null, line: "net" },
     ];
   }, [statement.data, compare]);
 
   const stCols = useMemo<GridColumn<PlRow>[]>(() => {
-    const label = (r: PlRow) => (r.kind === "line" ? <span className="pl-4 text-muted-foreground">{r.label}</span> : <span className="font-semibold">{r.label}</span>);
+    // A line that has records behind it opens them (the user, 2026-11-27: "each line will be break down also popup").
+    const label = (r: PlRow) => {
+      const text = r.kind === "line" ? <span className="pl-4 text-muted-foreground">{r.label}</span> : <span className="font-semibold">{r.label}</span>;
+      return r.line ? (
+        <button type="button" title="See the records behind this line" onClick={() => setLinePick(r)} className="text-left underline-offset-4 hover:text-primary hover:underline">{text}</button>
+      ) : text;
+    };
     const amount = (v: number, r: PlRow) => <span className={r.kind === "line" ? undefined : r.kind === "net" && v < 0 ? "font-semibold text-rose-600 dark:text-rose-400" : "font-semibold"}>{money(v, cur)}</span>;
     const priorText = statement.data?.prior ? periodText(statement.data.prior) : "Period before";
     return [
@@ -1018,6 +1050,10 @@ export function PLTable({ report, spec }: { report: Titled; spec: PlSpec }) {
         <DataGrid grid={stGrid} rows={lines} rowKey={(r) => r.key} loading={statement.isFetching} empty="Finance has nothing for this period." />
       )}
       {months && series.data?.capped && <p className="text-xs text-muted-foreground">The first 24 months of the period are shown. Pick a shorter period for the rest.</p>}
+      <CardPopup
+        open={linePick ? { card: "plLine", title: linePick.label, value: money(linePick.amount, cur), line: linePick.line, basis, note: `${statement.data ? periodText(statement.data.period) : ""} · ${PL_BASIS[basis]} The total is the line's.` } : null}
+        onClose={() => setLinePick(null)}
+      />
 
       {others.map((c) => (
         <p key={`${c.side}:${c.currency}`} className="text-xs text-muted-foreground">

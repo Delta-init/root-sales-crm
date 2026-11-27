@@ -55,7 +55,7 @@ export type LiveSpec =
   | {
       kind: "ledger";
       /** vat: the rows behind the VAT position and the income of "Income less expenses" (headline cards only). */
-      source: "commission" | "payroll" | "vat";
+      source: "commission" | "payroll" | "vat" | "pl-lines";
       /** The summary's grouping. */
       groupBy: string;
       view: "summary" | "records";

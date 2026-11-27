@@ -236,7 +236,7 @@ export interface LedgerReport {
   appUrl: string;
 }
 
-export interface LedgerAsk { source: "commission" | "payroll" | "vat"; groupBy: string; params?: Record<string, string>; picks?: Picks }
+export interface LedgerAsk { source: "commission" | "payroll" | "vat" | "pl-lines"; groupBy: string; params?: Record<string, string>; picks?: Picks }
 
 export const fetchLedger = (org: string, period: Period, ask: LedgerAsk, page: PageAsk) =>
   get<LedgerReport>(ask.source, { org, from: period.from, to: period.to, groupBy: ask.groupBy, ...picksParams(ask.picks ?? {}), ...(ask.params ?? {}), ...pageParams(page) });
@@ -252,7 +252,7 @@ export const useFinanceLedger = (org: string | undefined, period: Period, ask: L
 
 /* Profit & Loss (2026-11-27): finance's own calculation, the statement or month by month, invoiced or collected. */
 export type PlBasis = "invoiced" | "collected";
-export interface PlLine { label: string; amountMinor: number }
+export interface PlLine { label: string; amountMinor: number; /** Which records are behind it: income, bills, cat:<category>. */ key?: string }
 export interface PlSide { total: number; breakdown: PlLine[] }
 export interface PlPeriod { from: string; to: string; income: PlSide & { otherCurrencies?: { currency: string; what?: string; amountMinor: number; count: number }[] }; expenses: PlSide & { otherCurrencies?: { currency: string; amountMinor: number; count: number; breakdown?: PlLine[] }[] }; netProfitMinor: number }
 export interface PlStatement extends PlPeriod {

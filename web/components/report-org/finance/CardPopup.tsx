@@ -17,15 +17,26 @@ import { AgingTable, ExpenseTable, InPopup, LedgerTable, RevenueTable, type Titl
  * table adds up to its card: the same finance figures, counted the same way.
  */
 
-export type CardKey = "invoiced" | "net" | "collected" | "expenses" | "expensesOther" | "profit" | "receivables" | "payables" | "vat" | "vatOut" | "collectedOther";
+export type CardKey = "invoiced" | "net" | "collected" | "expenses" | "expensesOther" | "profit" | "receivables" | "payables" | "vat" | "vatOut" | "collectedOther" | "plLine";
 
 type Tab = { key: string; label: string; spec: LiveSpec; about: string };
 
 const report = (key: string, name: string, about: string, spec: LiveSpec): Titled =>
   ({ id: `CARD-${key.toUpperCase()}`, name, about, state: "live", spec, category: { name: "Headline figures" } });
 
-function tabsFor(card: CardKey, currency?: string): Tab[] {
+/** The records behind a Profit & Loss line, on its basis — the same rows finance's page opens (2026-11-27). */
+const plLines = (line: string, basis: string): LiveSpec =>
+  ({ kind: "ledger", source: "pl-lines", groupBy: line === "income" ? "month" : "category", view: "records", period: "month", params: { line, basis } });
+
+function tabsFor(card: CardKey, currency?: string, line?: string, basis = "invoiced"): Tab[] {
   switch (card) {
+    case "plLine":
+      return line === "net"
+        ? [
+          { key: "income", label: "Income", about: "Each record behind the income.", spec: plLines("income", basis) },
+          { key: "expenses", label: "Expenses", about: "Each record behind the expenses.", spec: plLines("expenses", basis) },
+        ]
+        : [{ key: line ?? "income", label: "Records", about: "Each record behind the line.", spec: plLines(line ?? "income", basis) }];
     case "invoiced":
     case "net":
       return [{ key: card, label: "Invoices", about: card === "net" ? "The invoices issued in the period, less the credit notes issued in it." : "The invoices issued in the period, with their credit notes.", spec: { kind: "revenue", basis: "invoiced", groupBy: "day", period: "month", chart: "line", columns: ["collected", "owed"] } }];
@@ -39,7 +50,7 @@ function tabsFor(card: CardKey, currency?: string): Tab[] {
       return [{ key: card, label: `Expenses in ${currency}`, about: `The expenses in ${currency}, as they were recorded. Never converted or added to the other currency.`, spec: { kind: "expenses", groupBy: "category", period: "month", chart: "bar", currency } }];
     case "profit":
       return [
-        { key: "income", label: "Income", about: "What the income is: each invoice before VAT.", spec: { kind: "ledger", source: "vat", groupBy: "month", view: "records", period: "month", params: { kind: "income" } } },
+        { key: "income", label: "Income", about: "What the income is: each invoice before VAT, any part paid in another currency shown apart.", spec: plLines("income", "invoiced") },
         { key: "spent", label: "Expenses", about: "What comes off it: the profit-and-loss expenses.", spec: { kind: "expenses", groupBy: "category", period: "month", chart: "bar" } },
       ];
     case "receivables":
@@ -66,20 +77,20 @@ function Table({ tab, title }: { tab: Tab; title: string }) {
   return null;
 }
 
-export interface CardOpen { card: CardKey; title: string; value: string; note?: ReactNode; currency?: string }
+export interface CardOpen { card: CardKey; title: string; value: string; note?: ReactNode; currency?: string; /** plLine: which line, and on which basis. */ line?: string; basis?: string }
 
 export function CardPopup({ open, onClose }: { open: CardOpen | null; onClose: () => void }) {
   return (
     <Dialog open={!!open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="max-w-[min(96vw,80rem)] sm:max-w-[min(96vw,80rem)]">
-        {open && <Body key={`${open.card}:${open.currency ?? ""}`} open={open} />}
+        {open && <Body key={`${open.card}:${open.currency ?? ""}:${open.line ?? ""}:${open.basis ?? ""}`} open={open} />}
       </DialogContent>
     </Dialog>
   );
 }
 
 function Body({ open }: { open: CardOpen }) {
-  const tabs = tabsFor(open.card, open.currency);
+  const tabs = tabsFor(open.card, open.currency, open.line, open.basis);
   const [on, setOn] = useState(tabs[0]!.key);
   const tab = tabs.find((t) => t.key === on) ?? tabs[0]!;
   return (
