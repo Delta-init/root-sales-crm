@@ -15,7 +15,8 @@ import {
 } from "./api";
 import { reportById, type Column, type LiveSpec, type Report } from "./catalog";
 import { ColumnsMenu, DataGrid, Pager, gridCsv, useGridColumns, type GridColumn, type GridSort } from "./DataGrid";
-import { Chip, FinanceFilters, pickOrg } from "./FinanceFilters";
+import { FinanceFilters, pickOrg, usePicks, type FilterDef } from "./FinanceFilters";
+import { Select } from "./FilterSelect";
 import { ErrorCard, ForeignUnknown, dayText, periodText, saveCsv, timeText } from "./parts";
 import { StateBadge } from "./ReportCatalog";
 
@@ -54,6 +55,22 @@ const BASIS: Record<"invoiced" | "collected" | "expense" | "paid", string> = {
   expense: "Approved expenses and those waiting for approval, by expense date. A supplier bill's expense is in it.",
   paid: "Approved expenses and those waiting for approval that have been paid, by the day paid.",
 };
+
+/* The filters each kind of table offers, in the order they sit in the bar. Every one is a column of the records too. */
+const REVENUE_FILTERS: FilterDef[] = [
+  { key: "crm", label: "CRM" }, { key: "salesperson", label: "Salesperson" }, { key: "department", label: "Department" },
+  { key: "course", label: "Course" }, { key: "status", label: "Invoice status" }, { key: "academy", label: "Academy" },
+];
+const COLLECTION_FILTERS: FilterDef[] = [
+  { key: "crm", label: "CRM" }, { key: "salesperson", label: "Salesperson" }, { key: "department", label: "Department" },
+  { key: "method", label: "Payment method" }, { key: "bank", label: "Bank account" }, { key: "course", label: "Course" }, { key: "status", label: "Invoice status" },
+];
+const EXPENSE_FILTERS: FilterDef[] = [
+  { key: "category", label: "Category" }, { key: "department", label: "Department" }, { key: "employee", label: "Employee" },
+  { key: "method", label: "Payment method" }, { key: "bank", label: "Bank account" }, { key: "source", label: "Source" }, { key: "status", label: "Status" }, { key: "paid", label: "Paid" },
+];
+const RECEIVABLE_FILTERS: FilterDef[] = [{ key: "party", label: "Student" }, { key: "band", label: "How late" }, { key: "salesperson", label: "Salesperson" }, { key: "department", label: "Department" }];
+const PAYABLE_FILTERS: FilterDef[] = [{ key: "party", label: "Vendor" }, { key: "band", label: "How late" }];
 
 const EXTRA: Record<Column, string> = { collected: "Collected so far", owed: "Still owed", average: "Average", change: "On the one before", efficiency: "Collected %" };
 const DASH = <span className="text-muted-foreground">—</span>;
@@ -114,10 +131,7 @@ function Tools({ text, onText, mode, onMode, children, actions }: { text: string
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input value={text} onChange={(e) => onText(e.target.value)} placeholder="Filter by number, name or detail" aria-label="Filter rows" className="h-8 pl-8 text-xs sm:text-xs" />
       </div>
-      <div className="flex gap-1.5" role="group" aria-label="Rows">
-        <Chip on={mode === "summary"} onClick={() => onMode("summary")} title="A row per day, month or group">Summary</Chip>
-        <Chip on={mode === "records"} onClick={() => onMode("records")} title="Every record behind it">Records</Chip>
-      </div>
+      <Select label="Rows" value={mode} onChange={(m) => onMode(m as Mode)} options={[{ key: "summary", name: "Summary: a row per group" }, { key: "records", name: "Records: every row" }]} />
       {children}
       <div className="flex items-center gap-2 sm:ml-auto">{actions}</div>
     </div>
@@ -174,9 +188,10 @@ function RevenueTable({ report, spec }: { report: Titled; spec: RevenueSpec }) {
   const org = pickOrg(orgs.data, f.entity);
   const overTime = spec.groupBy === "day" || spec.groupBy === "month";
   useYearFor(spec.period, report.id);
-  const t = useTable(spec.groupBy === "day" ? "records" : "summary", overTime, [org?.id, f.range.from, f.range.to, f.crm]);
+  const picks = usePicks("revenue");
+  const t = useTable(spec.groupBy === "day" ? "records" : "summary", overTime, [org?.id, f.range.from, f.range.to, JSON.stringify(picks)]);
 
-  const query = useFinanceRevenue(org?.id, f.range, f.crm, { basis: spec.basis, groupBy: spec.groupBy }, t.ask);
+  const query = useFinanceRevenue(org?.id, f.range, picks, { basis: spec.basis, groupBy: spec.groupBy }, t.ask);
   const data = query.data;
   const cur = data?.currency ?? org?.currency ?? "";
   const appUrl = data?.appUrl ?? "";
@@ -294,7 +309,7 @@ function RevenueTable({ report, spec }: { report: Titled; spec: RevenueSpec }) {
     setSaving(true);
     try {
       // Every row the filter keeps, not only the page on screen — in the same order.
-      const all = await fetchRevenue(org.id, f.range, f.crm, { basis: spec.basis, groupBy: spec.groupBy }, { ...t.ask, limit: 5000, offset: 0 });
+      const all = await fetchRevenue(org.id, f.range, picks, { basis: spec.basis, groupBy: spec.groupBy }, { ...t.ask, limit: 5000, offset: 0 });
       saveCsv(`${name}-records.csv`, [...top, ...gridCsv(recGrid.visible, all.rows)]);
     } catch (e) {
       toast.error(apiErrorMessage(e, "The export could not be read from finance"));
@@ -309,7 +324,7 @@ function RevenueTable({ report, spec }: { report: Titled; spec: RevenueSpec }) {
   return (
     <div className="space-y-3">
       <Head report={report} basis={BASIS[spec.basis]} source="finance's Revenue report" at={data?.generatedAt} />
-      <FinanceFilters orgs={orgs.data} org={org} />
+      <FinanceFilters orgs={orgs.data} org={org} space="revenue" options={data?.options} filters={invoiced ? REVENUE_FILTERS : COLLECTION_FILTERS} />
       <Tools
         text={t.text} onText={t.setText} mode={t.mode} onMode={t.setMode}
         actions={
@@ -372,9 +387,10 @@ function ExpenseTable({ report, spec }: { report: Titled; spec: ExpenseSpec }) {
   const [currency, setCurrency] = useState<string | undefined>(undefined);
   // Another organization has its own currencies: back to its own.
   useEffect(() => { setCurrency(undefined); }, [orgId]);
-  const t = useTable(spec.groupBy === "day" ? "records" : "summary", overTime, [orgId, f.range.from, f.range.to, basis, pnl, currency]);
+  const picks = usePicks("expenses");
+  const t = useTable(spec.groupBy === "day" ? "records" : "summary", overTime, [orgId, f.range.from, f.range.to, basis, pnl, currency, JSON.stringify(picks)]);
 
-  const ask = { basis, groupBy: spec.groupBy, pnl, currency, only: spec.only };
+  const ask = { basis, groupBy: spec.groupBy, pnl, currency, only: spec.only, picks };
   const query = useFinanceExpenses(orgId, f.range, ask, t.ask);
   const data = query.data;
   const cur = data?.currency ?? org?.currency ?? "";
@@ -457,7 +473,7 @@ function ExpenseTable({ report, spec }: { report: Titled; spec: ExpenseSpec }) {
     <div className="space-y-3">
       <Head report={report} basis={BASIS[basis]} source="finance's Expense report" at={data?.generatedAt} />
       {/* Expenses belong to no CRM, so there is no CRM to pick. */}
-      <FinanceFilters orgs={orgs.data} org={org} crm={false} />
+      <FinanceFilters orgs={orgs.data} org={org} space="expenses" options={data?.options} filters={EXPENSE_FILTERS.filter((d) => !spec.only?.[d.key])} />
       <Tools
         text={t.text} onText={t.setText} mode={t.mode} onMode={t.setMode}
         actions={
@@ -470,18 +486,10 @@ function ExpenseTable({ report, spec }: { report: Titled; spec: ExpenseSpec }) {
           </>
         }
       >
-        <div className="flex gap-1.5" role="group" aria-label="Which expenses">
-          <Chip on={pnl} onClick={() => setPnl(true)} title="What counts as an expense in profit and loss: advances, payroll clearing, VAT and loan principal left out">Profit and loss only</Chip>
-          <Chip on={!pnl} onClick={() => setPnl(false)} title="Everything recorded as an expense">All expenses</Chip>
-        </div>
-        <div className="flex gap-1.5" role="group" aria-label="Dated by">
-          <Chip on={basis === "expense"} onClick={() => setBasis("expense")}>By expense date</Chip>
-          <Chip on={basis === "paid"} onClick={() => setBasis("paid")}>By paid date</Chip>
-        </div>
+        <Select label="Which expenses" value={pnl ? "pnl" : "all"} onChange={(v) => setPnl(v === "pnl")} options={[{ key: "pnl", name: "Profit and loss only" }, { key: "all", name: "All expenses" }]} />
+        <Select label="Dated by" value={basis} onChange={(v) => setBasis(v as "expense" | "paid")} options={[{ key: "expense", name: "By expense date" }, { key: "paid", name: "By paid date" }]} />
         {data && data.currencies.length > 1 && (
-          <div className="flex gap-1.5" role="group" aria-label="Currency">
-            {data.currencies.map((c) => <Chip key={c} on={c === cur} onClick={() => setCurrency(c)}>{c}</Chip>)}
-          </div>
+          <Select label="Currency" value={cur} onChange={setCurrency} options={data.currencies.map((c) => ({ key: c, name: c }))} />
         )}
       </Tools>
 
@@ -536,8 +544,9 @@ function AgingTable({ report, spec }: { report: Titled; spec: AgingSpec }) {
   const receivable = spec.side === "receivables";
   const byParty = spec.groupBy === "party";
   // What is past due opens most late first; everything else soonest due first.
-  const t = useTable(spec.view, false, [org?.id], spec.due === "overdue" ? { key: "daysOverdue", dir: "desc" } : { key: "dueDate", dir: "asc" });
-  const ask = { kind: spec.side, groupBy: spec.groupBy, due: spec.due };
+  const picks = usePicks(spec.side);
+  const t = useTable(spec.view, false, [org?.id, JSON.stringify(picks)], spec.due === "overdue" ? { key: "daysOverdue", dir: "desc" } : { key: "dueDate", dir: "asc" });
+  const ask = { kind: spec.side, groupBy: spec.groupBy, due: spec.due, picks };
   const query = useFinanceAging(org?.id, ask, t.ask);
   const data = query.data;
   const cur = data?.currency ?? org?.currency ?? "";
@@ -573,6 +582,7 @@ function AgingTable({ report, spec }: { report: Titled; spec: AgingSpec }) {
       { key: "number", header: "Number", sort: "number", cell: (r) => numberCell(appUrl, r), text: (r) => r.number },
       { key: "title", header: party, sort: "title", cell: (r) => clip(r.title), text: (r) => r.title },
       { key: "date", header: "Issued", sort: "date", cell: (r) => dayText(r.date), text: (r) => r.date },
+      ...(receivable ? [textCol("salesperson", "Salesperson") as unknown as GridColumn<AgingRow>, textCol("department", "Department", { hidden: true }) as unknown as GridColumn<AgingRow>] : []),
       { key: "daysOverdue", header: "Days late", align: "right", sort: "daysOverdue", cell: (r) => (r.daysOverdue > 0 ? <span className="text-rose-600 dark:text-rose-400">{count(r.daysOverdue)}</span> : DASH), text: (r) => r.daysOverdue },
       { key: "band", header: "How late", cell: (r) => r.band, text: (r) => r.band },
       { key: "totalMinor", header: `${receivable ? "Invoice" : "Bill"} total`, align: "right", sort: "totalMinor", cell: (r) => money(r.totalMinor, cur), text: (r) => r.totalMinor / 100, total: money(totals?.totalMinor ?? 0, cur), totalText: (totals?.totalMinor ?? 0) / 100 },
@@ -609,7 +619,7 @@ function AgingTable({ report, spec }: { report: Titled; spec: AgingSpec }) {
     <div className="space-y-3">
       <Head report={report} basis={asOf} source={`finance's aged ${receivable ? "receivables" : "payables"}`} at={data?.generatedAt} />
       {/* Balances as they stand: no CRM and no period to pick. */}
-      <FinanceFilters orgs={orgs.data} org={org} crm={false} period={false} />
+      <FinanceFilters orgs={orgs.data} org={org} period={false} space={spec.side} options={data?.options} filters={receivable ? RECEIVABLE_FILTERS : PAYABLE_FILTERS} />
       <Tools
         text={t.text} onText={t.setText} mode={t.mode} onMode={t.setMode}
         actions={
@@ -658,8 +668,8 @@ function EntitiesTable({ report, basis }: { report: Titled; basis: "invoiced" | 
   const page: PageAsk = { limit: 0, offset: 0, sort: "date", dir: "desc", q: "" };
   const results = useQueries({
     queries: list.map((o) => ({
-      queryKey: ["report-org", "finance", "revenue", o.id, f.range.from, f.range.to, f.crm, basis, "month", 0, 0, "date", "desc", ""],
-      queryFn: () => fetchRevenue(o.id, f.range, f.crm, { basis, groupBy: "month" }, page),
+      queryKey: ["report-org", "finance", "revenue", o.id, f.range.from, f.range.to, "entities", basis, "month", 0, 0, "date", "desc", ""],
+      queryFn: () => fetchRevenue(o.id, f.range, {}, { basis, groupBy: "month" }, page),
       staleTime: 60_000, retry: false, refetchOnWindowFocus: false,
     })),
   });

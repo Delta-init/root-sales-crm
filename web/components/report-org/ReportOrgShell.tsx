@@ -72,6 +72,14 @@ interface Filters {
   setEntity: (entity: string) => void;
   range: Range;
   setRange: (range: Range) => void;
+  /**
+   * What each filter of the live tables is set to — several values each — kept per kind of table ("revenue",
+   * "expenses", "receivables", "payables"), since a salesperson picked for revenue means nothing to a list of bills.
+   * Kept here so it stays as one report is left for the next of its kind.
+   */
+  picked: Record<string, Record<string, string[]>>;
+  setPicked: (space: string, filter: string, values: string[]) => void;
+  clearPicked: (space: string) => void;
 }
 
 const FiltersContext = createContext<Filters | null>(null);
@@ -111,14 +119,18 @@ export function ReportOrgShell({ children }: { children: ReactNode }) {
   const [month, setMonth] = useState(thisMonth);
   const [entity, setEntity] = useState<string | null>(null);
   const [range, setRange] = useState<Range>(() => monthRange(thisMonth));
+  const [picked, setPickedState] = useState<Record<string, Record<string, string[]>>>({});
 
   const filters = useMemo<Filters>(
     () => ({
       crm, currency, month, thisMonth, setCrm, setCurrency, setMonth,
       reset: () => { setCrm("all"); setCurrency("AED"); setMonth(thisMonth); },
       entity, setEntity, range, setRange,
+      picked,
+      setPicked: (space, filter, values) => setPickedState((all) => ({ ...all, [space]: { ...(all[space] ?? {}), [filter]: values } })),
+      clearPicked: (space) => setPickedState((all) => ({ ...all, [space]: {} })),
     }),
-    [crm, currency, month, thisMonth, entity, range],
+    [crm, currency, month, thisMonth, entity, range, picked],
   );
 
   const isOn = (slug: string) => path === `/report-org/${slug}` || path.startsWith(`/report-org/${slug}/`);

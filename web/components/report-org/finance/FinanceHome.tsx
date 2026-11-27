@@ -3,12 +3,10 @@
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { CRMS } from "../data";
 import { useReportOrgFilters } from "../ReportOrgShell";
 import { change, count, expensesText, invoicesText, money, paymentsText, percent, useFinanceOrgs, useFinanceOverview, type Overview, type Pair } from "./api";
-import { FinanceFilters, pickOrg } from "./FinanceFilters";
+import { FinanceFilters, pickOrg, usePicks } from "./FinanceFilters";
 import { Bars, CardsLoading, ErrorCard, ForeignCards, ForeignUnknown, axisMoney, dayShort, dayText, daysBetween, foreignText, periodText, timeText } from "./parts";
-import { ReportCatalog } from "./ReportCatalog";
 
 /*
  * Report Org → Finance and revenue (2026-11-26): the section's own page.
@@ -16,8 +14,14 @@ import { ReportCatalog } from "./ReportCatalog";
  * The headline figures are finance's, read as the page opens — invoiced and collected from its Revenue report,
  * expenses and profit from its Profit & Loss, what is owed from its aged lists. The profit is income less expenses
  * from invoices, bills and expenses: finance keeps no ledger, and the card says so rather than calling it net profit
- * as a set of books would. Below them, every report in the specification, live or not.
+ * as a set of books would. The reports themselves are in the side menu.
  */
+
+/** The CRMs the headline figures can be kept to — the sales CRMs, CS Portal, and what was typed in finance itself. */
+const HOME_CRMS = [
+  { key: "delta", name: "Sales CRM" }, { key: "draw", name: "Draw" }, { key: "remote", name: "Remote CRM" }, { key: "banglore", name: "Banglore CRM" },
+  { key: "tetra-course", name: "CS Portal" }, { key: "old_books", name: "Old books" }, { key: "__none", name: "Typed in finance" },
+];
 
 const ACCOUNT_TYPE: Record<string, string> = { current: "Bank", savings: "Savings", petty_cash: "Petty cash", internal: "Internal", psp: "Payment provider" };
 
@@ -111,7 +115,7 @@ function Figures({ o }: { o: Overview }) {
     <div className="space-y-6">
       {o.crm && (
         <p className="rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
-          Invoiced and collected are the {CRMS.find((c) => c.code === o.crm)?.label ?? o.crm} CRM&apos;s alone. Expenses, profit, what is owed, VAT and the bank are {o.org.name}&apos;s as a whole.
+          Invoiced and collected are kept to {o.crm.map((k) => HOME_CRMS.find((c) => c.key === k)?.name ?? k).join(", ")} alone. Expenses, profit, what is owed, VAT and the bank are {o.org.name}&apos;s as a whole.
         </p>
       )}
 
@@ -198,7 +202,8 @@ export function FinanceHome() {
   const f = useReportOrgFilters();
   const orgs = useFinanceOrgs();
   const org = pickOrg(orgs.data, f.entity);
-  const overview = useFinanceOverview(org?.id, f.range, f.crm);
+  const crm = usePicks("revenue").crm ?? [];
+  const overview = useFinanceOverview(org?.id, f.range, crm);
   const error = orgs.error ?? overview.error;
 
   return (
@@ -217,7 +222,7 @@ export function FinanceHome() {
         )}
       </div>
 
-      <FinanceFilters orgs={orgs.data} org={org} />
+      <FinanceFilters orgs={orgs.data} org={org} space="revenue" filters={[{ key: "crm", label: "CRM" }]} fixed={{ crm: HOME_CRMS }} />
 
       {error ? (
         <ErrorCard error={error} onRetry={() => { void orgs.refetch(); void overview.refetch(); }} />
@@ -227,7 +232,6 @@ export function FinanceHome() {
         <CardsLoading n={8} />
       )}
 
-      <ReportCatalog />
     </div>
   );
 }

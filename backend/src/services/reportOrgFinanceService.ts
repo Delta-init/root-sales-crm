@@ -24,8 +24,11 @@ const PAGING = ["limit", "offset", "sort", "dir", "q"] as const;
 function passOn(q: Record<string, unknown>, keys: readonly string[]): string {
   const params = new URLSearchParams();
   for (const key of keys) {
+    // One value, or several of the same filter (a table's multi-select): each is passed on under the same name.
     const v = q[key];
-    if (typeof v === "string" && v.trim()) params.set(key, v.trim().slice(0, 200));
+    for (const one of (Array.isArray(v) ? v : [v]).slice(0, 50)) {
+      if (typeof one === "string" && one.trim()) params.append(key, one.trim().slice(0, 200));
+    }
   }
   const s = params.toString();
   return s ? `?${s}` : "";
@@ -78,6 +81,6 @@ export async function financeExpenses(q: Record<string, unknown>) {
  * student or vendor, with every open one as a row. Finance keeps no balances as of a past date, so there is no period.
  */
 export async function financeAging(q: Record<string, unknown>) {
-  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/aging${passOn(q, ["org", "kind", "due", "groupBy", ...PAGING])}`, "share what is still owed");
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/aging${passOn(q, ["org", "kind", "due", "groupBy", "party", "band", "salesperson", "department", ...PAGING])}`, "share what is still owed");
   return { ...data, appUrl };
 }

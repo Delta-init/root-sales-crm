@@ -24,7 +24,8 @@ export interface Overview {
   org: FinanceOrg;
   period: Period;
   before: Period;
-  crm: string | null;
+  /** The CRMs the invoiced and collected figures were kept to; null: all of them. */
+  crm: string[] | null;
   kpis: Record<"grossInvoiced" | "creditNotes" | "netInvoiced" | "collections" | "income" | "expenses" | "netProfit", Pair>;
   receivables: Aged;
   payables: Aged;
@@ -68,6 +69,8 @@ export interface ReportRow {
 interface Paged { rows: ReportRow[]; rowCount: number; offset: number; sort: string; dir: "asc" | "desc"; recordCount: number; capped: boolean }
 
 export interface RevenueReport extends Paged {
+  /** What each filter can be set to in this period: every value, with its name and how many records it has. */
+  options?: Record<string, { key: string; name: string; count: number }[]>;
   generatedAt: string;
   org: FinanceOrg;
   period: Period;
@@ -86,6 +89,8 @@ export interface RevenueReport extends Paged {
 export interface CurrencyTotals { currency: string; amountMinor: number; count: number; paidMinor?: number; unpaidMinor?: number }
 
 export interface ExpenseReport extends Paged {
+  /** What each filter can be set to in this period: every value, with its name and how many records it has. */
+  options?: Record<string, { key: string; name: string; count: number }[]>;
   generatedAt: string;
   org: FinanceOrg;
   period: Period;
@@ -105,13 +110,18 @@ export interface ExpenseReport extends Paged {
   appUrl: string;
 }
 
-const get = async <T,>(path: string, params?: Record<string, string | undefined>) => {
+const get = async <T,>(path: string, params?: Record<string, string | string[] | undefined>) => {
   const { data } = await api.get(`/report-org/finance/${path}`, { params });
   return data.data as T;
 };
 
 /** Finance's "all" is no filter at all. */
-const crmParam = (crm: string) => (crm && crm !== "all" ? crm : undefined);
+/** What each filter is set to: any number of values each. An empty list is no filter. */
+export type Picks = Record<string, string[]>;
+/** For a query's key: the same picks always read the same. */
+const picksKey = (p: Picks) => JSON.stringify(Object.keys(p).sort().map((k) => [k, [...p[k]].sort()]));
+/** As request parameters: a filter with several values goes several times under its name. */
+const picksParams = (p: Picks): Record<string, string[]> => Object.fromEntries(Object.entries(p).filter(([, v]) => v.length > 0));
 
 /** The figures are finance's live ones; a minute is fresh enough, and a failure is said once rather than retried. */
 const LIVE = { staleTime: 60_000, retry: false, refetchOnWindowFocus: false } as const;
@@ -124,10 +134,10 @@ export const useFinanceOrgs = () =>
     staleTime: 10 * 60_000,
   });
 
-export const useFinanceOverview = (org: string | undefined, period: Period, crm: string) =>
+export const useFinanceOverview = (org: string | undefined, period: Period, crm: string[]) =>
   useQuery({
-    queryKey: ["report-org", "finance", "overview", org, period.from, period.to, crm],
-    queryFn: () => get<Overview>("overview", { org, from: period.from, to: period.to, crm: crmParam(crm) }),
+    queryKey: ["report-org", "finance", "overview", org, period.from, period.to, [...crm].sort().join("|")],
+    queryFn: () => get<Overview>("overview", { org, from: period.from, to: period.to, ...(crm.length ? { crm } : {}) }),
     enabled: !!org,
     ...LIVE,
   });
@@ -140,29 +150,29 @@ const pageKey = (p: PageAsk) => [p.limit, p.offset, p.sort, p.dir, p.q];
 
 export interface RevenueAsk { basis: "invoiced" | "collected"; groupBy: string }
 
-export const fetchRevenue = (org: string, period: Period, crm: string, ask: RevenueAsk, page: PageAsk) =>
-  get<RevenueReport>("revenue", { org, from: period.from, to: period.to, crm: crmParam(crm), basis: ask.basis, groupBy: ask.groupBy, ...pageParams(page) });
+export const fetchRevenue = (org: string, period: Period, picks: Picks, ask: RevenueAsk, page: PageAsk) =>
+  get<RevenueReport>("revenue", { org, from: period.from, to: period.to, basis: ask.basis, groupBy: ask.groupBy, ...picksParams(picks), ...pageParams(page) });
 
-export const useFinanceRevenue = (org: string | undefined, period: Period, crm: string, ask: RevenueAsk, page: PageAsk) =>
+export const useFinanceRevenue = (org: string | undefined, period: Period, picks: Picks, ask: RevenueAsk, page: PageAsk) =>
   useQuery({
-    queryKey: ["report-org", "finance", "revenue", org, period.from, period.to, crm, ask.basis, ask.groupBy, ...pageKey(page)],
-    queryFn: () => fetchRevenue(org!, period, crm, ask, page),
+    queryKey: ["report-org", "finance", "revenue", org, period.from, period.to, picksKey(picks), ask.basis, ask.groupBy, ...pageKey(page)],
+    queryFn: () => fetchRevenue(org!, period, picks, ask, page),
     enabled: !!org,
     // Turning a page keeps the rows on screen until the next ones arrive, rather than blanking the table.
     placeholderData: (before) => before,
     ...LIVE,
   });
 
-export interface ExpenseAsk { basis: "expense" | "paid"; groupBy: string; pnl: boolean; currency?: string; only?: Record<string, string> }
+export interface ExpenseAsk { basis: "expense" | "paid"; groupBy: string; pnl: boolean; currency?: string; only?: Record<string, string>; picks?: Picks }
 
 export const fetchExpenses = (org: string, period: Period, ask: ExpenseAsk, page: PageAsk) =>
   get<ExpenseReport>("expenses", {
-    org, from: period.from, to: period.to, basis: ask.basis, groupBy: ask.groupBy, pnl: ask.pnl ? "1" : "0", currency: ask.currency, ...(ask.only ?? {}), ...pageParams(page),
+    org, from: period.from, to: period.to, basis: ask.basis, groupBy: ask.groupBy, pnl: ask.pnl ? "1" : "0", currency: ask.currency, ...picksParams(ask.picks ?? {}), ...(ask.only ?? {}), ...pageParams(page),
   });
 
 export const useFinanceExpenses = (org: string | undefined, period: Period, ask: ExpenseAsk, page: PageAsk) =>
   useQuery({
-    queryKey: ["report-org", "finance", "expenses", org, period.from, period.to, ask.basis, ask.groupBy, ask.pnl, ask.currency ?? "", JSON.stringify(ask.only ?? {}), ...pageKey(page)],
+    queryKey: ["report-org", "finance", "expenses", org, period.from, period.to, ask.basis, ask.groupBy, ask.pnl, ask.currency ?? "", JSON.stringify(ask.only ?? {}), picksKey(ask.picks ?? {}), ...pageKey(page)],
     queryFn: () => fetchExpenses(org!, period, ask, page),
     enabled: !!org,
     placeholderData: (before) => before,
@@ -185,20 +195,21 @@ export interface AgingReport {
   currency: string;
   totals: { amountMinor: number; count: number; totalMinor: number; overdueMinor: number; overdueCount: number };
   groups: AgingGroup[];
+  options?: Record<string, { key: string; name: string; count: number }[]>;
   rows: AgingRow[]; rowCount: number; offset: number; sort: string; dir: "asc" | "desc"; recordCount: number; capped: boolean;
   /** What is owed in another currency than the organization's — apart, never in the figures above. */
   otherCurrencies: { currency: string; what: string; amountMinor: number; count: number }[];
   appUrl: string;
 }
 
-export interface AgingAsk { kind: "receivables" | "payables"; groupBy: "band" | "party"; due?: "upcoming" | "overdue" }
+export interface AgingAsk { kind: "receivables" | "payables"; groupBy: "band" | "party"; due?: "upcoming" | "overdue"; picks?: Picks }
 
 export const fetchAging = (org: string, ask: AgingAsk, page: PageAsk) =>
-  get<AgingReport>("aging", { org, kind: ask.kind, groupBy: ask.groupBy, due: ask.due, ...pageParams(page) });
+  get<AgingReport>("aging", { org, kind: ask.kind, groupBy: ask.groupBy, due: ask.due, ...picksParams(ask.picks ?? {}), ...pageParams(page) });
 
 export const useFinanceAging = (org: string | undefined, ask: AgingAsk, page: PageAsk) =>
   useQuery({
-    queryKey: ["report-org", "finance", "aging", org, ask.kind, ask.groupBy, ask.due ?? "", ...pageKey(page)],
+    queryKey: ["report-org", "finance", "aging", org, ask.kind, ask.groupBy, ask.due ?? "", picksKey(ask.picks ?? {}), ...pageKey(page)],
     queryFn: () => fetchAging(org!, ask, page),
     enabled: !!org,
     placeholderData: (before) => before,
