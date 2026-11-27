@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiErrorMessage } from "@/lib/axios";
+import { cn } from "@/lib/utils";
 import { count, money, paymentsText, type ForeignLine, type Period } from "./api";
 
 /* Small pieces the Finance and revenue pages share. */
@@ -117,11 +118,18 @@ export function Bars({ rows, empty }: { rows: BarRow[]; empty: string }) {
  * card"). Finance keeps it out of Collected and gives it as it was paid; here it is a card of its own per currency,
  * beside the report's figures and never in them, with what finance recorded it as.
  */
-export function ForeignCards({ lines, cur, label }: { lines: ForeignLine[] | undefined; cur: string; label: string }) {
+export function ForeignCards({ lines, cur, label, onOpen }: { lines: ForeignLine[] | undefined; cur: string; label: string; onOpen?: (l: ForeignLine) => void }) {
   return (
     <>
       {(lines ?? []).filter((l) => l.count > 0).map((l) => (
-        <Card key={l.currency} className="border-amber-500/40">
+        <Card
+          key={l.currency}
+          {...(onOpen ? {
+            role: "button", tabIndex: 0, title: "Open the breakdown", onClick: () => onOpen(l),
+            onKeyDown: (e: React.KeyboardEvent) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(l); } },
+          } : {})}
+          className={cn("border-amber-500/40", onOpen && "cursor-pointer transition-colors hover:border-amber-500/70 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+        >
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground">{label} in {l.currency}</p>
             <p className="mt-1.5 break-words text-xl font-semibold tabular-nums text-amber-600 dark:text-amber-400">{money(l.amountMinor, l.currency)}</p>

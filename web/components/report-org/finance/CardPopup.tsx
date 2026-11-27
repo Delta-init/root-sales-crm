@@ -17,7 +17,7 @@ import { AgingTable, ExpenseTable, InPopup, LedgerTable, RevenueTable, type Titl
  * table adds up to its card: the same finance figures, counted the same way.
  */
 
-export type CardKey = "invoiced" | "net" | "collected" | "expenses" | "expensesOther" | "profit" | "receivables" | "payables" | "vat";
+export type CardKey = "invoiced" | "net" | "collected" | "expenses" | "expensesOther" | "profit" | "receivables" | "payables" | "vat" | "vatOut" | "collectedOther";
 
 type Tab = { key: string; label: string; spec: LiveSpec; about: string };
 
@@ -31,6 +31,8 @@ function tabsFor(card: CardKey, currency?: string): Tab[] {
       return [{ key: card, label: "Invoices", about: card === "net" ? "The invoices issued in the period, less the credit notes issued in it." : "The invoices issued in the period, with their credit notes.", spec: { kind: "revenue", basis: "invoiced", groupBy: "day", period: "month", chart: "line", columns: ["collected", "owed"] } }];
     case "collected":
       return [{ key: card, label: "Payments", about: "Each payment received in the period.", spec: { kind: "revenue", basis: "collected", groupBy: "day", period: "month", chart: "line" } }];
+    case "collectedOther":
+      return [{ key: card, label: `Payments in ${currency}`, about: `Each payment made in ${currency}, as it was paid. Never converted or added to the organization's own currency.`, spec: { kind: "revenue", basis: "collected", groupBy: "day", period: "month", chart: "line", paidIn: currency } }];
     case "expenses":
       return [{ key: card, label: "Expenses", about: "The expenses counted in the card: profit-and-loss expenses, approved or waiting.", spec: { kind: "expenses", groupBy: "category", period: "month", chart: "bar" } }];
     case "expensesOther":
@@ -44,6 +46,8 @@ function tabsFor(card: CardKey, currency?: string): Tab[] {
       return [{ key: card, label: "Open invoices", about: "Every invoice still owed on, by how late it is.", spec: { kind: "aging", side: "receivables", groupBy: "band", view: "summary" } }];
     case "payables":
       return [{ key: card, label: "Open bills", about: "Every supplier bill still owed on, by how late it is.", spec: { kind: "aging", side: "payables", groupBy: "band", view: "summary" } }];
+    case "vatOut":
+      return [{ key: "output", label: "Output VAT", about: "VAT charged on sales.", spec: { kind: "ledger", source: "vat", groupBy: "month", view: "records", period: "month", params: { kind: "output" } } }];
     case "vat":
       return [
         { key: "output", label: "Output VAT", about: "VAT charged on sales.", spec: { kind: "ledger", source: "vat", groupBy: "month", view: "records", period: "month", params: { kind: "output" } } },

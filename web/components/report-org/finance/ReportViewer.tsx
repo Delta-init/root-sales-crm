@@ -206,7 +206,7 @@ export function RevenueTable({ report, spec }: { report: Titled; spec: RevenueSp
   const picks = usePicks("revenue");
   const t = useTable(spec.groupBy === "day" ? "records" : "summary", overTime, [org?.id, f.range.from, f.range.to, JSON.stringify(picks)]);
 
-  const query = useFinanceRevenue(org?.id, f.range, picks, { basis: spec.basis, groupBy: spec.groupBy }, t.ask);
+  const query = useFinanceRevenue(org?.id, f.range, picks, { basis: spec.basis, groupBy: spec.groupBy, paidIn: spec.paidIn }, t.ask);
   const data = query.data;
   const cur = data?.currency ?? org?.currency ?? "";
   const appUrl = data?.appUrl ?? "";
@@ -278,15 +278,24 @@ export function RevenueTable({ report, spec }: { report: Titled; spec: RevenueSp
       {
         key: "amount", header: `Amount (${cur})`, align: "right", sort: "amount",
         // A payment made in another currency is not in this column: its money is in its own, and what finance recorded it as is beside.
-        cell: (r) => r.recordedMinor !== undefined ? DASH : (
+        // Asked for one other currency's payments only, they are this column: in that currency, as paid.
+        cell: (r) => r.recordedMinor !== undefined && !spec.paidIn ? DASH : (
           <>
             <span className={r.amountMinor < 0 ? "text-rose-600 dark:text-rose-400" : "font-medium"}>{money(r.amountMinor, cur)}</span>
             {r.paidIn && <span className="ml-1.5 text-[11px] text-amber-600 dark:text-amber-400" title={`Paid in ${r.paidIn}, but the amount in ${r.paidIn} was never recorded, so it is counted in ${cur}`}>paid in {r.paidIn}</span>}
           </>
         ),
-        text: (r) => (r.recordedMinor !== undefined ? "" : r.amountMinor / 100),
+        text: (r) => (r.recordedMinor !== undefined && !spec.paidIn ? "" : r.amountMinor / 100),
         total: money(totals?.amountMinor ?? 0, cur), totalText: (totals?.amountMinor ?? 0) / 100,
       },
+      // …and beside them, what finance recorded each as in the organization's own currency — shown, never added.
+      ...(spec.paidIn && data ? [{
+        key: "recorded", header: `Recorded as (${data.org.currency})`, align: "right" as const,
+        cell: (r: ReportRow) => (r.recordedMinor !== undefined ? <span className="text-muted-foreground">{money(r.recordedMinor, data.org.currency)}</span> : DASH),
+        text: (r: ReportRow) => (r.recordedMinor !== undefined ? r.recordedMinor / 100 : ""),
+        total: <span className="text-muted-foreground">{money(Number((totals as { recordedMinor?: number } | undefined)?.recordedMinor ?? 0), data.org.currency)}</span>,
+        totalText: Number((totals as { recordedMinor?: number } | undefined)?.recordedMinor ?? 0) / 100,
+      }] : []),
       ...lines.flatMap((l): GridColumn<ReportRow>[] => [
         {
           key: `paid-${l.currency}`, header: `Paid in ${l.currency}`, align: "right",
@@ -309,7 +318,7 @@ export function RevenueTable({ report, spec }: { report: Titled; spec: RevenueSp
       );
     }
     return cols;
-  }, [data, lines, cur, invoiced, appUrl]);
+  }, [data, lines, cur, invoiced, appUrl, spec.paidIn]);
 
   const sumGrid = useGridColumns(`${report.id}:summary`, sumCols);
   const recGrid = useGridColumns(`${report.id}:records`, recCols);
@@ -324,7 +333,7 @@ export function RevenueTable({ report, spec }: { report: Titled; spec: RevenueSp
     setSaving(true);
     try {
       // Every row the filter keeps, not only the page on screen — in the same order.
-      const all = await fetchRevenue(org.id, f.range, picks, { basis: spec.basis, groupBy: spec.groupBy }, { ...t.ask, limit: 5000, offset: 0 });
+      const all = await fetchRevenue(org.id, f.range, picks, { basis: spec.basis, groupBy: spec.groupBy, paidIn: spec.paidIn }, { ...t.ask, limit: 5000, offset: 0 });
       saveCsv(`${name}-records.csv`, [...top, ...gridCsv(recGrid.visible, all.rows)]);
     } catch (e) {
       toast.error(apiErrorMessage(e, "The export could not be read from finance"));

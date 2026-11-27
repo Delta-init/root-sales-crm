@@ -148,14 +148,14 @@ export interface PageAsk { limit: number; offset: number; sort: string; dir: "as
 const pageParams = (p: PageAsk) => ({ limit: String(p.limit), offset: String(p.offset), sort: p.sort, dir: p.dir, q: p.q || undefined });
 const pageKey = (p: PageAsk) => [p.limit, p.offset, p.sort, p.dir, p.q];
 
-export interface RevenueAsk { basis: "invoiced" | "collected"; groupBy: string }
+export interface RevenueAsk { basis: "invoiced" | "collected"; groupBy: string; /** Only the payments made in this other currency. */ paidIn?: string }
 
 export const fetchRevenue = (org: string, period: Period, picks: Picks, ask: RevenueAsk, page: PageAsk) =>
-  get<RevenueReport>("revenue", { org, from: period.from, to: period.to, basis: ask.basis, groupBy: ask.groupBy, ...picksParams(picks), ...pageParams(page) });
+  get<RevenueReport>("revenue", { org, from: period.from, to: period.to, basis: ask.basis, groupBy: ask.groupBy, ...(ask.paidIn ? { paidIn: ask.paidIn } : {}), ...picksParams(picks), ...pageParams(page) });
 
 export const useFinanceRevenue = (org: string | undefined, period: Period, picks: Picks, ask: RevenueAsk, page: PageAsk) =>
   useQuery({
-    queryKey: ["report-org", "finance", "revenue", org, period.from, period.to, picksKey(picks), ask.basis, ask.groupBy, ...pageKey(page)],
+    queryKey: ["report-org", "finance", "revenue", org, period.from, period.to, picksKey(picks), ask.basis, ask.groupBy, ask.paidIn ?? "", ...pageKey(page)],
     queryFn: () => fetchRevenue(org!, period, picks, ask, page),
     enabled: !!org,
     // Turning a page keeps the rows on screen until the next ones arrive, rather than blanking the table.

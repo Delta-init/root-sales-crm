@@ -137,7 +137,7 @@ function Figures({ o, onOpen }: { o: Overview; onOpen: (c: CardOpen) => void }) 
     <div className="space-y-6">
       {keptTo.length > 0 && (
         <p className="rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
-          Invoiced, collected, receivables and output VAT are kept to {crmNames} alone. Expenses, payables, input VAT, income less expenses and the bank are {o.org.name}&apos;s as a whole: finance records no CRM on an expense or a supplier bill.
+          Kept to {crmNames}: invoiced, collected, receivables and output VAT. Expenses, income less expenses, payables and input VAT are not shown, since finance records no CRM on an expense or a supplier bill. Clear the CRM to see them.
         </p>
       )}
 
@@ -145,9 +145,11 @@ function Figures({ o, onOpen }: { o: Overview; onOpen: (c: CardOpen) => void }) 
         <Kpi label="Gross invoiced" value={money(k.grossInvoiced.minor, cur)} note={`${invoicesText(k.grossInvoiced.count ?? 0)}, by issue date. VAT included.`} pair={k.grossInvoiced} before={before} onOpen={open("invoiced", "Gross invoiced", money(k.grossInvoiced.minor, cur))} />
         <Kpi label="Net invoiced" value={money(k.netInvoiced.minor, cur)} note={`After ${money(k.creditNotes.minor, cur)} of credit notes`} pair={k.netInvoiced} before={before} onOpen={open("net", "Net invoiced", money(k.netInvoiced.minor, cur), `Invoices less ${money(k.creditNotes.minor, cur)} of credit notes. The table's total is the card's.`)} />
         <Kpi label={foreign.length ? `Collections in ${cur}` : "Collections"} value={money(collected, cur)} note={`${paymentsText(k.collections.count ?? 0)}, by the day paid`} pair={k.collections} before={before} onOpen={open("collected", foreign.length ? `Collections in ${cur}` : "Collections", money(collected, cur))} />
-        <ForeignCards lines={foreign} cur={cur} label="Collections" />
-        <Kpi label={spentOther.length ? `Expenses in ${cur}` : "Expenses"} value={money(k.expenses.minor, cur)} note={`${expensesText(k.expenses.count ?? 0)} that count in profit and loss, approved or waiting`} pair={k.expenses} before={before} good="down" onOpen={open("expenses", spentOther.length ? `Expenses in ${cur}` : "Expenses", money(k.expenses.minor, cur))} />
-        {spentOther.map((c) => (
+        <ForeignCards lines={foreign} cur={cur} label="Collections" onOpen={(l) => onOpen({ card: "collectedOther", title: `Collections in ${l.currency}`, value: money(l.amountMinor, l.currency), note: `Paid in ${l.currency}, as paid.${l.recordedMinor ? ` Recorded as ${money(l.recordedMinor, cur)}, not in the ${cur} figure.` : ""}`, currency: l.currency })} />
+        {/* What finance cannot split by CRM is shown only for the whole organization (the user, 2026-11-27: "if expense
+            don't have it, didn't need to show the stats card there if that type of crm select"). */}
+        {!keptTo.length && <Kpi label={spentOther.length ? `Expenses in ${cur}` : "Expenses"} value={money(k.expenses.minor, cur)} note={`${expensesText(k.expenses.count ?? 0)} that count in profit and loss, approved or waiting`} pair={k.expenses} before={before} good="down" onOpen={open("expenses", spentOther.length ? `Expenses in ${cur}` : "Expenses", money(k.expenses.minor, cur))} />}
+        {!keptTo.length && spentOther.map((c) => (
           <Opens key={c.currency} className="border-amber-500/40" onOpen={open("expensesOther", `Expenses in ${c.currency}`, money(c.amountMinor, c.currency), `Recorded in ${c.currency}. Not in the ${cur} figure, nor in the profit.`, c.currency)}>
             <CardContent className="p-4">
               <p className="text-xs text-muted-foreground">Expenses in {c.currency}</p>
@@ -156,10 +158,15 @@ function Figures({ o, onOpen }: { o: Overview; onOpen: (c: CardOpen) => void }) 
             </CardContent>
           </Opens>
         ))}
-        <Kpi label="Income less expenses" value={money(k.netProfit.minor, cur)} note="Invoices before VAT, less the expenses beside it. Finance keeps no ledger." pair={k.netProfit} before={before} onOpen={open("profit", "Income less expenses", money(k.netProfit.minor, cur), `${lessText(["Income before VAT", k.income.minor], ["expenses", k.expenses.minor], cur)} Kept to no CRM: finance records no CRM on an expense.`)} />
+        {!keptTo.length && <Kpi label="Income less expenses" value={money(k.netProfit.minor, cur)} note="Invoices before VAT, less the expenses beside it. Finance keeps no ledger." pair={k.netProfit} before={before} onOpen={open("profit", "Income less expenses", money(k.netProfit.minor, cur), `${lessText(["Income before VAT", k.income.minor], ["expenses", k.expenses.minor], cur)} Kept to no CRM: finance records no CRM on an expense.`)} />}
         <Kpi label="Receivables" value={money(o.receivables.grand, cur)} note={`Still owed on invoices${only}, as of ${dayText(o.receivables.asOf)}`} onOpen={open("receivables", "Receivables", money(o.receivables.grand, cur), `Still owed on invoices${only}, as of ${dayText(o.receivables.asOf)}, whatever the period.`)} />
-        <Kpi label="Payables" value={money(o.payables.grand, cur)} note={`Still owed on bills, as of ${dayText(o.payables.asOf)}`} onOpen={open("payables", "Payables", money(o.payables.grand, cur), `Still owed on supplier bills, as of ${dayText(o.payables.asOf)}, whatever the period. Bills belong to no CRM.`)} />
-        <Kpi label="VAT position" value={money(o.vat.netPayableMinor, cur)} note={`Output${o.vat.outputByCrm ? only : ""} ${money(o.vat.outputMinor, cur)} less input ${money(o.vat.inputMinor, cur)}${o.vat.outputByCrm ? " (whole company)" : ""}`} onOpen={open("vat", "VAT position", money(o.vat.netPayableMinor, cur), `${lessText([`Output VAT${o.vat.outputByCrm ? only : ""}`, o.vat.outputMinor], ["input VAT", o.vat.inputMinor], cur)}${o.vat.outputByCrm ? " Input VAT is the whole company's: supplier bills record no CRM." : " The whole organization's."}`)} />
+        {!keptTo.length && <Kpi label="Payables" value={money(o.payables.grand, cur)} note={`Still owed on bills, as of ${dayText(o.payables.asOf)}`} onOpen={open("payables", "Payables", money(o.payables.grand, cur), `Still owed on supplier bills, as of ${dayText(o.payables.asOf)}, whatever the period. Bills belong to no CRM.`)} />}
+        {keptTo.length && o.vat.outputByCrm ? (
+          // Input VAT is from supplier bills, which record no CRM: with a CRM picked, only the VAT on its sales.
+          <Kpi label="Output VAT" value={money(o.vat.outputMinor, cur)} note={`VAT on sales${only}`} onOpen={open("vatOut", "Output VAT", money(o.vat.outputMinor, cur), `VAT on sales${only}.`)} />
+        ) : !keptTo.length ? (
+          <Kpi label="VAT position" value={money(o.vat.netPayableMinor, cur)} note={`Output ${money(o.vat.outputMinor, cur)} less input ${money(o.vat.inputMinor, cur)}`} onOpen={open("vat", "VAT position", money(o.vat.netPayableMinor, cur), `${lessText(["Output VAT", o.vat.outputMinor], ["input VAT", o.vat.inputMinor], cur)} The whole organization's.`)} />
+        ) : null}
       </div>
 
       <ForeignUnknown lines={foreign} cur={cur} />

@@ -63,7 +63,7 @@ export async function financeOverview(q: Record<string, unknown>) {
 
 /** The Revenue report: invoiced or collected, grouped by a dimension (or by day) and kept to any of them. */
 export async function financeRevenue(q: Record<string, unknown>) {
-  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/revenue${passOn(q, ["org", "from", "to", "basis", "groupBy", ...PAGING, ...DIMENSIONS])}`, "share its revenue report");
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/revenue${passOn(q, ["org", "from", "to", "basis", "groupBy", "paidIn", ...PAGING, ...DIMENSIONS])}`, "share its revenue report");
   return { ...data, appUrl };
 }
 

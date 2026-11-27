@@ -37,6 +37,8 @@ export type LiveSpec =
       period: "month" | "year";
       chart: "bar" | "line";
       columns?: Column[];
+      /** Only the payments made in this other currency (a headline card's breakdown). */
+      paidIn?: string;
     }
   /** What is still owed on open invoices or open bills, as of now — finance's aged lists. No period: balances as they stand. */
   | {
