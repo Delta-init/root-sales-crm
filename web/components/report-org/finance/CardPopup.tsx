@@ -24,9 +24,11 @@ type Tab = { key: string; label: string; spec: LiveSpec; about: string };
 const report = (key: string, name: string, about: string, spec: LiveSpec): Titled =>
   ({ id: `CARD-${key.toUpperCase()}`, name, about, state: "live", spec, category: { name: "Headline figures" } });
 
+/** The income side's lines (2026-11-27, audit F03): the whole income, its invoices, and the credit notes off it. */
+const INCOME_LINES = ["income", "invoices", "credit-notes"];
 /** The records behind a Profit & Loss line, on its basis — the same rows finance's page opens (2026-11-27). */
 const plLines = (line: string, basis: string): LiveSpec =>
-  ({ kind: "ledger", source: "pl-lines", groupBy: line === "income" ? "month" : "category", view: "records", period: "month", params: { line, basis } });
+  ({ kind: "ledger", source: "pl-lines", groupBy: INCOME_LINES.includes(line) ? "month" : "category", view: "records", period: "month", params: { line, basis } });
 
 function tabsFor(card: CardKey, currency?: string, line?: string, basis = "invoiced"): Tab[] {
   switch (card) {
@@ -50,7 +52,7 @@ function tabsFor(card: CardKey, currency?: string, line?: string, basis = "invoi
       return [{ key: card, label: `Expenses in ${currency}`, about: `The expenses in ${currency}, as they were recorded. Never converted or added to the other currency.`, spec: { kind: "expenses", groupBy: "category", period: "month", chart: "bar", currency } }];
     case "profit":
       return [
-        { key: "income", label: "Income", about: "What the income is: each invoice before VAT, any part paid in another currency shown apart.", spec: plLines("income", "invoiced") },
+        { key: "income", label: "Income", about: "What the income is: each invoice before VAT, less the credit notes issued in the period; any part paid in another currency shown apart.", spec: plLines("income", "invoiced") },
         { key: "spent", label: "Expenses", about: "What comes off it: the profit-and-loss expenses.", spec: { kind: "expenses", groupBy: "category", period: "month", chart: "bar" } },
       ];
     case "receivables":
