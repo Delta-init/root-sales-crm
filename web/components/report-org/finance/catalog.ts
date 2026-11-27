@@ -55,7 +55,7 @@ export type LiveSpec =
   | {
       kind: "ledger";
       /** vat: the rows behind the VAT position and the income of "Income less expenses" (headline cards only). */
-      source: "commission" | "payroll" | "vat" | "pl-lines" | "management-profit-lines";
+      source: "commission" | "payroll" | "vat" | "pl-lines" | "management-profit-lines" | "financial-lines";
       /** The summary's grouping. */
       groupBy: string;
       view: "summary" | "records";
@@ -75,6 +75,11 @@ export type LiveSpec =
    * commission, supplier and other costs (paid and unpaid), net and margin, with each figure's records.
    */
   | { kind: "mp"; view: "invoice" | "collection" | "cash"; period: "month" | "year" }
+  /**
+   * Cash flow and financial position (Phase 4, 2026-11-27): the period's cash flow, or a position as of the period's
+   * last day (at most today) — with each month, the records behind every line, notes and data warnings.
+   */
+  | { kind: "fp"; report: "cashflow" | "cash" | "receivables" | "obligations" | "advances" | "position"; period: "month" | "year" }
   /** Finance's Expense report: approved expenses and those waiting for approval. */
   | {
       kind: "expenses";
@@ -127,6 +132,10 @@ const spent = (groupBy: ExpenseGroupBy, chart: "bar" | "line", period: "month" |
 const owed = (side: "receivables" | "payables", groupBy: "band" | "party", view: "summary" | "records", due?: "upcoming" | "overdue"): LiveSpec =>
   ({ kind: "aging", side, groupBy, view, ...(due ? { due } : {}) });
 
+/** Phase 4 (2026-11-27): one of finance's cash flow / position reports, or the records behind one of its lines. */
+const fpr = (report: Extract<LiveSpec, { kind: "fp" }>["report"], period: "month" | "year" = "month"): LiveSpec => ({ kind: "fp", report, period });
+const fpList = (report: string, line: string, groupBy: string, period: "month" | "year" = "month"): LiveSpec =>
+  ({ kind: "ledger", source: "financial-lines", groupBy, view: "records", period, params: { report, line } });
 const listed = (source: "commission" | "payroll", groupBy: string, view: "summary" | "records", period: "month" | "year" = "month", extra: { params?: Record<string, string>; only?: Record<string, string> } = {}): LiveSpec =>
   ({ kind: "ledger", source, groupBy, view, period, ...extra });
 const NOT_IN_FINANCE = "This is worked out in the CRMs and Root before finance approves anything, so finance has no record of it.";
@@ -198,7 +207,7 @@ export const CATEGORIES: Category[] = [
     reports: [
       live("FS-01", "Profit and loss", { kind: "pl", view: "statement", period: "month" }, "Income, each kind of expense and net profit for the period — finance's own Profit & Loss, worked out from invoices, bills and expenses, not from a ledger."),
       none("FS-02", "Balance sheet", NO_LEDGER),
-      planned("FS-03", "Cash flow", "Finance can give money in and money out from operations only. It has not been connected yet."),
+      live("FS-03", "Cash flow", fpr("cashflow"), "Opening and closing cash and bank balances, and the period's bank lines by activity: operating, investing, financing — with what is not identified or marked duplicate shown apart. Transfers between own accounts are out of money in and out."),
       none("FS-04", "Trial balance", NO_LEDGER),
       none("FS-05", "General ledger", NO_LEDGER),
       none("FS-06", "Account ledger", NO_LEDGER),
@@ -206,7 +215,8 @@ export const CATEGORIES: Category[] = [
       none("FS-08", "Changes in equity", NO_LEDGER),
       live("FS-09", "Comparative statements", { kind: "pl", view: "compare", period: "month" }, "The profit and loss beside the period before, line by line, and how each moved."),
       none("FS-10", "Consolidated statements", "The organizations keep their books in different currencies, and finance never adds them together."),
-      planned("FS-11", "Opening and closing balances", "Finance has these for bank accounts only. It has not been connected yet."),
+      live("FS-11", "Opening and closing balances", fpr("cash"), "Every bank account, petty cash wallet and payment gateway: its opening balance and its balance as of the date, last transaction and reconciliation."),
+      live("FS-12", "Management financial position", fpr("position"), "Cash and bank, pending gateway settlements, enforceable receivables and employee advances, less recorded obligations — a management view, not a statutory balance sheet."),
     ],
   },
   {
@@ -225,6 +235,8 @@ export const CATEGORIES: Category[] = [
       none("AR-10", "Bad debt and impairment", "Finance writes nothing off, so there is no bad debt to list."),
       none("AR-11", "Disputes", "Finance does not mark a balance as disputed."),
       planned("AR-12", "Expected collections"),
+      live("AR-13", "Receivables as of a date", fpr("receivables"), "What customers owed on a chosen date — payments and credits after it not taken off — by kind (enforceable, enrolment balance, pro-forma, old books) and age (seven bands)."),
+      live("AR-14", "Receivables by CRM", fpList("receivables", "all", "crm"), "What is owed as of the date, by the CRM each enrolment came from."),
     ],
   },
   {
@@ -237,12 +249,13 @@ export const CATEGORIES: Category[] = [
       live("AP-04", "Upcoming payments", owed("payables", "band", "records", "upcoming"), "Open bills not yet due, soonest first."),
       live("AP-05", "Overdue payments", owed("payables", "band", "records", "overdue"), "Open bills past their due date."),
       live("AP-06", "Unpaid bills", owed("payables", "band", "records"), "Every open bill: its total, what is left on it, when it is due and how late it is."),
-      planned("AP-07", "Salary payable"),
-      planned("AP-08", "Commission payable"),
+      live("AP-07", "Salary payable", fpList("obligations", "obl:salaries", "status"), "Each person's pay still owed as of the date, from approved payroll runs, less what was paid by then."),
+      live("AP-08", "Commission payable", fpList("obligations", "obl:commission", "category"), "Commission approved or earned and not paid as of the date, outside payroll (commission in a payroll run is in salaries)."),
       planned("AP-09", "Tax payable"),
       none("AP-10", "Accrued expenses", NO_LEDGER),
       planned("AP-11", "Vendor advances"),
       none("AP-12", "Payment forecast", NO_FORECAST),
+      live("AP-13", "All obligations", fpr("obligations"), "Everything recorded as owed as of the date — bills, salaries, commission, expenses, reimbursements, loans — with ageing. Not a complete statutory liability balance."),
     ],
   },
   {
@@ -294,20 +307,20 @@ export const CATEGORIES: Category[] = [
     slug: "treasury",
     name: "Cash flow and treasury",
     reports: [
-      planned("TRE-01", "Daily cash position"),
-      planned("TRE-02", "Bank balances"),
-      planned("TRE-03", "Physical cash"),
-      planned("TRE-04", "Inflows and outflows"),
-      planned("TRE-05", "Internal transfers"),
+      live("TRE-01", "Daily cash position", fpr("cash"), "Cash and bank as of the date: estimated available cash, pending gateway settlements, and what is confirmed by a reconciled statement."),
+      live("TRE-02", "Bank balances", fpr("cash"), "Each account's balance as of the date, its last transaction and reconciliation."),
+      live("TRE-03", "Physical cash", fpList("cash", "petty", "account"), "Petty cash wallets and their balances as of the date."),
+      live("TRE-04", "Inflows and outflows", fpr("cashflow"), "Money in and money out of the period by activity, transfers between own accounts left out."),
+      live("TRE-05", "Internal transfers", fpList("cashflow", "transfers", "account"), "Transfers between the organization's own accounts in the period, each side."),
       none("TRE-06", "POS settlements", "Finance keeps no POS terminals or their settlement batches."),
-      planned("TRE-07", "PSP settlements"),
+      live("TRE-07", "PSP settlements", fpList("cash", "psp", "account"), "Payment gateway balances as of the date: payments received through the gateway and not yet settled to a bank."),
       none("TRE-08", "Restricted cash", "Finance does not mark cash as restricted."),
       none("TRE-09", "Commitments", NO_FORECAST),
       none("TRE-10", "7-day forecast", NO_FORECAST),
       none("TRE-11", "30-day forecast", NO_FORECAST),
       none("TRE-12", "90-day forecast", NO_FORECAST),
       none("TRE-13", "Cash runway", NO_FORECAST),
-      planned("TRE-14", "Bank transaction history"),
+      live("TRE-14", "Bank transaction history", fpList("cashflow", "all", "category"), "Every bank line of the period with its activity, account and status."),
     ],
   },
   {
@@ -346,6 +359,7 @@ export const CATEGORIES: Category[] = [
       live("PAY-03", "Salary payable", listed("payroll", "person", "records", "month", { params: { due: "1" } }), "The people still owed part of their pay."),
       live("PAY-04", "Payment history", listed("payroll", "month", "records", "month", { params: { kind: "payments" } }), "Each payroll payment made: when, how, from which account. Reversed payments are left out."),
       live("PAY-05", "Total employee cost", listed("payroll", "person", "summary"), "What each person is paid: gross, deductions, additions and what is payable."),
+      live("PAY-06", "Employee advances", fpr("advances"), "Advances given and recovered from pay, per employee: outstanding where finance can work it out, and the advances whose recoveries are not recorded."),
     ],
   },
   {

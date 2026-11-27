@@ -236,7 +236,7 @@ export interface LedgerReport {
   appUrl: string;
 }
 
-export interface LedgerAsk { source: "commission" | "payroll" | "vat" | "pl-lines" | "management-profit-lines"; groupBy: string; params?: Record<string, string>; picks?: Picks }
+export interface LedgerAsk { source: "commission" | "payroll" | "vat" | "pl-lines" | "management-profit-lines" | "financial-lines"; groupBy: string; params?: Record<string, string>; picks?: Picks }
 
 export const fetchLedger = (org: string, period: Period, ask: LedgerAsk, page: PageAsk) =>
   get<LedgerReport>(ask.source, { org, from: period.from, to: period.to, groupBy: ask.groupBy, ...picksParams(ask.picks ?? {}), ...(ask.params ?? {}), ...pageParams(page) });
@@ -297,6 +297,26 @@ export const useFinanceManagement = (org: string | undefined, period: Period, vi
   useQuery({
     queryKey: ["report-org", "finance", "management-profit", org, period.from, period.to, view],
     queryFn: () => get<MpReport>("management-profit", { org: org!, from: period.from, to: period.to, view }),
+    enabled: !!org,
+    placeholderData: (before) => before,
+    ...LIVE,
+  });
+
+/* Cash flow and financial position (Phase 4, 2026-11-27). */
+export type FpReportKind = "cashflow" | "cash" | "receivables" | "obligations" | "advances" | "position";
+export interface FpLine { key: string; label: string; amountMinor: number; count: number }
+export interface FpSection { key: string; title: string; lines: FpLine[]; totalMinor: number; showTotal: boolean }
+export interface FpTotal { key: string; label: string; amountMinor: number; strong?: boolean }
+export interface FpSide { currency: string; sections: FpSection[]; totals: FpTotal[] }
+export interface FpReport {
+  generatedAt: string; org: FinanceOrg; period: Period; report: FpReportKind; currency: string; from: string; to: string; asOf: string;
+  sides: FpSide[]; months: { month: string; sides: FpSide[] }[]; notes: string[]; warnings: string[]; recordCount: number; appUrl: string;
+}
+
+export const useFinanceFp = (org: string | undefined, period: Period, report: FpReportKind) =>
+  useQuery({
+    queryKey: ["report-org", "finance", "financial", org, period.from, period.to, report],
+    queryFn: () => get<FpReport>("financial", { org: org!, from: period.from, to: period.to, report }),
     enabled: !!org,
     placeholderData: (before) => before,
     ...LIVE,

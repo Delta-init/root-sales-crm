@@ -127,3 +127,15 @@ export async function financeManagementLines(q: Record<string, unknown>) {
   const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/management-profit-lines${passOn(q, ["org", "from", "to", "view", "line", "groupBy", "category", "status", "crm", "method", "month", ...PAGING])}`, "share the records behind a management profitability figure");
   return { ...data, appUrl };
 }
+
+/** Cash flow and financial position (Phase 4, 2026-11-27): ?report=cashflow | cash | receivables | obligations | advances | position. */
+export async function financeFinancial(q: Record<string, unknown>) {
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/financial${passOn(q, ["org", "from", "to", "report"])}`, "share its cash flow and financial position");
+  return { ...data, appUrl };
+}
+
+/** The records behind one of its figures (?line=<section>:<line> | <section> | all). */
+export async function financeFinancialLines(q: Record<string, unknown>) {
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/financial-lines${passOn(q, ["org", "from", "to", "report", "line", "groupBy", "category", "account", "status", "month", "kind", "band", "crm", ...PAGING])}`, "share the records behind a cash flow or financial position figure");
+  return { ...data, appUrl };
+}

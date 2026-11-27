@@ -10,8 +10,8 @@ import { Input } from "@/components/ui/input";
 import { apiErrorMessage } from "@/lib/axios";
 import { useReportOrgFilters, yearRange } from "../ReportOrgShell";
 import {
-  change, count, fetchAging, fetchExpenses, fetchLedger, fetchRevenue, money, useFinanceManagement, useFinancePl, percent, useFinanceAging, useFinanceExpenses, useFinanceLedger, useFinanceOrgs, useFinanceRevenue,
-  type MpSide, type MpSum, type AgingGroup, type AgingRow, type ForeignLine, type PlBasis, type PlMonth, type PlMonths, type PlStatement, type LedgerGroup, type LedgerRow, type PageAsk, type ReportRow, type RevenueReport,
+  change, count, fetchAging, fetchExpenses, fetchLedger, fetchRevenue, money, useFinanceFp, useFinanceManagement, useFinancePl, percent, useFinanceAging, useFinanceExpenses, useFinanceLedger, useFinanceOrgs, useFinanceRevenue,
+  type FpSide, type MpSide, type MpSum, type AgingGroup, type AgingRow, type ForeignLine, type PlBasis, type PlMonth, type PlMonths, type PlStatement, type LedgerGroup, type LedgerRow, type PageAsk, type ReportRow, type RevenueReport,
 } from "./api";
 import { reportById, type Column, type LiveSpec, type Report } from "./catalog";
 import { ColumnsMenu, DataGrid, Pager, gridCsv, useGridColumns, type GridColumn, type GridSort } from "./DataGrid";
@@ -40,6 +40,7 @@ type AgingSpec = Extract<LiveSpec, { kind: "aging" }>;
 type LedgerSpec = Extract<LiveSpec, { kind: "ledger" }>;
 type PlSpec = Extract<LiveSpec, { kind: "pl" }>;
 type MpSpec = Extract<LiveSpec, { kind: "mp" }>;
+type FpSpec = Extract<LiveSpec, { kind: "fp" }>;
 type Mode = "summary" | "records";
 
 /** A summary row: one day, month or group. */
@@ -715,6 +716,40 @@ interface LedgerShape {
 const GROUP_LABEL: Record<string, string> = { person: "Person", source: "CRM or CS", month: "Month", state: "State", kind: "Type", department: "Department", status: "Status", runState: "Payroll run", method: "Payment method", bank: "Bank account", vendor: "Vendor", crm: "CRM", salesperson: "Salesperson" };
 
 function ledgerShape(spec: LedgerSpec): LedgerShape {
+  if (spec.source === "financial-lines") {
+    const report = spec.params?.report ?? "cashflow";
+    if (report === "receivables") {
+      return {
+        space: "fp-receivables", noun: "Invoices",
+        filters: [{ key: "kind", label: "Kind" }, { key: "band", label: "Age" }, { key: "crm", label: "CRM" }, { key: "month", label: "Issued in" }],
+        sums: [["amountMinor", "Outstanding"], ["originalMinor", "Invoice total"], ["settledMinor", "Paid"], ["creditMinor", "Credit applied"]],
+        first: ["date", "Issued"],
+        fields: [["title", "Customer"], ["category", "Kind"], ["crm", "CRM"], ["due", "Due"], ["status", "Age"], ["detail", "Salesperson"], ["month", "Month", true]],
+        basis: "Outstanding as of the date: payments and credit applied after it are not taken off.",
+        source: "finance's receivables",
+      };
+    }
+    if (report === "obligations") {
+      return {
+        space: "fp-obligations", noun: "Obligations",
+        filters: [{ key: "category", label: "Category" }, { key: "band", label: "Age" }, { key: "status", label: "Status" }, { key: "month", label: "Month" }],
+        sums: [["amountMinor", "Outstanding"], ["originalMinor", "Original"], ["settledMinor", "Settled"], ["creditMinor", "Credits"]],
+        first: ["date", "Date"],
+        fields: [["title", "Owed to"], ["category", "Category"], ["due", "Due"], ["status", "Status"], ["detail", "Detail"], ["month", "Month", true]],
+        basis: "Recorded obligations as of the date — not a complete statutory liability balance.",
+        source: "finance's obligations",
+      };
+    }
+    return {
+      space: `fp-${report}`, noun: report === "cash" ? "Accounts" : report === "advances" ? "Records" : "Bank lines",
+      filters: [{ key: "category", label: "Kind" }, { key: "account", label: "Account" }, { key: "status", label: "Status" }, { key: "month", label: "Month" }],
+      sums: [["amountMinor", report === "cash" ? "Balance" : "Amount"]],
+      first: ["date", report === "cash" ? "Last transaction" : "Date"],
+      fields: [["title", report === "cash" ? "Account" : "Description"], ["account", "Account", report === "cash"], ["category", "Kind"], ["status", "Status"], ["detail", "Detail"], ["month", "Month", true]],
+      basis: report === "cash" ? "Balances as of the date: opening balance plus every bank line up to it." : report === "advances" ? "Advances issued and recovered from pay." : "Bank lines of the period, by activity; transfers between own accounts are their own kind.",
+      source: "finance's banking",
+    };
+  }
   if (spec.source === "management-profit-lines") {
     const view = spec.params?.view ?? "invoice";
     const line = spec.params?.line ?? "income";
@@ -1230,6 +1265,113 @@ export function MPTable({ report, spec }: { report: Titled; spec: MpSpec }) {
   );
 }
 
+/* ── Cash flow and financial position (Phase 4, 2026-11-27) ──────────────────── */
+
+const FP_TITLE: Record<FpSpec["report"], string> = {
+  cashflow: "Cash flow statement", cash: "Cash and bank position", receivables: "Receivables", obligations: "Outstanding obligations",
+  advances: "Employee advances", position: "Management Financial Position — not a statutory balance sheet",
+};
+interface FpRow { key: string; label: string; kind: "head" | "line" | "subtotal" | "total"; amount: number | null; count?: number; line?: string }
+
+export function FPTable({ report, spec }: { report: Titled; spec: FpSpec }) {
+  const f = useReportOrgFilters();
+  const orgs = useFinanceOrgs();
+  const org = pickOrg(orgs.data, f.entity);
+  useYearFor(spec.period, report.id);
+  const [show, setShow] = useState<"statement" | "months">("statement");
+  const [currency, setCurrency] = useState<string>("");
+  const [pick, setPick] = useState<FpRow | null>(null);
+  const query = useFinanceFp(org?.id, f.range, spec.report);
+  const data = query.data;
+  const base = data?.currency ?? org?.currency ?? "";
+  const cur = currency && data?.sides.some((x) => x.currency === currency) ? currency : base;
+  const side: FpSide | undefined = data?.sides.find((x) => x.currency === cur);
+  const flow = spec.report === "cashflow";
+  const when = data ? (flow ? periodText(data.period) : `As of ${dayText(data.asOf)}`) : "";
+
+  const rows = useMemo<FpRow[]>(() => {
+    if (!side) return [];
+    const out: FpRow[] = [];
+    for (const sct of side.sections) {
+      out.push({ key: `h:${sct.key}`, label: sct.title, kind: "head", amount: null });
+      for (const l of sct.lines) out.push({ key: l.key, label: l.label, kind: "line", amount: l.amountMinor, count: l.count, line: l.key });
+      if (sct.showTotal) out.push({ key: `t:${sct.key}`, label: `Total — ${sct.title.toLowerCase()}`, kind: "subtotal", amount: sct.totalMinor, line: sct.key });
+    }
+    out.push({ key: "h:totals", label: flow ? "Reconciliation" : "Summary", kind: "head", amount: null });
+    for (const t of side.totals) out.push({ key: `x:${t.key}`, label: t.label, kind: t.strong ? "total" : "line", amount: t.amountMinor });
+    return out;
+  }, [side, flow]);
+
+  const stCols = useMemo<GridColumn<FpRow>[]>(() => [
+    { key: "label", header: "Line", fixed: true, cell: (r) => {
+      const text = r.kind === "head" ? <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{r.label}</span> : r.kind === "line" ? <span className="pl-4">{r.label}</span> : <span className="font-semibold">{r.label}</span>;
+      return r.line ? <button type="button" title="See the records behind this line" onClick={() => setPick(r)} className="text-left underline-offset-4 hover:text-primary hover:underline">{text}</button> : text;
+    }, text: (r) => r.label },
+    { key: "amount", header: `${when} (${cur})`, align: "right", cell: (r) => (r.amount === null ? "" : <span className={r.kind === "line" ? (r.amount < 0 ? "text-rose-600 dark:text-rose-400" : undefined) : r.amount < 0 ? "font-semibold text-rose-600 dark:text-rose-400" : "font-semibold"}>{money(r.amount, cur)}</span>), text: (r) => (r.amount === null ? "" : r.amount / 100) },
+    { key: "count", header: "Records", align: "right", cell: (r) => (r.count ? count(r.count) : ""), text: (r) => r.count ?? "" },
+  ], [cur, when]);
+
+  type MoRow = { month: string; s?: FpSide };
+  const moRows = useMemo<MoRow[]>(() => (data?.months ?? []).map((m) => ({ month: m.month, s: m.sides.find((x) => x.currency === cur) })), [data, cur]);
+  const moCols = useMemo<GridColumn<MoRow>[]>(() => {
+    const keys = (data?.months.find((m) => m.sides.some((x) => x.currency === cur))?.sides.find((x) => x.currency === cur)?.totals ?? side?.totals ?? []).filter((t) => t.key !== "check" && t.key !== "restricted");
+    return [
+      { key: "month", header: flow ? "Month" : "Month end", fixed: true, cell: (r) => <span className="font-medium">{monthText(r.month)}</span>, text: (r) => r.month },
+      ...keys.map((t): GridColumn<MoRow> => {
+        const v = (r: MoRow) => r.s?.totals.find((x) => x.key === t.key)?.amountMinor ?? 0;
+        return { key: t.key, header: t.label, align: "right", cell: (r) => <span className={v(r) < 0 ? "text-rose-600 dark:text-rose-400" : undefined}>{money(v(r), cur)}</span>, text: (r) => v(r) / 100 };
+      }),
+    ];
+  }, [data, cur, side, flow]);
+
+  const stGrid = useGridColumns(`${report.id}:statement`, stCols);
+  const moGrid = useGridColumns(`${report.id}:months:${cur}`, moCols);
+  const error = orgs.error ?? query.error;
+  const save = () => {
+    if (!data) return;
+    const name = `${report.id}-${data.org.name}-${data.from}_${data.to}-${cur}`.replace(/\s+/g, "-");
+    const top = [[`${report.id} ${report.name}`], [data.org.name, when, FP_TITLE[spec.report], cur], []];
+    saveCsv(`${name}.csv`, [...top, ...(show === "months" ? gridCsv(moGrid.visible, moRows) : gridCsv(stGrid.visible, rows))]);
+  };
+
+  return (
+    <div className="space-y-3">
+      <Head report={report} basis={FP_TITLE[spec.report]} source="finance" at={data?.generatedAt} />
+      <FinanceFilters orgs={orgs.data} org={org} space={`fp-${spec.report}`} filters={[]} />
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        {spec.report !== "advances" && <Select label="Show" value={show} onChange={(v) => setShow(v as "statement" | "months")} options={[{ key: "statement", name: flow ? "The period" : "As of the date" }, { key: "months", name: flow ? "Month by month" : "Each month end" }]} />}
+        {(data?.sides.length ?? 0) > 1 && <Select label="Currency" value={cur} onChange={setCurrency} options={(data?.sides ?? []).map((x) => ({ key: x.currency, name: x.currency === base ? `${x.currency} (the organization's)` : `${x.currency} (apart, never converted)` }))} />}
+        {!flow && data && <p className="text-xs text-muted-foreground">As of {dayText(data.asOf)}: the last day of the period, or today if that is later.</p>}
+        <div className="flex items-center gap-2 sm:ml-auto">
+          {show === "months" ? <ColumnsMenu grid={moGrid} /> : <ColumnsMenu grid={stGrid} />}
+          <Button variant="outline" size="sm" className="h-8" onClick={save} disabled={!data}>
+            <Download />
+            Export
+          </Button>
+        </div>
+      </div>
+      {(data?.warnings ?? []).length > 0 && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+          <p className="mb-1 font-medium">Data completeness</p>
+          {data!.warnings.map((w) => <p key={w}>{w}</p>)}
+        </div>
+      )}
+      {error ? (
+        <ErrorCard error={error} onRetry={() => { void orgs.refetch(); void query.refetch(); }} />
+      ) : show === "months" ? (
+        <DataGrid grid={moGrid} rows={moRows} rowKey={(r) => r.month} loading={query.isFetching} empty="No month in this period." />
+      ) : (
+        <DataGrid grid={stGrid} rows={rows} rowKey={(r) => r.key} loading={query.isFetching} empty="Finance has nothing for this." />
+      )}
+      {(data?.notes ?? []).map((n) => <p key={n} className="text-xs text-muted-foreground">{n}</p>)}
+      <CardPopup
+        open={pick ? { card: "fpLine", title: pick.label, value: money(pick.amount ?? 0, cur), line: pick.line, basis: spec.report, note: `${when} · ${FP_TITLE[spec.report]}. Each record behind the line; other currencies apart.` } : null}
+        onClose={() => setPick(null)}
+      />
+    </div>
+  );
+}
+
 function EntitiesTable({ report, basis }: { report: Titled; basis: "invoiced" | "collected" }) {
   const f = useReportOrgFilters();
   const orgs = useFinanceOrgs();
@@ -1327,5 +1469,6 @@ export function ReportViewer({ id }: { id: string }) {
   if (report.spec.kind === "ledger") return <LedgerTable key={report.id} report={report} spec={report.spec} />;
   if (report.spec.kind === "pl") return <PLTable key={report.id} report={report} spec={report.spec} />;
   if (report.spec.kind === "mp") return <MPTable key={report.id} report={report} spec={report.spec} />;
+  if (report.spec.kind === "fp") return <FPTable key={report.id} report={report} spec={report.spec} />;
   return <RevenueTable key={report.id} report={report} spec={report.spec} />;
 }

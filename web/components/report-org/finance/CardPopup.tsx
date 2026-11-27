@@ -17,7 +17,7 @@ import { AgingTable, ExpenseTable, InPopup, LedgerTable, RevenueTable, type Titl
  * table adds up to its card: the same finance figures, counted the same way.
  */
 
-export type CardKey = "invoiced" | "net" | "collected" | "expenses" | "expensesOther" | "profit" | "receivables" | "payables" | "vat" | "vatOut" | "collectedOther" | "plLine" | "mpLine";
+export type CardKey = "invoiced" | "net" | "collected" | "expenses" | "expensesOther" | "profit" | "receivables" | "payables" | "vat" | "vatOut" | "collectedOther" | "plLine" | "mpLine" | "fpLine";
 
 type Tab = { key: string; label: string; spec: LiveSpec; about: string };
 
@@ -34,8 +34,14 @@ const plLines = (line: string, basis: string): LiveSpec =>
 const mpLines = (line: string, view: string): LiveSpec =>
   ({ kind: "ledger", source: "management-profit-lines", groupBy: line === "income" ? "month" : "category", view: "records", period: "month", params: { line, view } });
 
+/** The records behind a cash flow / position line (Phase 4, 2026-11-27); `basis` carries the report. */
+const fpLines = (line: string, report: string): LiveSpec =>
+  ({ kind: "ledger", source: "financial-lines", groupBy: report === "receivables" ? "kind" : report === "obligations" ? "category" : "category", view: "records", period: "month", params: { line, report } });
+
 function tabsFor(card: CardKey, currency?: string, line?: string, basis = "invoiced"): Tab[] {
   switch (card) {
+    case "fpLine":
+      return [{ key: line ?? "all", label: "Records", about: "Each record behind the line.", spec: fpLines(line ?? "all", basis) }];
     case "mpLine":
       return line === "net"
         ? [
