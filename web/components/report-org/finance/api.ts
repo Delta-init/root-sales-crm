@@ -236,7 +236,7 @@ export interface LedgerReport {
   appUrl: string;
 }
 
-export interface LedgerAsk { source: "commission" | "payroll" | "vat" | "pl-lines" | "management-profit-lines" | "financial-lines" | "reconciliation-lines"; groupBy: string; params?: Record<string, string>; picks?: Picks }
+export interface LedgerAsk { source: "commission" | "payroll" | "vat" | "pl-lines" | "management-profit-lines" | "financial-lines" | "reconciliation-lines" | "controls-lines"; groupBy: string; params?: Record<string, string>; picks?: Picks }
 
 export const fetchLedger = (org: string, period: Period, ask: LedgerAsk, page: PageAsk) =>
   get<LedgerReport>(ask.source, { org, from: period.from, to: period.to, groupBy: ask.groupBy, ...picksParams(ask.picks ?? {}), ...(ask.params ?? {}), ...pageParams(page) });
@@ -306,7 +306,7 @@ export const useFinanceManagement = (org: string | undefined, period: Period, vi
 export type FpReportKind = "cashflow" | "cash" | "receivables" | "obligations" | "advances" | "position";
 export interface FpLine { key: string; label: string; amountMinor: number; count: number }
 export interface FpSection { key: string; title: string; lines: FpLine[]; totalMinor: number; showTotal: boolean }
-export interface FpTotal { key: string; label: string; amountMinor: number; strong?: boolean }
+export interface FpTotal { key: string; label: string; amountMinor: number; strong?: boolean; /** A count or status line: no amount to show (Phase 6). */ noAmount?: boolean }
 export interface FpSide { currency: string; sections: FpSection[]; totals: FpTotal[] }
 export interface FpReport {
   generatedAt: string; org: FinanceOrg; period: Period; report: FpReportKind; currency: string; from: string; to: string; asOf: string;
@@ -331,6 +331,20 @@ export const useFinanceRc = (org: string | undefined, period: Period, report: Rc
   useQuery({
     queryKey: ["report-org", "finance", "reconciliation", org, period.from, period.to, report],
     queryFn: () => get<RcReport>("reconciliation", { org: org!, from: period.from, to: period.to, report }),
+    enabled: !!org,
+    placeholderData: (before) => before,
+    ...LIVE,
+  });
+
+/* Financial controls (Phase 6, 2026-11-28). */
+export type FcReportKind = "overview" | "approvals" | "risks" | "liquidity" | "expenses" | "payroll" | "vat" | "closing" | "audit";
+export interface FcIndicator { currency: string; key: string; label: string; value: number | null; as: "money" | "count"; report: string; line: string; note?: string }
+export interface FcReport extends Omit<FpReport, "report"> { report: FcReportKind; indicators: FcIndicator[] }
+
+export const useFinanceFc = (org: string | undefined, period: Period, report: FcReportKind) =>
+  useQuery({
+    queryKey: ["report-org", "finance", "controls", org, period.from, period.to, report],
+    queryFn: () => get<FcReport>("controls", { org: org!, from: period.from, to: period.to, report }),
     enabled: !!org,
     placeholderData: (before) => before,
     ...LIVE,

@@ -42,6 +42,7 @@ function tabsFor(card: CardKey, currency?: string, line?: string, basis = "invoi
   switch (card) {
     case "fpLine":
       // Reconciliation reports carry "rc:<report>" (Phase 5): their records come from the reconciliation lines.
+      if (basis.startsWith("fc:")) return [{ key: line ?? "all", label: "Records", about: "Each record behind the line.", spec: { kind: "ledger", source: "controls-lines", groupBy: "category", view: "records", period: "month", params: { line: line ?? "all", report: basis.slice(3) } } }];
       return basis.startsWith("rc:")
         ? [{ key: line ?? "all", label: "Records", about: "Each record behind the line.", spec: { kind: "ledger", source: "reconciliation-lines", groupBy: basis === "rc:exceptions" ? "severityName" : "category", view: "records", period: "month", params: { line: line ?? "all", report: basis.slice(3) } } }]
         : [{ key: line ?? "all", label: "Records", about: "Each record behind the line.", spec: fpLines(line ?? "all", basis) }];

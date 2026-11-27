@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { apiErrorMessage } from "@/lib/axios";
 import { useReportOrgFilters, yearRange } from "../ReportOrgShell";
 import {
-  change, count, fetchAging, fetchExpenses, fetchLedger, fetchRevenue, money, useFinanceFp, useFinanceRc, useFinanceManagement, useFinancePl, percent, useFinanceAging, useFinanceExpenses, useFinanceLedger, useFinanceOrgs, useFinanceRevenue,
+  change, count, fetchAging, fetchExpenses, fetchLedger, fetchRevenue, money, useFinanceFc, useFinanceFp, useFinanceRc, useFinanceManagement, useFinancePl, percent, useFinanceAging, useFinanceExpenses, useFinanceLedger, useFinanceOrgs, useFinanceRevenue,
   type FpReportKind, type FpSide, type MpSide, type MpSum, type AgingGroup, type AgingRow, type ForeignLine, type PlBasis, type PlMonth, type PlMonths, type PlStatement, type LedgerGroup, type LedgerRow, type PageAsk, type ReportRow, type RevenueReport,
 } from "./api";
 import { reportById, type Column, type LiveSpec, type Report } from "./catalog";
@@ -40,7 +40,7 @@ type AgingSpec = Extract<LiveSpec, { kind: "aging" }>;
 type LedgerSpec = Extract<LiveSpec, { kind: "ledger" }>;
 type PlSpec = Extract<LiveSpec, { kind: "pl" }>;
 type MpSpec = Extract<LiveSpec, { kind: "mp" }>;
-type FpSpec = Extract<LiveSpec, { kind: "fp" }> | Extract<LiveSpec, { kind: "rc" }>;
+type FpSpec = Extract<LiveSpec, { kind: "fp" }> | Extract<LiveSpec, { kind: "rc" }> | Extract<LiveSpec, { kind: "fc" }>;
 type Mode = "summary" | "records";
 
 /** A summary row: one day, month or group. */
@@ -121,7 +121,12 @@ function Head({ report, basis, source, at }: { report: Titled; basis?: string; s
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        {report.id.startsWith("RC-") ? (
+        {report.id.startsWith("FC-") ? (
+          <Link href="/report-org/controls" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Financial controls
+          </Link>
+        ) : report.id.startsWith("RC-") ? (
           <Link href="/report-org/reconciliation" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
             <ArrowLeft className="h-3.5 w-3.5" />
             Reconciliation
@@ -723,6 +728,18 @@ interface LedgerShape {
 const GROUP_LABEL: Record<string, string> = { person: "Person", source: "CRM or CS", month: "Month", state: "State", kind: "Type", department: "Department", status: "Status", runState: "Payroll run", method: "Payment method", bank: "Bank account", vendor: "Vendor", crm: "CRM", salesperson: "Salesperson" };
 
 function ledgerShape(spec: LedgerSpec): LedgerShape {
+  if (spec.source === "controls-lines") {
+    const report = spec.params?.report ?? "approvals";
+    return {
+      space: `fc-${report}`, noun: report === "approvals" ? "Approvals" : report === "closing" ? "Checks" : "Records",
+      filters: [{ key: "category", label: report === "approvals" ? "Kind" : "Kind" }, { key: "status", label: "Status" }, { key: "stage", label: report === "approvals" ? "On time / overdue" : "Stage" }, { key: "severityName", label: "Severity" }, { key: "module", label: "Module" }, { key: "account", label: report === "approvals" ? "Department" : report === "audit" ? "By" : "Account" }, { key: "month", label: "Month" }],
+      sums: [["amountMinor", "Amount"]],
+      first: ["date", report === "approvals" ? "Sent" : "Date"],
+      fields: [["title", "Record"], ["category", "Kind"], ["status", "Status"], ["ageDays", report === "approvals" ? "Days waiting" : "Age (days)"], ["action", report === "approvals" ? "Who decides" : "Recommended action"], ["account", report === "approvals" ? "Department" : report === "audit" ? "By" : "Account"], ["detail", "Detail"], ["month", "Month", true]],
+      basis: "From finance's financial controls reports. Report Org shows only — approvals, payments and corrections are made in finance.",
+      source: "finance's financial controls",
+    };
+  }
   if (spec.source === "reconciliation-lines") {
     const report = spec.params?.report ?? "exceptions";
     return {
@@ -1291,6 +1308,8 @@ const FP_TITLE: Record<string, string> = {
   advances: "Employee advances", position: "Management Financial Position — not a statutory balance sheet",
   "rc:bank": "Bank reconciliation", "rc:psp": "PSP and settlement reconciliation", "rc:invoices": "Invoice and collection reconciliation", "rc:expenses": "Expense and supplier reconciliation",
   "rc:payroll": "Payroll and commission reconciliation", "rc:advances": "Employee advance reconciliation", "rc:historical": "Historical data reconciliation", "rc:exceptions": "Financial exceptions",
+  "fc:approvals": "Approval monitoring", "fc:risks": "Financial risks and exceptions", "fc:liquidity": "Payment and liquidity controls", "fc:expenses": "Expense controls",
+  "fc:payroll": "Payroll and commission controls", "fc:vat": "VAT and compliance", "fc:closing": "Monthly closing readiness — not a closing", "fc:audit": "Audit and activity monitoring",
 };
 interface FpRow { key: string; label: string; kind: "head" | "line" | "subtotal" | "total"; amount: number | null; count?: number; line?: string }
 
@@ -1302,11 +1321,13 @@ export function FPTable({ report, spec }: { report: Titled; spec: FpSpec }) {
   const [show, setShow] = useState<"statement" | "months">("statement");
   const [currency, setCurrency] = useState<string>("");
   const [pick, setPick] = useState<FpRow | null>(null);
-  const rc = spec.kind === "rc";
+  const fcKind = spec.kind === "fc";
+  const rc = spec.kind === "rc" || fcKind;
   const fpQuery = useFinanceFp(rc ? undefined : org?.id, f.range, rc ? "cash" : (spec.report as FpReportKind));
-  const rcQuery = useFinanceRc(rc ? org?.id : undefined, f.range, rc ? spec.report : "bank");
-  const query = rc ? rcQuery : fpQuery;
-  const titleKey = rc ? `rc:${spec.report}` : spec.report;
+  const rcQuery = useFinanceRc(spec.kind === "rc" ? org?.id : undefined, f.range, spec.kind === "rc" ? spec.report : "bank");
+  const fcQuery = useFinanceFc(fcKind ? org?.id : undefined, f.range, fcKind ? spec.report : "approvals");
+  const query = fcKind ? fcQuery : spec.kind === "rc" ? rcQuery : fpQuery;
+  const titleKey = rc ? `${spec.kind}:${spec.report}` : spec.report;
   const data = query.data;
   const base = data?.currency ?? org?.currency ?? "";
   const cur = currency && data?.sides.some((x) => x.currency === currency) ? currency : base;
@@ -1323,7 +1344,7 @@ export function FPTable({ report, spec }: { report: Titled; spec: FpSpec }) {
       if (sct.showTotal) out.push({ key: `t:${sct.key}`, label: `Total — ${sct.title.toLowerCase()}`, kind: "subtotal", amount: sct.totalMinor, line: sct.key });
     }
     out.push({ key: "h:totals", label: flow ? "Reconciliation" : "Summary", kind: "head", amount: null });
-    for (const t of side.totals) out.push({ key: `x:${t.key}`, label: t.label, kind: t.strong ? "total" : "line", amount: t.amountMinor });
+    for (const t of side.totals) out.push({ key: `x:${t.key}`, label: t.label, kind: t.strong ? "total" : "line", amount: t.noAmount ? null : t.amountMinor });
     return out;
   }, [side, flow]);
 
@@ -1361,8 +1382,8 @@ export function FPTable({ report, spec }: { report: Titled; spec: FpSpec }) {
 
   return (
     <div className="space-y-3">
-      <Head report={report} basis={FP_TITLE[titleKey]} source={rc ? "finance's reconciliation" : "finance"} at={data?.generatedAt} />
-      <FinanceFilters orgs={orgs.data} org={org} space={`${rc ? "rc" : "fp"}-${spec.report}`} filters={[]} />
+      <Head report={report} basis={FP_TITLE[titleKey]} source={fcKind ? "finance's financial controls" : rc ? "finance's reconciliation" : "finance"} at={data?.generatedAt} />
+      <FinanceFilters orgs={orgs.data} org={org} space={`${spec.kind}-${spec.report}`} filters={[]} />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         {spec.report !== "advances" && !rc && <Select label="Show" value={show} onChange={(v) => setShow(v as "statement" | "months")} options={[{ key: "statement", name: flow ? "The period" : "As of the date" }, { key: "months", name: flow ? "Month by month" : "Each month end" }]} />}
         {(data?.sides.length ?? 0) > 1 && <Select label="Currency" value={cur} onChange={setCurrency} options={(data?.sides ?? []).map((x) => ({ key: x.currency, name: x.currency === base ? `${x.currency} (the organization's)` : `${x.currency} (apart, never converted)` }))} />}
@@ -1390,7 +1411,7 @@ export function FPTable({ report, spec }: { report: Titled; spec: FpSpec }) {
       )}
       {(data?.notes ?? []).map((n) => <p key={n} className="text-xs text-muted-foreground">{n}</p>)}
       <CardPopup
-        open={pick ? { card: "fpLine", title: pick.label, value: money(pick.amount ?? 0, cur), line: pick.line, basis: rc ? `rc:${spec.report}` : spec.report, note: `${when} · ${FP_TITLE[titleKey]}. Each record behind the line; other currencies apart.` } : null}
+        open={pick ? { card: "fpLine", title: pick.label, value: money(pick.amount ?? 0, cur), line: pick.line, basis: rc ? `${spec.kind}:${spec.report}` : spec.report, note: `${when} · ${FP_TITLE[titleKey]}. Each record behind the line; other currencies apart.` } : null}
         onClose={() => setPick(null)}
       />
     </div>
@@ -1494,6 +1515,6 @@ export function ReportViewer({ id }: { id: string }) {
   if (report.spec.kind === "ledger") return <LedgerTable key={report.id} report={report} spec={report.spec} />;
   if (report.spec.kind === "pl") return <PLTable key={report.id} report={report} spec={report.spec} />;
   if (report.spec.kind === "mp") return <MPTable key={report.id} report={report} spec={report.spec} />;
-  if (report.spec.kind === "fp" || report.spec.kind === "rc") return <FPTable key={report.id} report={report} spec={report.spec} />;
+  if (report.spec.kind === "fp" || report.spec.kind === "rc" || report.spec.kind === "fc") return <FPTable key={report.id} report={report} spec={report.spec} />;
   return <RevenueTable key={report.id} report={report} spec={report.spec} />;
 }

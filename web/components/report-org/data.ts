@@ -77,16 +77,6 @@ const PROFIT_AND_LOSS = {
   ],
 };
 
-const MIGRATION_REGISTER = {
-  head: ["Account", "Migrated", "Verified", "Difference"],
-  rows: [
-    ["Bank A", "257,500", "245,000", "-12,500"],
-    ["Bank B", "175,000", "180,000", "+5,000"],
-    ["Cash", "17,000", "15,000", "-2,000"],
-    ["Receivables", "290,000", "285,000", "-5,000"],
-  ],
-};
-
 export const SECTIONS: Section[] = [
   {
     slug: "executive",
@@ -173,41 +163,7 @@ export const SECTIONS: Section[] = [
   },
   /* Finance and revenue is not here: it is live, read from finance, with its own pages (components/report-org/finance). */
   /* Reconciliation is not here either: it is live, read from finance (Phase 5, 2026-11-27, components/report-org/finance/ReconciliationHome). */
-  {
-    slug: "controls",
-    label: "Financial controls",
-    title: "Financial controls",
-    about: "Migration adjustments, suspense, approvals, anomalies, period closing and audit trail.",
-    icon: ShieldCheck,
-    metrics: [
-      { label: "Pending approvals", value: 8, as: "count" },
-      { label: "Migration exceptions", value: 12, as: "count" },
-      { label: "Suspense balance", value: 24_500, as: "money" },
-      { label: "Duplicate flags", value: 3, as: "count" },
-      { label: "Overdue accounts", value: 2, as: "count" },
-      { label: "Closing progress", value: 75, as: "percent" },
-    ],
-    panels: [
-      { title: "Migration register", type: "table", ...MIGRATION_REGISTER },
-      {
-        title: "Suspense aging", type: "bars",
-        rows: [
-          { label: "0–7 days", value: 3_500, as: "money", percent: 14 },
-          { label: "8–30 days", value: 6_000, as: "money", percent: 24 },
-          { label: "31–60 days", value: 5_000, as: "money", percent: 20 },
-          { label: "60+ days", value: 10_000, as: "money", percent: 41 },
-        ],
-      },
-    ],
-    reports: [
-      { name: "Opening balance adjustments", detail: { type: "table", ...MIGRATION_REGISTER } },
-      { name: "Suspense accounts" },
-      { name: "Journal approvals" },
-      { name: "Financial anomalies" },
-      { name: "Period closing", detail: { type: "checklist", items: ["Bank reconciled", "POS reconciled", "Trial balance verified", "Management approval"] } },
-      { name: "Audit trail" },
-    ],
-  },
+  /* Financial controls is not here either: it is live, read from finance (Phase 6, 2026-11-28, components/report-org/finance/ControlsHome). */
 ];
 
 export const sectionBySlug = (slug: string) => SECTIONS.find((s) => s.slug === slug) ?? null;
@@ -221,7 +177,7 @@ export const NAV: { slug: string; label: string; icon: LucideIcon; live?: boolea
   { slug: "sales", label: "Sales and CRMs", icon: Users2 },
   { slug: "finance", label: "Finance and revenue", icon: Banknote, live: true },
   { slug: "reconciliation", label: "Reconciliation", icon: ArrowLeftRight, live: true },
-  { slug: "controls", label: "Financial controls", icon: ShieldCheck },
+  { slug: "controls", label: "Financial controls", icon: ShieldCheck, live: true },
 ];
 
 /** A sample figure as the page shows it: exact, never "800K" — Root's reports show whole figures. */

@@ -55,7 +55,7 @@ export type LiveSpec =
   | {
       kind: "ledger";
       /** vat: the rows behind the VAT position and the income of "Income less expenses" (headline cards only). */
-      source: "commission" | "payroll" | "vat" | "pl-lines" | "management-profit-lines" | "financial-lines" | "reconciliation-lines";
+      source: "commission" | "payroll" | "vat" | "pl-lines" | "management-profit-lines" | "financial-lines" | "reconciliation-lines" | "controls-lines";
       /** The summary's grouping. */
       groupBy: string;
       view: "summary" | "records";
@@ -82,6 +82,8 @@ export type LiveSpec =
   | { kind: "fp"; report: "cashflow" | "cash" | "receivables" | "obligations" | "advances" | "position"; period: "month" | "year" }
   /** Reconciliation and data integrity (Phase 5, 2026-11-27): one of finance's reconciliation reports. */
   | { kind: "rc"; report: "bank" | "psp" | "invoices" | "expenses" | "payroll" | "advances" | "historical" | "exceptions"; period: "month" | "year" }
+  /** Financial controls (Phase 6, 2026-11-28): one of finance's controls reports. */
+  | { kind: "fc"; report: "approvals" | "risks" | "liquidity" | "expenses" | "payroll" | "vat" | "closing" | "audit"; period: "month" | "year" }
   /** Finance's Expense report: approved expenses and those waiting for approval. */
   | {
       kind: "expenses";
@@ -406,15 +408,42 @@ export const RECONCILIATION: Category[] = [
   },
 ];
 
-export const ALL_REPORTS: (Report & { category: Category })[] = [...CATEGORIES, ...RECONCILIATION].flatMap((category) =>
+/**
+ * Report Org → Financial controls (Phase 6, 2026-11-28): finance's controls reports, live — the sample section they
+ * replace is gone. FC-01 is the section's own dashboard.
+ */
+const fcr = (report: Extract<LiveSpec, { kind: "fc" }>["report"], period: "month" | "year" = "year"): LiveSpec => ({ kind: "fc", report, period });
+export const CONTROLS: Category[] = [
+  {
+    slug: "controls",
+    name: "Financial controls",
+    reports: [
+      live("FC-01", "Financial controls overview", fcr("approvals"), "The dashboard: approvals waiting and overdue, critical and high exceptions, unreconciled accounts, overdue gateway settlements, obligations, unpaid salaries and commission, documentation gaps and closing readiness — each opening its report."),
+      live("FC-02", "Approval monitoring", fcr("approvals"), "Everything waiting for a decision in finance — enrolments, expenses, bills, payroll, procurement, advances, reimbursements, one-time payments, hiring, late entries, draft credit notes — with how long it has waited, who decides and the link to decide it in finance."),
+      live("FC-03", "Financial risks and exceptions", fcr("risks"), "Phase 5's exceptions by severity, status (confirmed, suspected, missing information), module and age. Money at risk counts confirmed discrepancies only, once each."),
+      live("FC-04", "Payment and liquidity controls", fcr("liquidity", "month"), "Available recorded cash, pending gateway money, obligations due within 30 days and those with no due date, overdue supplier payments, and the potential surplus or shortfall."),
+      live("FC-05", "Expense controls", fcr("expenses"), "Expenses awaiting approval, without documents or references, possible duplicates, without a bank line, late-recorded or entered after their month, unusual movements, and balance-sheet-like categories in the P&L."),
+      live("FC-06", "Payroll and commission controls", fcr("payroll"), "Payroll runs by stage, people on hold, reversals, commission outstanding, possible duplicate commission payments, typed commission to verify and advance recovery discrepancies."),
+      live("FC-07", "VAT and compliance", fcr("vat"), "Output, input and indicative net VAT (not a confirmed liability), missing tax invoices and supplier VAT numbers, VAT-related expense classification, credit-note limits and documentation gaps."),
+      live("FC-08", "Monthly closing readiness", fcr("closing"), "Twelve checks per month from finance's records — complete, incomplete, requires review, not applicable or unable to verify. Readiness only: no period is closed."),
+      live("FC-09", "Audit and activity monitoring", fcr("audit"), "The activity finance's records carry: approval decisions, late entries, payroll payment deletions and reversals, reconciliation, credit notes, voids, records created and changed. What is not recorded is said so."),
+    ],
+  },
+];
+
+export const ALL_REPORTS: (Report & { category: Category })[] = [...CATEGORIES, ...RECONCILIATION, ...CONTROLS].flatMap((category) =>
   category.reports.map((r) => ({ ...r, category })),
 );
-const FINANCE_REPORTS = ALL_REPORTS.filter((r) => r.category.slug !== "reconciliation");
+const FINANCE_REPORTS = ALL_REPORTS.filter((r) => r.category.slug !== "reconciliation" && r.category.slug !== "controls");
 
 /** A report by its ID, however it was typed in the address — "rev-04" finds REV-04. */
 export const reportById = (id: string) => ALL_REPORTS.find((r) => r.id.toLowerCase() === id.toLowerCase()) ?? null;
 
-export const hrefOf = (r: Report) => (r.id.startsWith("RC-") ? `/report-org/reconciliation/${r.id.toLowerCase()}` : `/report-org/finance/${r.id.toLowerCase()}`);
+export const hrefOf = (r: Report) =>
+  r.id === "FC-01" ? "/report-org/controls"
+    : r.id.startsWith("FC-") ? `/report-org/controls/${r.id.toLowerCase()}`
+    : r.id.startsWith("RC-") ? `/report-org/reconciliation/${r.id.toLowerCase()}`
+    : `/report-org/finance/${r.id.toLowerCase()}`;
 
 export const COUNTS = {
   all: FINANCE_REPORTS.length,

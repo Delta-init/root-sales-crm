@@ -151,3 +151,15 @@ export async function financeReconciliationLines(q: Record<string, unknown>) {
   const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/reconciliation-lines${passOn(q, ["org", "from", "to", "report", "line", "groupBy", "category", "severityName", "status", "module", "account", "month", ...PAGING])}`, "share the records behind a reconciliation figure");
   return { ...data, appUrl };
 }
+
+/** Financial controls (Phase 6, 2026-11-28): ?report=overview | approvals | risks | liquidity | expenses | payroll | vat | closing | audit. */
+export async function financeControls(q: Record<string, unknown>) {
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/controls${passOn(q, ["org", "from", "to", "report"])}`, "share its financial controls");
+  return { ...data, appUrl };
+}
+
+/** The records behind one financial-controls figure (?line=<section>:<line> | <section> | all). */
+export async function financeControlsLines(q: Record<string, unknown>) {
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/controls-lines${passOn(q, ["org", "from", "to", "report", "line", "groupBy", "category", "status", "severityName", "module", "account", "stage", "month", ...PAGING])}`, "share the records behind a financial-controls figure");
+  return { ...data, appUrl };
+}
