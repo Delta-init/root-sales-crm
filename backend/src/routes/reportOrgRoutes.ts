@@ -1,6 +1,6 @@
 import { Router, type Response, type NextFunction } from "express";
 import { authenticate, requireRole } from "../middleware/auth.js";
-import { financeAging, financeCommission, financeExpenses, financePayroll, financeVat, financePl, financePlLines, financeOrganizations, financeOverview, financeRevenue } from "../services/reportOrgFinanceService.js";
+import { financeAging, financeCommission, financeExpenses, financePayroll, financeVat, financePl, financePlLines, financeManagementProfit, financeManagementLines, financeOrganizations, financeOverview, financeRevenue } from "../services/reportOrgFinanceService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
 import type { AuthenticatedRequest } from "../types/index.js";
 
@@ -36,5 +36,7 @@ router.get("/finance/payroll", answer("Payroll report", financePayroll));
 router.get("/finance/vat", answer("VAT and income rows", financeVat));
 router.get("/finance/pl", answer("Profit and loss", financePl));
 router.get("/finance/pl-lines", answer("Profit and loss line", financePlLines));
+router.get("/finance/management-profit", answer("Management profitability", financeManagementProfit));
+router.get("/finance/management-profit-lines", answer("Management profitability records", financeManagementLines));
 
 export default router;

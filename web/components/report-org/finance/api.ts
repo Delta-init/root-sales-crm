@@ -236,7 +236,7 @@ export interface LedgerReport {
   appUrl: string;
 }
 
-export interface LedgerAsk { source: "commission" | "payroll" | "vat" | "pl-lines"; groupBy: string; params?: Record<string, string>; picks?: Picks }
+export interface LedgerAsk { source: "commission" | "payroll" | "vat" | "pl-lines" | "management-profit-lines"; groupBy: string; params?: Record<string, string>; picks?: Picks }
 
 export const fetchLedger = (org: string, period: Period, ask: LedgerAsk, page: PageAsk) =>
   get<LedgerReport>(ask.source, { org, from: period.from, to: period.to, groupBy: ask.groupBy, ...picksParams(ask.picks ?? {}), ...(ask.params ?? {}), ...pageParams(page) });
@@ -276,6 +276,27 @@ export const useFinancePl = <T extends PlStatement | PlMonths>(org: string | und
   useQuery({
     queryKey: ["report-org", "finance", "pl", org, period.from, period.to, basis, view],
     queryFn: () => fetchPl<T>(org!, period, basis, view),
+    enabled: !!org,
+    placeholderData: (before) => before,
+    ...LIVE,
+  });
+
+/* Management profitability (Phase 3, 2026-11-27): three views, figures per currency, month by month. */
+export type MpView = "invoice" | "collection" | "cash";
+export interface MpSum { total: number; paid: number; unpaid: number; count: number }
+export interface MpSide { currency: string; income: MpSum; payroll: MpSum; commission: MpSum; supplier: MpSum; other: MpSum; expenses: MpSum; netMinor: number; marginPct: number | null }
+export interface MpPayroll { currency: string; people: number; grossMinor: number; deductionsMinor: number; recoveriesMinor: number; netMinor: number; additionsMinor: number; commissionMinor: number; payableMinor: number; paidMinor: number; outstandingMinor: number; onHold: number; onHoldMinor: number }
+export interface MpCommission { currency: string; approvedUnpaidMinor: number; paidMinor: number; earnedMinor: number; typedMinor: number; inPayrollMinor: number; count: number }
+export interface MpReport {
+  generatedAt: string; org: FinanceOrg; period: Period; view: MpView; currency: string;
+  sides: MpSide[]; months: { month: string; sides: MpSide[] }[]; payroll: MpPayroll[]; commission: MpCommission[];
+  notes: string[]; duplicates: number; recordCount: number; appUrl: string;
+}
+
+export const useFinanceManagement = (org: string | undefined, period: Period, view: MpView) =>
+  useQuery({
+    queryKey: ["report-org", "finance", "management-profit", org, period.from, period.to, view],
+    queryFn: () => get<MpReport>("management-profit", { org: org!, from: period.from, to: period.to, view }),
     enabled: !!org,
     placeholderData: (before) => before,
     ...LIVE,

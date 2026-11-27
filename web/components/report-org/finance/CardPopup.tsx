@@ -17,7 +17,7 @@ import { AgingTable, ExpenseTable, InPopup, LedgerTable, RevenueTable, type Titl
  * table adds up to its card: the same finance figures, counted the same way.
  */
 
-export type CardKey = "invoiced" | "net" | "collected" | "expenses" | "expensesOther" | "profit" | "receivables" | "payables" | "vat" | "vatOut" | "collectedOther" | "plLine";
+export type CardKey = "invoiced" | "net" | "collected" | "expenses" | "expensesOther" | "profit" | "receivables" | "payables" | "vat" | "vatOut" | "collectedOther" | "plLine" | "mpLine";
 
 type Tab = { key: string; label: string; spec: LiveSpec; about: string };
 
@@ -30,8 +30,19 @@ const INCOME_LINES = ["income", "invoices", "credit-notes"];
 const plLines = (line: string, basis: string): LiveSpec =>
   ({ kind: "ledger", source: "pl-lines", groupBy: INCOME_LINES.includes(line) ? "month" : "category", view: "records", period: "month", params: { line, basis } });
 
+/** The records behind a management profitability figure (Phase 3, 2026-11-27); `basis` carries the view. */
+const mpLines = (line: string, view: string): LiveSpec =>
+  ({ kind: "ledger", source: "management-profit-lines", groupBy: line === "income" ? "month" : "category", view: "records", period: "month", params: { line, view } });
+
 function tabsFor(card: CardKey, currency?: string, line?: string, basis = "invoiced"): Tab[] {
   switch (card) {
+    case "mpLine":
+      return line === "net"
+        ? [
+          { key: "income", label: "Income", about: "Each record behind the income.", spec: mpLines("income", basis) },
+          { key: "expenses", label: "Costs", about: "Each record behind the costs.", spec: mpLines("expenses", basis) },
+        ]
+        : [{ key: line ?? "income", label: "Records", about: "Each record behind the figure.", spec: mpLines(line ?? "income", basis) }];
     case "plLine":
       return line === "net"
         ? [

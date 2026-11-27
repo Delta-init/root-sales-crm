@@ -10,8 +10,8 @@ import { Input } from "@/components/ui/input";
 import { apiErrorMessage } from "@/lib/axios";
 import { useReportOrgFilters, yearRange } from "../ReportOrgShell";
 import {
-  change, count, fetchAging, fetchExpenses, fetchLedger, fetchRevenue, money, useFinancePl, percent, useFinanceAging, useFinanceExpenses, useFinanceLedger, useFinanceOrgs, useFinanceRevenue,
-  type AgingGroup, type AgingRow, type ForeignLine, type PlBasis, type PlMonth, type PlMonths, type PlStatement, type LedgerGroup, type LedgerRow, type PageAsk, type ReportRow, type RevenueReport,
+  change, count, fetchAging, fetchExpenses, fetchLedger, fetchRevenue, money, useFinanceManagement, useFinancePl, percent, useFinanceAging, useFinanceExpenses, useFinanceLedger, useFinanceOrgs, useFinanceRevenue,
+  type MpSide, type MpSum, type AgingGroup, type AgingRow, type ForeignLine, type PlBasis, type PlMonth, type PlMonths, type PlStatement, type LedgerGroup, type LedgerRow, type PageAsk, type ReportRow, type RevenueReport,
 } from "./api";
 import { reportById, type Column, type LiveSpec, type Report } from "./catalog";
 import { ColumnsMenu, DataGrid, Pager, gridCsv, useGridColumns, type GridColumn, type GridSort } from "./DataGrid";
@@ -39,6 +39,7 @@ type ExpenseSpec = Extract<LiveSpec, { kind: "expenses" }>;
 type AgingSpec = Extract<LiveSpec, { kind: "aging" }>;
 type LedgerSpec = Extract<LiveSpec, { kind: "ledger" }>;
 type PlSpec = Extract<LiveSpec, { kind: "pl" }>;
+type MpSpec = Extract<LiveSpec, { kind: "mp" }>;
 type Mode = "summary" | "records";
 
 /** A summary row: one day, month or group. */
@@ -714,6 +715,30 @@ interface LedgerShape {
 const GROUP_LABEL: Record<string, string> = { person: "Person", source: "CRM or CS", month: "Month", state: "State", kind: "Type", department: "Department", status: "Status", runState: "Payroll run", method: "Payment method", bank: "Bank account", vendor: "Vendor", crm: "CRM", salesperson: "Salesperson" };
 
 function ledgerShape(spec: LedgerSpec): LedgerShape {
+  if (spec.source === "management-profit-lines") {
+    const view = spec.params?.view ?? "invoice";
+    const line = spec.params?.line ?? "income";
+    if (line === "income") {
+      return {
+        space: `mp-income-${view}`, noun: view === "invoice" ? "Invoices and credit notes" : view === "collection" ? "Payments" : "Bank lines",
+        filters: [{ key: "category", label: "Kind" }, { key: "crm", label: "CRM" }, { key: "method", label: "Payment method" }, { key: "month", label: "Month" }],
+        sums: view === "cash" ? [["amountMinor", "Money in"]] : [["amountMinor", "Counted (no VAT)"], ["vatMinor", "VAT"], ["grossMinor", "With VAT"]],
+        first: ["date", view === "invoice" ? "Issued" : view === "collection" ? "Paid on" : "Date"],
+        fields: [["title", view === "cash" ? "Description" : "Client"], ["category", "Kind"], ["crm", "CRM", view === "cash"], ["method", "Payment method", view !== "collection"], ["detail", "Detail"], ["month", "Month", true]],
+        basis: view === "invoice" ? "Invoices issued in the period before VAT, less credit notes; a part paid in another currency is apart." : view === "collection" ? "Payments received in the period, without their VAT. A payment in another currency carries none and is apart." : "Money in on the bank lines of the period; transfers between own accounts left out.",
+        source: "finance's management profitability",
+      };
+    }
+    return {
+      space: `mp-costs-${view}`, noun: view === "cash" ? "Bank lines" : "Records",
+      filters: [{ key: "category", label: view === "cash" ? "Kind" : "Category" }, { key: "status", label: "Status" }, { key: "month", label: "Month" }],
+      sums: view === "cash" ? [["amountMinor", "Money out"]] : [["amountMinor", "Cost"], ["paidMinor", "Paid"], ["unpaidMinor", "Unpaid"]],
+      first: ["date", view === "cash" ? "Date" : "Incurred"],
+      fields: [["title", "Name"], ["category", view === "cash" ? "Kind" : "Category"], ["status", "Status"], ["detail", "Detail"], ["month", "Month", true]],
+      basis: view === "cash" ? "Money out on the bank lines of the period; transfers between own accounts left out." : "Costs incurred in the period: payroll in its payroll month whether paid or not, commission outside payroll, supplier bills before VAT less vendor credits, and other expenses.",
+      source: "finance's management profitability",
+    };
+  }
   if (spec.source === "pl-lines") {
     const collected = spec.params?.basis === "collected";
     if (spec.params?.line === "income") {
@@ -1065,6 +1090,146 @@ export function PLTable({ report, spec }: { report: Titled; spec: PlSpec }) {
 }
 
 /** Each organization's invoiced revenue as a row, in its own currency — never a column to be added up. */
+/* ── Management profitability (Phase 3, 2026-11-27) ─────────────────────────── */
+
+const MP_TITLE: Record<MpSpec["view"], string> = {
+  invoice: "Invoice-based management profitability",
+  collection: "Collection-based management profitability",
+  cash: "Cash movement",
+};
+interface MpRow { key: string; label: string; kind: "line" | "total" | "net" | "margin"; sum?: MpSum; amount: number; line?: string }
+const marginText = (v: number | null) => (v === null ? "" : `${v.toLocaleString("en-US", { maximumFractionDigits: 1 })}%`);
+
+export function MPTable({ report, spec }: { report: Titled; spec: MpSpec }) {
+  const f = useReportOrgFilters();
+  const orgs = useFinanceOrgs();
+  const org = pickOrg(orgs.data, f.entity);
+  useYearFor(spec.period, report.id);
+  const [show, setShow] = useState<"statement" | "months">("statement");
+  const [pick, setPick] = useState<MpRow | null>(null);
+  const query = useFinanceManagement(org?.id, f.range, spec.view);
+  const data = query.data;
+  const cur = data?.currency ?? org?.currency ?? "";
+  const cash = spec.view === "cash";
+  const own = data?.sides.find((x) => x.currency === cur);
+  const others = (data?.sides ?? []).filter((x) => x.currency !== cur);
+
+  const rowsOf = (side: MpSide | undefined): MpRow[] => {
+    const z = { total: 0, paid: 0, unpaid: 0, count: 0 };
+    const s = side ?? { income: z, payroll: z, commission: z, supplier: z, other: z, expenses: z, netMinor: 0, marginPct: null } as unknown as MpSide;
+    return [
+      { key: "income", label: cash ? "Money in" : spec.view === "invoice" ? "Net invoiced revenue (before VAT, less credit notes)" : "Collections (without VAT)", kind: "total", sum: s.income, amount: s.income.total, line: "income" },
+      { key: "payroll", label: cash ? "Payroll paid" : "Payroll", kind: "line", sum: s.payroll, amount: s.payroll.total, line: "payroll" },
+      { key: "commission", label: cash ? "Commission paid" : "Commission (outside payroll)", kind: "line", sum: s.commission, amount: s.commission.total, line: "commission" },
+      { key: "supplier", label: cash ? "Supplier bills paid" : "Supplier costs (before VAT, less vendor credits)", kind: "line", sum: s.supplier, amount: s.supplier.total, line: "supplier" },
+      { key: "other", label: cash ? "Other money out" : "Other operating expenses", kind: "line", sum: s.other, amount: s.other.total, line: "other" },
+      { key: "expenses", label: cash ? "Total money out" : "Total costs", kind: "total", sum: s.expenses, amount: s.expenses.total, line: "expenses" },
+      { key: "net", label: cash ? "Net cash movement" : "Net management profit", kind: "net", amount: s.netMinor, line: "net" },
+      ...(cash ? [] : [{ key: "margin", label: "Profit margin", kind: "margin" as const, amount: s.marginPct ?? 0 }]),
+    ];
+  };
+  const lines = useMemo(() => rowsOf(own), [own, cash, spec.view]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const stCols = useMemo<GridColumn<MpRow>[]>(() => {
+    const label = (r: MpRow) => {
+      const text = r.kind === "line" ? <span className="pl-4 text-muted-foreground">{r.label}</span> : <span className="font-semibold">{r.label}</span>;
+      return r.line ? <button type="button" title="See the records behind this figure" onClick={() => setPick(r)} className="text-left underline-offset-4 hover:text-primary hover:underline">{text}</button> : text;
+    };
+    const amt = (r: MpRow) => (r.kind === "margin" ? (own?.marginPct === null || own?.marginPct === undefined ? DASH : marginText(own.marginPct)) : <span className={r.kind === "line" ? undefined : r.kind === "net" && r.amount < 0 ? "font-semibold text-rose-600 dark:text-rose-400" : "font-semibold"}>{money(r.amount, cur)}</span>);
+    const isCost = (r: MpRow) => r.sum && r.key !== "income";
+    return [
+      { key: "label", header: "Figure", fixed: true, cell: label, text: (r) => (r.kind === "line" ? `   ${r.label}` : r.label) },
+      { key: "amount", header: `${data ? periodText(data.period) : "Period"} (${cur})`, align: "right", cell: amt, text: (r) => (r.kind === "margin" ? marginText(own?.marginPct ?? null) : r.amount / 100) },
+      ...(cash ? [] : [
+        { key: "paid", header: "Paid", align: "right", cell: (r: MpRow) => (isCost(r) ? money(r.sum!.paid, cur) : DASH), text: (r: MpRow) => (isCost(r) ? r.sum!.paid / 100 : "") },
+        { key: "unpaid", header: "Unpaid", align: "right", cell: (r: MpRow) => (isCost(r) ? <span className={r.sum!.unpaid ? "text-amber-600 dark:text-amber-400" : undefined}>{money(r.sum!.unpaid, cur)}</span> : DASH), text: (r: MpRow) => (isCost(r) ? r.sum!.unpaid / 100 : "") },
+      ] as GridColumn<MpRow>[]),
+      { key: "count", header: "Records", align: "right", cell: (r) => (r.sum ? count(r.sum.count) : DASH), text: (r) => (r.sum ? r.sum.count : "") },
+    ];
+  }, [cur, data, own, cash]);
+
+  type MoRow = { month: string; s?: MpSide };
+  const moRows = useMemo<MoRow[]>(() => (data?.months ?? []).map((m) => ({ month: m.month, s: m.sides.find((x) => x.currency === cur) })), [data, cur]);
+  const moCols = useMemo<GridColumn<MoRow>[]>(() => {
+    const v = (r: MoRow, k: "income" | "payroll" | "commission" | "supplier" | "other" | "expenses") => r.s?.[k].total ?? 0;
+    const t = own;
+    const col = (k: "income" | "payroll" | "commission" | "supplier" | "other" | "expenses", header: string): GridColumn<MoRow> => ({ key: k, header: `${header} (${cur})`, align: "right", cell: (r) => money(v(r, k), cur), text: (r) => v(r, k) / 100, total: money(t?.[k].total ?? 0, cur), totalText: (t?.[k].total ?? 0) / 100 });
+    return [
+      { key: "month", header: "Month", fixed: true, cell: (r) => <span className="font-medium">{monthText(r.month)}</span>, text: (r) => r.month, total: "Total", totalText: "Total" },
+      col("income", cash ? "Money in" : "Income"),
+      col("payroll", "Payroll"), col("commission", "Commission"), col("supplier", "Supplier"), col("other", "Other"),
+      col("expenses", cash ? "Money out" : "Costs"),
+      { key: "net", header: `${cash ? "Net" : "Net profit"} (${cur})`, align: "right", cell: (r) => <span className={(r.s?.netMinor ?? 0) < 0 ? "font-medium text-rose-600 dark:text-rose-400" : "font-medium"}>{money(r.s?.netMinor ?? 0, cur)}</span>, text: (r) => (r.s?.netMinor ?? 0) / 100, total: money(t?.netMinor ?? 0, cur), totalText: (t?.netMinor ?? 0) / 100 },
+      ...(cash ? [] : [{ key: "margin", header: "Margin", align: "right", cell: (r: MoRow) => marginText(r.s?.marginPct ?? null) || DASH, text: (r: MoRow) => marginText(r.s?.marginPct ?? null), total: marginText(t?.marginPct ?? null) || DASH, totalText: marginText(t?.marginPct ?? null) }] as GridColumn<MoRow>[]),
+    ];
+  }, [cur, own, cash]);
+
+  const stGrid = useGridColumns(`${report.id}:statement`, stCols);
+  const moGrid = useGridColumns(`${report.id}:months`, moCols);
+  const pay = data?.payroll.find((p) => p.currency === cur);
+  const com = data?.commission.find((c) => c.currency === cur);
+  const error = orgs.error ?? query.error;
+
+  const save = () => {
+    if (!data) return;
+    const name = `${report.id}-${data.org.name}-${data.period.from}_${data.period.to}`.replace(/\s+/g, "-");
+    const top = [[`${report.id} ${report.name}`], [data.org.name, periodText(data.period), MP_TITLE[spec.view]], []];
+    saveCsv(`${name}.csv`, [...top, ...(show === "months" ? gridCsv(moGrid.visible, moRows) : gridCsv(stGrid.visible, lines))]);
+  };
+
+  return (
+    <div className="space-y-3">
+      <Head report={report} basis={MP_TITLE[spec.view]} source="finance's management profitability" at={data?.generatedAt} />
+      <FinanceFilters orgs={orgs.data} org={org} space={`mp-${spec.view}`} filters={[]} />
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <Select label="Show" value={show} onChange={(v) => setShow(v as "statement" | "months")} options={[{ key: "statement", name: "The period" }, { key: "months", name: "Month by month" }]} />
+        <div className="flex items-center gap-2 sm:ml-auto">
+          {show === "months" ? <ColumnsMenu grid={moGrid} /> : <ColumnsMenu grid={stGrid} />}
+          <Button variant="outline" size="sm" className="h-8" onClick={save} disabled={!data}>
+            <Download />
+            Export
+          </Button>
+        </div>
+      </div>
+      {error ? (
+        <ErrorCard error={error} onRetry={() => { void orgs.refetch(); void query.refetch(); }} />
+      ) : show === "months" ? (
+        <DataGrid grid={moGrid} rows={moRows} rowKey={(r) => r.month} loading={query.isFetching} empty="No month in this period." />
+      ) : (
+        <DataGrid grid={stGrid} rows={lines} rowKey={(r) => r.key} loading={query.isFetching} empty="Finance has nothing for this period." />
+      )}
+
+      {!cash && pay && (
+        <div className="rounded-md border border-border p-3 text-xs text-muted-foreground">
+          <p className="mb-1 font-medium text-foreground">Payroll in {cur}: {count(pay.people)} {pay.people === 1 ? "person" : "people"}</p>
+          <p>
+            Gross {money(pay.grossMinor, cur)} · deductions {money(pay.deductionsMinor, cur)} (of which advance and loan recoveries {money(pay.recoveriesMinor, cur)}) · net from HRMS {money(pay.netMinor, cur)} ·
+            additions {money(pay.additionsMinor, cur)} (of which commission {money(pay.commissionMinor, cur)}) · <span className="font-medium text-foreground">payable {money(pay.payableMinor, cur)}</span> ·
+            paid {money(pay.paidMinor, cur)} · outstanding {money(pay.outstandingMinor, cur)}{pay.onHold ? ` (${count(pay.onHold)} on hold, ${money(pay.onHoldMinor, cur)})` : ""}.
+          </p>
+          <p className="mt-1">The cost counted is the payable. Recoveries pay back money given earlier and are shown, not added. Employer costs are not recorded in finance.</p>
+        </div>
+      )}
+      {!cash && com && (com.count > 0 || com.inPayrollMinor !== 0) && (
+        <p className="text-xs text-muted-foreground">
+          Commission in {cur}: approved, not paid {money(com.approvedUnpaidMinor, cur)} · paid {money(com.paidMinor, cur)} · earned in finance, not paid {money(com.earnedMinor, cur)}{com.typedMinor ? ` · typed as Sales Commission ${money(com.typedMinor, cur)}` : ""} · inside payroll (counted in payroll, not again) {money(com.inPayrollMinor, cur)}. Pending eligibility and earned-not-approved commission are in the CRMs, not finance.
+        </p>
+      )}
+      {others.map((o) => (
+        <p key={o.currency} className="text-xs text-muted-foreground">
+          Also in {o.currency}: {cash ? "money in" : "income"} {amber(money(o.income.total, o.currency))}, {cash ? "money out" : "costs"} {amber(money(o.expenses.total, o.currency))}{cash ? "" : ` (unpaid ${money(o.expenses.unpaid, o.currency)})`}, net {amber(money(o.netMinor, o.currency))}. Not in the {cur} figures, never converted.
+        </p>
+      ))}
+      {cash && !!data?.duplicates && <p className="text-xs text-muted-foreground">{count(data.duplicates)} bank {data.duplicates === 1 ? "line is" : "lines are"} marked duplicate and still counted, as in the account balance.</p>}
+      {(data?.notes ?? []).map((n) => <p key={n} className="text-xs text-muted-foreground">{n}</p>)}
+      <CardPopup
+        open={pick ? { card: "mpLine", title: pick.label, value: money(pick.amount, cur), line: pick.line, basis: spec.view, note: `${data ? periodText(data.period) : ""} · ${MP_TITLE[spec.view]}. The total is the figure's.` } : null}
+        onClose={() => setPick(null)}
+      />
+    </div>
+  );
+}
+
 function EntitiesTable({ report, basis }: { report: Titled; basis: "invoiced" | "collected" }) {
   const f = useReportOrgFilters();
   const orgs = useFinanceOrgs();
@@ -1161,5 +1326,6 @@ export function ReportViewer({ id }: { id: string }) {
   if (report.spec.kind === "aging") return <AgingTable key={report.id} report={report} spec={report.spec} />;
   if (report.spec.kind === "ledger") return <LedgerTable key={report.id} report={report} spec={report.spec} />;
   if (report.spec.kind === "pl") return <PLTable key={report.id} report={report} spec={report.spec} />;
+  if (report.spec.kind === "mp") return <MPTable key={report.id} report={report} spec={report.spec} />;
   return <RevenueTable key={report.id} report={report} spec={report.spec} />;
 }

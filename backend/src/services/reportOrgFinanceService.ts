@@ -115,3 +115,15 @@ export async function financePl(q: Record<string, unknown>) {
   const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/pl${passOn(q, ["org", "from", "to", "basis", "view"])}`, "share its profit and loss");
   return { ...data, appUrl };
 }
+
+/** Management profitability (Phase 3, 2026-11-27): ?view=invoice | collection | cash — figures per currency, month by month. */
+export async function financeManagementProfit(q: Record<string, unknown>) {
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/management-profit${passOn(q, ["org", "from", "to", "view"])}`, "share its management profitability");
+  return { ...data, appUrl };
+}
+
+/** The records behind one management profitability figure (?line=income | payroll | commission | supplier | other | expenses). */
+export async function financeManagementLines(q: Record<string, unknown>) {
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/management-profit-lines${passOn(q, ["org", "from", "to", "view", "line", "groupBy", "category", "status", "crm", "method", "month", ...PAGING])}`, "share the records behind a management profitability figure");
+  return { ...data, appUrl };
+}

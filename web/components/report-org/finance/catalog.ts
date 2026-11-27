@@ -55,7 +55,7 @@ export type LiveSpec =
   | {
       kind: "ledger";
       /** vat: the rows behind the VAT position and the income of "Income less expenses" (headline cards only). */
-      source: "commission" | "payroll" | "vat" | "pl-lines";
+      source: "commission" | "payroll" | "vat" | "pl-lines" | "management-profit-lines";
       /** The summary's grouping. */
       groupBy: string;
       view: "summary" | "records";
@@ -70,6 +70,11 @@ export type LiveSpec =
    * beside it) or a row per month (`months`, with net margin or the change on the month before).
    */
   | { kind: "pl"; view: "statement" | "compare" | "months"; column?: "margin" | "change"; period: "month" | "year" }
+  /**
+   * Management profitability (Phase 3, 2026-11-27): invoice-based, collection-based or cash movement — income, payroll,
+   * commission, supplier and other costs (paid and unpaid), net and margin, with each figure's records.
+   */
+  | { kind: "mp"; view: "invoice" | "collection" | "cash"; period: "month" | "year" }
   /** Finance's Expense report: approved expenses and those waiting for approval. */
   | {
       kind: "expenses";
@@ -280,6 +285,9 @@ export const CATEGORIES: Category[] = [
       none("PRF-11", "Break-even", NO_COST_SPLIT),
       none("PRF-12", "Contribution margin", NO_COST_SPLIT),
       live("PRF-13", "Trend", { kind: "pl", view: "months", column: "change", period: "year" }, "Net profit month by month, and how each month moved against the one before."),
+      live("PRF-14", "Management profit — invoice-based", { kind: "mp", view: "invoice", period: "month" }, "Invoices issued before VAT, less credit notes, less the costs incurred in the period: payroll in its month whether paid or not, commission owed, supplier bills and other expenses — each paid and unpaid. A management view, not statutory accrual profit."),
+      live("PRF-15", "Management profit — collection-based", { kind: "mp", view: "collection", period: "month" }, "Payments received in the period without their VAT, less the same costs incurred. Collections can be for invoices of earlier periods. Not accounting profit."),
+      live("PRF-16", "Cash movement", { kind: "mp", view: "cash", period: "month" }, "Money in less money out on the bank lines of the period, by kind. Transfers between the organization's own accounts are left out; nothing unpaid or uncollected is in it."),
     ],
   },
   {
