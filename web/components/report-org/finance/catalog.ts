@@ -216,7 +216,7 @@ export const CATEGORIES: Category[] = [
       live("FS-09", "Comparative statements", { kind: "pl", view: "compare", period: "month" }, "The profit and loss beside the period before, line by line, and how each moved."),
       none("FS-10", "Consolidated statements", "The organizations keep their books in different currencies, and finance never adds them together."),
       live("FS-11", "Opening and closing balances", fpr("cash"), "Every bank account, petty cash wallet and payment gateway: its opening balance and its balance as of the date, last transaction and reconciliation."),
-      live("FS-12", "Management financial position", fpr("position"), "Cash and bank, pending gateway settlements, enforceable receivables and employee advances, less recorded obligations — a management view, not a statutory balance sheet."),
+      live("FS-12", "Management financial position", fpr("position"), "Cash and bank, pending gateway settlements, what is due on issued invoices and enrolment balances, and employee advances, less recorded obligations — a management view, not a statutory balance sheet."),
     ],
   },
   {
@@ -235,7 +235,7 @@ export const CATEGORIES: Category[] = [
       none("AR-10", "Bad debt and impairment", "Finance writes nothing off, so there is no bad debt to list."),
       none("AR-11", "Disputes", "Finance does not mark a balance as disputed."),
       planned("AR-12", "Expected collections"),
-      live("AR-13", "Receivables as of a date", fpr("receivables"), "What customers owed on a chosen date — payments and credits after it not taken off — by kind (enforceable, enrolment balance, pro-forma, old books) and age (seven bands)."),
+      live("AR-13", "Receivables as of a date", fpr("receivables"), "What customers owed on a chosen date — payments and credits after it not taken off — by kind (issued invoices, enrolment balances, pro-forma instalments, old books) and age (seven bands)."),
       live("AR-14", "Receivables by CRM", fpList("receivables", "all", "crm"), "What is owed as of the date, by the CRM each enrolment came from."),
     ],
   },
