@@ -110,12 +110,15 @@ function Figures({ o }: { o: Overview }) {
   const agingTop = Math.max(0, ...aging.map(([, v]) => v));
   const foreign = o.collectedForeign?.lines ?? [];
   const spentOther = o.expensesOther ?? [];
+  // Which CRMs the figures were kept to. A finance server from before the multi-select answers with one name, not a
+  // list — taken either way, so a newer page over an older finance does not fall over (it did, 2026-11-27).
+  const keptTo = Array.isArray(o.crm) ? o.crm : o.crm ? [String(o.crm)] : [];
 
   return (
     <div className="space-y-6">
-      {o.crm && (
+      {keptTo.length > 0 && (
         <p className="rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
-          Invoiced and collected are kept to {o.crm.map((k) => HOME_CRMS.find((c) => c.key === k)?.name ?? k).join(", ")} alone. Expenses, profit, what is owed, VAT and the bank are {o.org.name}&apos;s as a whole.
+          Invoiced and collected are kept to {keptTo.map((k) => HOME_CRMS.find((c) => c.key === k)?.name ?? k).join(", ")} alone. Expenses, profit, what is owed, VAT and the bank are {o.org.name}&apos;s as a whole.
         </p>
       )}
 

@@ -25,7 +25,7 @@ export interface Overview {
   period: Period;
   before: Period;
   /** The CRMs the invoiced and collected figures were kept to; null: all of them. */
-  crm: string[] | null;
+  crm: string[] | string | null;
   kpis: Record<"grossInvoiced" | "creditNotes" | "netInvoiced" | "collections" | "income" | "expenses" | "netProfit", Pair>;
   receivables: Aged;
   payables: Aged;
