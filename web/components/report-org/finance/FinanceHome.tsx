@@ -129,13 +129,15 @@ function Figures({ o, onOpen }: { o: Overview; onOpen: (c: CardOpen) => void }) 
   // Which CRMs the figures were kept to. A finance server from before the multi-select answers with one name, not a
   // list — taken either way, so a newer page over an older finance does not fall over (it did, 2026-11-27).
   const keptTo = Array.isArray(o.crm) ? o.crm : o.crm ? [String(o.crm)] : [];
+  const crmNames = keptTo.map((k) => HOME_CRMS.find((c) => c.key === k)?.name ?? k).join(", ");
+  const only = keptTo.length ? ` for ${crmNames}` : "";
   const open = (card: CardKey, title: string, value: string, note?: string, currency?: string) => () => onOpen({ card, title, value, note, currency });
 
   return (
     <div className="space-y-6">
       {keptTo.length > 0 && (
         <p className="rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
-          Invoiced and collected are kept to {keptTo.map((k) => HOME_CRMS.find((c) => c.key === k)?.name ?? k).join(", ")} alone. Expenses, profit, what is owed, VAT and the bank are {o.org.name}&apos;s as a whole.
+          Invoiced, collected, receivables and output VAT are kept to {crmNames} alone. Expenses, payables, input VAT, income less expenses and the bank are {o.org.name}&apos;s as a whole: finance records no CRM on an expense or a supplier bill.
         </p>
       )}
 
@@ -155,9 +157,9 @@ function Figures({ o, onOpen }: { o: Overview; onOpen: (c: CardOpen) => void }) 
           </Opens>
         ))}
         <Kpi label="Income less expenses" value={money(k.netProfit.minor, cur)} note="Invoices before VAT, less the expenses beside it. Finance keeps no ledger." pair={k.netProfit} before={before} onOpen={open("profit", "Income less expenses", money(k.netProfit.minor, cur), `${lessText(["Income before VAT", k.income.minor], ["expenses", k.expenses.minor], cur)} Kept to no CRM: finance records no CRM on an expense.`)} />
-        <Kpi label="Receivables" value={money(o.receivables.grand, cur)} note={`Still owed on invoices, as of ${dayText(o.receivables.asOf)}`} onOpen={open("receivables", "Receivables", money(o.receivables.grand, cur), `Still owed on invoices, as of ${dayText(o.receivables.asOf)}, whatever the period.`)} />
+        <Kpi label="Receivables" value={money(o.receivables.grand, cur)} note={`Still owed on invoices${only}, as of ${dayText(o.receivables.asOf)}`} onOpen={open("receivables", "Receivables", money(o.receivables.grand, cur), `Still owed on invoices${only}, as of ${dayText(o.receivables.asOf)}, whatever the period.`)} />
         <Kpi label="Payables" value={money(o.payables.grand, cur)} note={`Still owed on bills, as of ${dayText(o.payables.asOf)}`} onOpen={open("payables", "Payables", money(o.payables.grand, cur), `Still owed on supplier bills, as of ${dayText(o.payables.asOf)}, whatever the period. Bills belong to no CRM.`)} />
-        <Kpi label="VAT position" value={money(o.vat.netPayableMinor, cur)} note={`Output ${money(o.vat.outputMinor, cur)} less input ${money(o.vat.inputMinor, cur)}`} onOpen={open("vat", "VAT position", money(o.vat.netPayableMinor, cur), `${lessText(["Output VAT", o.vat.outputMinor], ["input VAT", o.vat.inputMinor], cur)} The whole organization's, kept to no CRM.`)} />
+        <Kpi label="VAT position" value={money(o.vat.netPayableMinor, cur)} note={`Output${o.vat.outputByCrm ? only : ""} ${money(o.vat.outputMinor, cur)} less input ${money(o.vat.inputMinor, cur)}${o.vat.outputByCrm ? " (whole company)" : ""}`} onOpen={open("vat", "VAT position", money(o.vat.netPayableMinor, cur), `${lessText([`Output VAT${o.vat.outputByCrm ? only : ""}`, o.vat.outputMinor], ["input VAT", o.vat.inputMinor], cur)}${o.vat.outputByCrm ? " Input VAT is the whole company's: supplier bills record no CRM." : " The whole organization's."}`)} />
       </div>
 
       <ForeignUnknown lines={foreign} cur={cur} />
@@ -181,7 +183,7 @@ function Figures({ o, onOpen }: { o: Overview; onOpen: (c: CardOpen) => void }) 
             })}
           />
         </Panel>
-        <Panel title="Receivables by age" note={`As of ${dayText(o.receivables.asOf)}, whatever the period · ${cur}`}>
+        <Panel title={`Receivables by age${only}`} note={`As of ${dayText(o.receivables.asOf)}, whatever the period · ${cur}`}>
           <Bars empty="Nothing is owed." rows={agingTop ? aging.map(([label, v]) => ({ label, value: money(v, cur), percent: (v / agingTop) * 100 })) : []} />
         </Panel>
         <Panel title="Bank and cash now" note="What each account holds in finance at this moment, whatever the period">

@@ -101,11 +101,19 @@ export function useReportOrgFilters(): Filters {
  * The same filters, held apart (2026-11-27): a breakdown opened from a headline card starts on the page's organization,
  * period and picks, and whatever is changed inside it stays inside it — the page behind keeps its own.
  */
-export function FiltersScope({ children }: { children: ReactNode }) {
+export function FiltersScope({ children, carry = {} }: { children: ReactNode; carry?: Record<string, [string, string]> }) {
   const outer = useReportOrgFilters();
   const [entity, setEntity] = useState<string | null>(outer.entity);
   const [range, setRange] = useState<Range>(outer.range);
-  const [picked, setPickedState] = useState<Record<string, Record<string, string[]>>>(outer.picked);
+  // `carry`: a pick of one kind of table that starts another's — the page's CRM, for the open invoices and their VAT.
+  const [picked, setPickedState] = useState<Record<string, Record<string, string[]>>>(() => {
+    const all = { ...outer.picked };
+    for (const [to, [from, filter]] of Object.entries(carry)) {
+      const values = outer.picked[from]?.[filter];
+      if (values?.length) all[to] = { ...(all[to] ?? {}), [filter]: values };
+    }
+    return all;
+  });
   const filters = useMemo<Filters>(
     () => ({
       ...outer,

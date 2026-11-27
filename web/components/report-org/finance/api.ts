@@ -29,7 +29,7 @@ export interface Overview {
   kpis: Record<"grossInvoiced" | "creditNotes" | "netInvoiced" | "collections" | "income" | "expenses" | "netProfit", Pair>;
   receivables: Aged;
   payables: Aged;
-  vat: { outputMinor: number; inputMinor: number; netPayableMinor: number };
+  vat: { outputMinor: number; inputMinor: number; netPayableMinor: number; /** Output VAT kept to the CRMs picked. */ outputByCrm?: boolean };
   /** A method taken in another currency only (INR Transfer) has nothing in `amountMinor`: its money is in `foreign`. */
   methods: { key: string; name: string; amountMinor: number; count: number; foreign?: ForeignLine[] }[];
   expenseCategories: { label: string; amountMinor: number }[];

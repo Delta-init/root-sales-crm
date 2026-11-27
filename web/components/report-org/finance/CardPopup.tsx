@@ -97,7 +97,7 @@ function Body({ open }: { open: CardOpen }) {
         </div>
       )}
       <InPopup.Provider value>
-        <FiltersScope>
+        <FiltersScope carry={{ receivables: ["revenue", "crm"], "vat-output": ["revenue", "crm"] }}>
           <Table key={tab.key} tab={tab} title={open.title} />
         </FiltersScope>
       </InPopup.Provider>

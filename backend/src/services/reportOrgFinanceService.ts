@@ -81,7 +81,7 @@ export async function financeExpenses(q: Record<string, unknown>) {
  * student or vendor, with every open one as a row. Finance keeps no balances as of a past date, so there is no period.
  */
 export async function financeAging(q: Record<string, unknown>) {
-  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/aging${passOn(q, ["org", "kind", "due", "groupBy", "party", "band", "salesperson", "department", ...PAGING])}`, "share what is still owed");
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/aging${passOn(q, ["org", "kind", "due", "groupBy", "crm", "party", "band", "salesperson", "department", ...PAGING])}`, "share what is still owed");
   return { ...data, appUrl };
 }
 

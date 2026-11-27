@@ -70,7 +70,7 @@ const EXPENSE_FILTERS: FilterDef[] = [
   { key: "category", label: "Category" }, { key: "department", label: "Department" }, { key: "employee", label: "Employee" },
   { key: "method", label: "Payment method" }, { key: "bank", label: "Bank account" }, { key: "source", label: "Source" }, { key: "status", label: "Status" }, { key: "paid", label: "Paid" },
 ];
-const RECEIVABLE_FILTERS: FilterDef[] = [{ key: "party", label: "Student" }, { key: "band", label: "How late" }, { key: "salesperson", label: "Salesperson" }, { key: "department", label: "Department" }];
+const RECEIVABLE_FILTERS: FilterDef[] = [{ key: "crm", label: "CRM" }, { key: "party", label: "Student" }, { key: "band", label: "How late" }, { key: "salesperson", label: "Salesperson" }, { key: "department", label: "Department" }];
 const PAYABLE_FILTERS: FilterDef[] = [{ key: "party", label: "Vendor" }, { key: "band", label: "How late" }];
 
 const EXTRA: Record<Column, string> = { collected: "Collected so far", owed: "Still owed", average: "Average", change: "On the one before", efficiency: "Collected %" };
@@ -598,7 +598,7 @@ export function AgingTable({ report, spec }: { report: Titled; spec: AgingSpec }
       { key: "number", header: "Number", sort: "number", cell: (r) => numberCell(appUrl, r), text: (r) => r.number },
       { key: "title", header: party, sort: "title", cell: (r) => clip(r.title), text: (r) => r.title },
       { key: "date", header: "Issued", sort: "date", cell: (r) => dayText(r.date), text: (r) => r.date },
-      ...(receivable ? [textCol("salesperson", "Salesperson") as unknown as GridColumn<AgingRow>, textCol("department", "Department", { hidden: true }) as unknown as GridColumn<AgingRow>] : []),
+      ...(receivable ? [textCol("crm", "CRM") as unknown as GridColumn<AgingRow>, textCol("salesperson", "Salesperson") as unknown as GridColumn<AgingRow>, textCol("department", "Department", { hidden: true }) as unknown as GridColumn<AgingRow>] : []),
       { key: "daysOverdue", header: "Days late", align: "right", sort: "daysOverdue", cell: (r) => (r.daysOverdue > 0 ? <span className="text-rose-600 dark:text-rose-400">{count(r.daysOverdue)}</span> : DASH), text: (r) => r.daysOverdue },
       { key: "band", header: "How late", cell: (r) => r.band, text: (r) => r.band },
       { key: "totalMinor", header: `${receivable ? "Invoice" : "Bill"} total`, align: "right", sort: "totalMinor", cell: (r) => money(r.totalMinor, cur), text: (r) => r.totalMinor / 100, total: money(totals?.totalMinor ?? 0, cur), totalText: (totals?.totalMinor ?? 0) / 100 },
@@ -660,7 +660,7 @@ export function AgingTable({ report, spec }: { report: Titled; spec: AgingSpec }
         <>
           <DataGrid
             grid={recGrid} rows={data?.rows ?? []} rowKey={(r) => r.id} loading={query.isFetching}
-            sort={t.sort} onSort={(k) => t.setSort(nextSort(t.sort, k, ["title", "number", "dueDate", "date"]))}
+            sort={t.sort} onSort={(k) => t.setSort(nextSort(t.sort, k, ["title", "number", "dueDate", "date", "crm", "salesperson", "department"]))}
             empty={nothing}
           />
           <Pager page={t.page} pageSize={t.pageSize} total={data?.rowCount ?? 0} onPage={t.setPage} onPageSize={t.setPageSize} noun={thing} />
@@ -724,7 +724,7 @@ function ledgerShape(spec: LedgerSpec): LedgerShape {
         ? [["amountMinor", "Before VAT"], ["vatMinor", "VAT"], ["totalMinor", "Invoice total"]]
         : [["amountMinor", "Output VAT"], ["netMinor", "Before VAT"], ["totalMinor", "With VAT"]],
       first: ["date", income ? "Issued" : "Date"],
-      fields: [["title", "Client"], ["crm", "CRM"], ["salesperson", "Salesperson"], ["detail", "Detail", true], ["month", "Month", true], ["status", "Status"]],
+      fields: [["title", "Client"], ["crmName", "CRM"], ["salesperson", "Salesperson"], ["detail", "Detail", true], ["month", "Month", true], ["status", "Status"]],
       basis: income
         ? "Invoices issued in the period, before VAT, as the profit and loss counts them. Drafts and void invoices are left out."
         : "VAT on invoices issued in the period; on a pro-forma, each payment's tax invoice by the day it was paid. Drafts and void invoices are left out.",
