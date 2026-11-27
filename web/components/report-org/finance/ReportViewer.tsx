@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiErrorMessage } from "@/lib/axios";
-import { useReportOrgFilters, yearRange } from "../ReportOrgShell";
+import { comparePeriod, periodLabel, useReportOrgFilters, yearRange } from "../ReportOrgShell";
 import {
   change, count, fetchAging, fetchExpenses, fetchLedger, fetchRevenue, money, useFinanceFc, useFinanceFp, useFinanceRc, useFinanceManagement, useFinancePl, percent, useFinanceAging, useFinanceExpenses, useFinanceLedger, useFinanceOrgs, useFinanceRevenue,
   type FpReportKind, type FpSide, type MpSide, type MpSum, type AgingGroup, type AgingRow, type ForeignLine, type PlBasis, type PlMonth, type PlMonths, type PlStatement, type LedgerGroup, type LedgerRow, type PageAsk, type ReportRow, type RevenueReport,
@@ -1035,6 +1035,19 @@ const PL_BASIS: Record<PlBasis, string> = {
 
 interface PlRow { key: string; label: string; kind: "line" | "total" | "net"; amount: number; prior?: number | null; /** The records behind it (2026-11-27). */ line?: string }
 
+/**
+ * The comparison columns (Phase 7, 2026-11-28): the comparison period's figure, the change in money and in percent.
+ * A row without a figure (a heading, a margin) shows nothing.
+ */
+function compareColumns<R>(cur: string, header: string, now: (r: R) => number | null | undefined, before: (r: R) => number | null | undefined): GridColumn<R>[] {
+  const pair = (r: R) => { const a = now(r), b = before(r); return a === null || a === undefined || b === null || b === undefined ? null : { a, b }; };
+  return [
+    { key: "cmp", header: `${header} (${cur})`, align: "right", cell: (r) => { const b = before(r); return b === null || b === undefined ? "" : money(b, cur); }, text: (r) => { const b = before(r); return b === null || b === undefined ? "" : b / 100; } },
+    { key: "cmpDiff", header: `Change (${cur})`, align: "right", cell: (r) => { const x = pair(r); if (!x) return ""; const d = x.a - x.b; return <span className={d < 0 ? "text-rose-600 dark:text-rose-400" : d > 0 ? "text-emerald-600 dark:text-emerald-400" : undefined}>{d > 0 ? "+" : ""}{money(d, cur)}</span>; }, text: (r) => { const x = pair(r); return x ? (x.a - x.b) / 100 : ""; } },
+    { key: "cmpPct", header: "Change %", align: "right", cell: (r) => { const x = pair(r); const m = x ? change(x.a, x.b) : null; return m === null ? (x ? DASH : "") : percent(m); }, text: (r) => { const x = pair(r); const m = x ? change(x.a, x.b) : null; return m === null ? "" : percent(m); } },
+  ];
+}
+
 export function PLTable({ report, spec }: { report: Titled; spec: PlSpec }) {
   const f = useReportOrgFilters();
   const orgs = useFinanceOrgs();
@@ -1047,24 +1060,29 @@ export function PLTable({ report, spec }: { report: Titled; spec: PlSpec }) {
   const series = useFinancePl<PlMonths>(months ? org?.id : undefined, f.range, basis, "months");
   const query = months ? series : statement;
   const cur = (months ? series.data?.currency : statement.data?.currency) ?? org?.currency ?? "";
-  const compare = spec.view === "compare";
+  // The toolbar's comparison (Phase 7): the same statement for the comparison period, asked for apart.
+  const other = months ? null : comparePeriod(f.range, f.compare, f.compareCustom);
+  const otherQ = useFinancePl<PlStatement>(other ? org?.id : undefined, other ?? f.range, basis, "statement");
+  const compare = spec.view === "compare" || !!other;
+  const priorSrc = other ? otherQ.data ?? null : statement.data?.prior ?? null;
 
   const lines = useMemo<PlRow[]>(() => {
     const d = statement.data;
     if (!d) return [];
-    const prior = (side: "income" | "expenses", label: string) => (d.prior ? d.prior[side].breakdown.find((x) => x.label === label)?.amountMinor ?? 0 : null);
+    const p = priorSrc;
+    const prior = (side: "income" | "expenses", label: string) => (p ? p[side].breakdown.find((x) => x.label === label)?.amountMinor ?? 0 : null);
     // Lines only in the period before still show, at nothing now — so a cost that stopped is not hidden.
-    const labels = (side: "income" | "expenses") => Array.from(new Set([...d[side].breakdown.map((x) => x.label), ...(compare && d.prior ? d.prior[side].breakdown.map((x) => x.label) : [])]));
+    const labels = (side: "income" | "expenses") => Array.from(new Set([...d[side].breakdown.map((x) => x.label), ...(compare && p ? p[side].breakdown.map((x) => x.label) : [])]));
     const now = (side: "income" | "expenses", label: string) => d[side].breakdown.find((x) => x.label === label)?.amountMinor ?? 0;
-    const keyOf = (side: "income" | "expenses", label: string) => (d[side].breakdown.find((x) => x.label === label) ?? d.prior?.[side].breakdown.find((x) => x.label === label))?.key;
+    const keyOf = (side: "income" | "expenses", label: string) => (d[side].breakdown.find((x) => x.label === label) ?? p?.[side].breakdown.find((x) => x.label === label))?.key;
     return [
       ...labels("income").map((label): PlRow => ({ key: `i:${label}`, label, kind: "line", amount: now("income", label), prior: prior("income", label), line: keyOf("income", label) })),
-      { key: "income", label: "Total income", kind: "total", amount: d.income.total, prior: d.prior?.income.total ?? null, line: "income" },
+      { key: "income", label: "Total income", kind: "total", amount: d.income.total, prior: p?.income.total ?? null, line: "income" },
       ...labels("expenses").map((label): PlRow => ({ key: `e:${label}`, label, kind: "line", amount: now("expenses", label), prior: prior("expenses", label), line: keyOf("expenses", label) })),
-      { key: "expenses", label: "Total expenses", kind: "total", amount: d.expenses.total, prior: d.prior?.expenses.total ?? null, line: "expenses" },
-      { key: "net", label: "Net profit", kind: "net", amount: d.netProfitMinor, prior: d.prior?.netProfitMinor ?? null, line: "net" },
+      { key: "expenses", label: "Total expenses", kind: "total", amount: d.expenses.total, prior: p?.expenses.total ?? null, line: "expenses" },
+      { key: "net", label: "Net profit", kind: "net", amount: d.netProfitMinor, prior: p?.netProfitMinor ?? null, line: "net" },
     ];
-  }, [statement.data, compare]);
+  }, [statement.data, compare, priorSrc]);
 
   const stCols = useMemo<GridColumn<PlRow>[]>(() => {
     // A line that has records behind it opens them (the user, 2026-11-27: "each line will be break down also popup").
@@ -1075,16 +1093,13 @@ export function PLTable({ report, spec }: { report: Titled; spec: PlSpec }) {
       ) : text;
     };
     const amount = (v: number, r: PlRow) => <span className={r.kind === "line" ? undefined : r.kind === "net" && v < 0 ? "font-semibold text-rose-600 dark:text-rose-400" : "font-semibold"}>{money(v, cur)}</span>;
-    const priorText = statement.data?.prior ? periodText(statement.data.prior) : "Period before";
+    const priorText = other ? periodLabel(other) : statement.data?.prior ? periodText(statement.data.prior) : "Period before";
     return [
       { key: "label", header: "Line", fixed: true, cell: label, text: (r) => (r.kind === "line" ? `   ${r.label}` : r.label) },
       { key: "amount", header: `${statement.data ? periodText(statement.data.period) : "Period"} (${cur})`, align: "right", cell: (r) => amount(r.amount, r), text: (r) => r.amount / 100 },
-      ...(compare ? [
-        { key: "prior", header: `${priorText} (${cur})`, align: "right", cell: (r: PlRow) => (r.prior === null || r.prior === undefined ? DASH : amount(r.prior, r)), text: (r: PlRow) => (r.prior === null || r.prior === undefined ? "" : r.prior / 100) },
-        { key: "moved", header: "Change", align: "right", cell: (r: PlRow) => { const m = r.prior ? change(r.amount, r.prior) : null; return m === null ? DASH : percent(m); }, text: (r: PlRow) => { const m = r.prior ? change(r.amount, r.prior) : null; return m === null ? "" : percent(m); } },
-      ] as GridColumn<PlRow>[] : []),
+      ...(compare ? compareColumns<PlRow>(cur, priorText, (r) => r.amount, (r) => r.prior) : []),
     ];
-  }, [cur, compare, statement.data]);
+  }, [cur, compare, statement.data, other]);
 
   const moCols = useMemo<GridColumn<PlMonth>[]>(() => {
     const d = series.data;
@@ -1121,7 +1136,7 @@ export function PLTable({ report, spec }: { report: Titled; spec: PlSpec }) {
     <div className="space-y-3">
       <Head report={report} basis={PL_BASIS[basis]} source="finance's Profit & Loss" at={data?.generatedAt} />
       {/* Expenses and bills record no CRM, so there is none to pick. */}
-      <FinanceFilters orgs={orgs.data} org={org} space="pl" filters={[]} />
+      <FinanceFilters orgs={orgs.data} org={org} space="pl" filters={[]} compare={!months} />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <Select label="Count income by" value={basis} onChange={(v) => setBasis(v as PlBasis)} options={[{ key: "invoiced", name: "Income: invoiced" }, { key: "collected", name: "Income: collected" }]} />
         {!months && statement.data?.bases && (
@@ -1143,7 +1158,7 @@ export function PLTable({ report, spec }: { report: Titled; spec: PlSpec }) {
       ) : months ? (
         <DataGrid grid={moGrid} rows={series.data?.months ?? []} rowKey={(r) => r.month} loading={series.isFetching} empty="No month in this period." />
       ) : (
-        <DataGrid grid={stGrid} rows={lines} rowKey={(r) => r.key} loading={statement.isFetching} empty="Finance has nothing for this period." />
+        <DataGrid grid={stGrid} rows={lines} rowKey={(r) => r.key} loading={statement.isFetching || otherQ.isFetching} empty="Finance has nothing for this period." />
       )}
       {months && series.data?.capped && <p className="text-xs text-muted-foreground">The first 24 months of the period are shown. Pick a shorter period for the rest.</p>}
       <CardPopup
@@ -1183,6 +1198,10 @@ export function MPTable({ report, spec }: { report: Titled; spec: MpSpec }) {
   const cur = data?.currency ?? org?.currency ?? "";
   const cash = spec.view === "cash";
   const own = data?.sides.find((x) => x.currency === cur);
+  // The toolbar's comparison (Phase 7): the same report for the comparison period.
+  const other = show === "statement" ? comparePeriod(f.range, f.compare, f.compareCustom) : null;
+  const otherQ = useFinanceManagement(other ? org?.id : undefined, other ?? f.range, spec.view);
+  const ownCmp = other ? otherQ.data?.sides.find((x) => x.currency === cur) : undefined;
   const others = (data?.sides ?? []).filter((x) => x.currency !== cur);
 
   const rowsOf = (side: MpSide | undefined): MpRow[] => {
@@ -1200,6 +1219,7 @@ export function MPTable({ report, spec }: { report: Titled; spec: MpSpec }) {
     ];
   };
   const lines = useMemo(() => rowsOf(own), [own, cash, spec.view]); // eslint-disable-line react-hooks/exhaustive-deps
+  const cmpLines = useMemo(() => (other && otherQ.data ? rowsOf(ownCmp) : null), [other, otherQ.data, ownCmp, cash, spec.view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stCols = useMemo<GridColumn<MpRow>[]>(() => {
     const label = (r: MpRow) => {
@@ -1216,8 +1236,9 @@ export function MPTable({ report, spec }: { report: Titled; spec: MpSpec }) {
         { key: "unpaid", header: "Unpaid", align: "right", cell: (r: MpRow) => (isCost(r) ? <span className={r.sum!.unpaid ? "text-amber-600 dark:text-amber-400" : undefined}>{money(r.sum!.unpaid, cur)}</span> : DASH), text: (r: MpRow) => (isCost(r) ? r.sum!.unpaid / 100 : "") },
       ] as GridColumn<MpRow>[]),
       { key: "count", header: "Records", align: "right", cell: (r) => (r.sum ? count(r.sum.count) : DASH), text: (r) => (r.sum ? r.sum.count : "") },
+      ...(other ? compareColumns<MpRow>(cur, periodLabel(other), (r) => (r.kind === "margin" ? null : r.amount), (r) => (r.kind === "margin" || !cmpLines ? null : cmpLines.find((x) => x.key === r.key)?.amount ?? 0)) : []),
     ];
-  }, [cur, data, own, cash]);
+  }, [cur, data, own, cash, other, cmpLines]);
 
   type MoRow = { month: string; s?: MpSide };
   const moRows = useMemo<MoRow[]>(() => (data?.months ?? []).map((m) => ({ month: m.month, s: m.sides.find((x) => x.currency === cur) })), [data, cur]);
@@ -1251,7 +1272,7 @@ export function MPTable({ report, spec }: { report: Titled; spec: MpSpec }) {
   return (
     <div className="space-y-3">
       <Head report={report} basis={MP_TITLE[spec.view]} source="finance's management profitability" at={data?.generatedAt} />
-      <FinanceFilters orgs={orgs.data} org={org} space={`mp-${spec.view}`} filters={[]} />
+      <FinanceFilters orgs={orgs.data} org={org} space={`mp-${spec.view}`} filters={[]} compare={show === "statement"} />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <Select label="Show" value={show} onChange={(v) => setShow(v as "statement" | "months")} options={[{ key: "statement", name: "The period" }, { key: "months", name: "Month by month" }]} />
         <div className="flex items-center gap-2 sm:ml-auto">
@@ -1267,7 +1288,7 @@ export function MPTable({ report, spec }: { report: Titled; spec: MpSpec }) {
       ) : show === "months" ? (
         <DataGrid grid={moGrid} rows={moRows} rowKey={(r) => r.month} loading={query.isFetching} empty="No month in this period." />
       ) : (
-        <DataGrid grid={stGrid} rows={lines} rowKey={(r) => r.key} loading={query.isFetching} empty="Finance has nothing for this period." />
+        <DataGrid grid={stGrid} rows={lines} rowKey={(r) => r.key} loading={query.isFetching || otherQ.isFetching} empty="Finance has nothing for this period." />
       )}
 
       {!cash && pay && (
@@ -1311,7 +1332,20 @@ const FP_TITLE: Record<string, string> = {
   "fc:approvals": "Approval monitoring", "fc:risks": "Financial risks and exceptions", "fc:liquidity": "Payment and liquidity controls", "fc:expenses": "Expense controls",
   "fc:payroll": "Payroll and commission controls", "fc:vat": "VAT and compliance", "fc:closing": "Monthly closing readiness — not a closing", "fc:audit": "Audit and activity monitoring",
 };
-interface FpRow { key: string; label: string; kind: "head" | "line" | "subtotal" | "total"; amount: number | null; count?: number; line?: string }
+interface FpRow { key: string; label: string; kind: "head" | "line" | "subtotal" | "total"; amount: number | null; count?: number; line?: string; /** The section a line belongs to — it folds with it (Phase 7). */ sec?: string }
+
+function fpRowsOf(side: FpSide | undefined, flow: boolean): FpRow[] {
+  if (!side) return [];
+  const out: FpRow[] = [];
+  for (const sct of side.sections) {
+    out.push({ key: `h:${sct.key}`, label: sct.title, kind: "head", amount: null, sec: sct.key });
+    for (const l of sct.lines) out.push({ key: l.key, label: l.label, kind: "line", amount: l.amountMinor, count: l.count, line: l.key, sec: sct.key });
+    if (sct.showTotal) out.push({ key: `t:${sct.key}`, label: `Total — ${sct.title.toLowerCase()}`, kind: "subtotal", amount: sct.totalMinor, line: sct.key, sec: sct.key });
+  }
+  out.push({ key: "h:totals", label: flow ? "Reconciliation" : "Summary", kind: "head", amount: null, sec: "totals" });
+  for (const t of side.totals) out.push({ key: `x:${t.key}`, label: t.label, kind: t.strong ? "total" : "line", amount: t.noAmount ? null : t.amountMinor, sec: "totals" });
+  return out;
+}
 
 export function FPTable({ report, spec }: { report: Titled; spec: FpSpec }) {
   const f = useReportOrgFilters();
@@ -1335,27 +1369,33 @@ export function FPTable({ report, spec }: { report: Titled; spec: FpSpec }) {
   const flow = !rc && spec.report === "cashflow";
   const when = data ? (flow ? periodText(data.period) : `As of ${dayText(data.asOf)}`) : "";
 
-  const rows = useMemo<FpRow[]>(() => {
-    if (!side) return [];
-    const out: FpRow[] = [];
-    for (const sct of side.sections) {
-      out.push({ key: `h:${sct.key}`, label: sct.title, kind: "head", amount: null });
-      for (const l of sct.lines) out.push({ key: l.key, label: l.label, kind: "line", amount: l.amountMinor, count: l.count, line: l.key });
-      if (sct.showTotal) out.push({ key: `t:${sct.key}`, label: `Total — ${sct.title.toLowerCase()}`, kind: "subtotal", amount: sct.totalMinor, line: sct.key });
-    }
-    out.push({ key: "h:totals", label: flow ? "Reconciliation" : "Summary", kind: "head", amount: null });
-    for (const t of side.totals) out.push({ key: `x:${t.key}`, label: t.label, kind: t.strong ? "total" : "line", amount: t.noAmount ? null : t.amountMinor });
-    return out;
-  }, [side, flow]);
+  // The toolbar's comparison (Phase 7): cash flow only — a position as of a date has no period to compare.
+  const other = flow && show === "statement" ? comparePeriod(f.range, f.compare, f.compareCustom) : null;
+  const otherQ = useFinanceFp(other ? org?.id : undefined, other ?? f.range, "cashflow");
+  const cmpRows = useMemo(() => (other && otherQ.data ? fpRowsOf(otherQ.data.sides.find((x) => x.currency === cur), true) : null), [other, otherQ.data, cur]);
+  // Sections fold (Phase 7): a closed one keeps its heading, and its total stays in the summary.
+  const [closed, setClosed] = useState<Set<string>>(() => new Set());
+  const allRows = useMemo<FpRow[]>(() => fpRowsOf(side, flow), [side, flow]);
+  const rows = useMemo(() => allRows.filter((r) => r.kind === "head" || !r.sec || !closed.has(r.sec)), [allRows, closed]);
+  const fold = (sec: string) => setClosed((all) => { const next = new Set(all); if (next.has(sec)) next.delete(sec); else next.add(sec); return next; });
 
   const stCols = useMemo<GridColumn<FpRow>[]>(() => [
     { key: "label", header: "Line", fixed: true, cell: (r) => {
-      const text = r.kind === "head" ? <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{r.label}</span> : r.kind === "line" ? <span className="pl-4">{r.label}</span> : <span className="font-semibold">{r.label}</span>;
+      if (r.kind === "head") {
+        const shut = closed.has(r.sec ?? "");
+        return (
+          <button type="button" onClick={() => fold(r.sec ?? "")} aria-expanded={!shut} className="flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground">
+            <span className={shut ? "inline-block" : "inline-block rotate-90"} aria-hidden>›</span>{r.label}
+          </button>
+        );
+      }
+      const text = r.kind === "line" ? <span className="pl-4">{r.label}</span> : <span className="font-semibold">{r.label}</span>;
       return r.line ? <button type="button" title="See the records behind this line" onClick={() => setPick(r)} className="text-left underline-offset-4 hover:text-primary hover:underline">{text}</button> : text;
     }, text: (r) => r.label },
     { key: "amount", header: `${when} (${cur})`, align: "right", cell: (r) => (r.amount === null ? "" : <span className={r.kind === "line" ? (r.amount < 0 ? "text-rose-600 dark:text-rose-400" : undefined) : r.amount < 0 ? "font-semibold text-rose-600 dark:text-rose-400" : "font-semibold"}>{money(r.amount, cur)}</span>), text: (r) => (r.amount === null ? "" : r.amount / 100) },
     { key: "count", header: "Records", align: "right", cell: (r) => (r.count ? count(r.count) : ""), text: (r) => r.count ?? "" },
-  ], [cur, when]);
+    ...(other ? compareColumns<FpRow>(cur, periodLabel(other), (r) => (r.kind === "head" ? null : r.amount), (r) => (r.kind === "head" || r.amount === null || !cmpRows ? null : cmpRows.find((x) => x.key === r.key)?.amount ?? 0)) : []),
+  ], [cur, when, closed, other, cmpRows]); // eslint-disable-line react-hooks/exhaustive-deps
 
   type MoRow = { month: string; s?: FpSide };
   const moRows = useMemo<MoRow[]>(() => (data?.months ?? []).map((m) => ({ month: m.month, s: m.sides.find((x) => x.currency === cur) })), [data, cur]);
@@ -1377,13 +1417,13 @@ export function FPTable({ report, spec }: { report: Titled; spec: FpSpec }) {
     if (!data) return;
     const name = `${report.id}-${data.org.name}-${data.from}_${data.to}-${cur}`.replace(/\s+/g, "-");
     const top = [[`${report.id} ${report.name}`], [data.org.name, when, FP_TITLE[titleKey], cur], []];
-    saveCsv(`${name}.csv`, [...top, ...(show === "months" ? gridCsv(moGrid.visible, moRows) : gridCsv(stGrid.visible, rows))]);
+    saveCsv(`${name}.csv`, [...top, ...(show === "months" ? gridCsv(moGrid.visible, moRows) : gridCsv(stGrid.visible, allRows))]);
   };
 
   return (
     <div className="space-y-3">
       <Head report={report} basis={FP_TITLE[titleKey]} source={fcKind ? "finance's financial controls" : rc ? "finance's reconciliation" : "finance"} at={data?.generatedAt} />
-      <FinanceFilters orgs={orgs.data} org={org} space={`${spec.kind}-${spec.report}`} filters={[]} />
+      <FinanceFilters orgs={orgs.data} org={org} space={`${spec.kind}-${spec.report}`} filters={[]} compare={flow && show === "statement"} />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         {spec.report !== "advances" && !rc && <Select label="Show" value={show} onChange={(v) => setShow(v as "statement" | "months")} options={[{ key: "statement", name: flow ? "The period" : "As of the date" }, { key: "months", name: flow ? "Month by month" : "Each month end" }]} />}
         {(data?.sides.length ?? 0) > 1 && <Select label="Currency" value={cur} onChange={setCurrency} options={(data?.sides ?? []).map((x) => ({ key: x.currency, name: x.currency === base ? `${x.currency} (the organization's)` : `${x.currency} (apart, never converted)` }))} />}
@@ -1407,7 +1447,7 @@ export function FPTable({ report, spec }: { report: Titled; spec: FpSpec }) {
       ) : show === "months" ? (
         <DataGrid grid={moGrid} rows={moRows} rowKey={(r) => r.month} loading={query.isFetching} empty="No month in this period." />
       ) : (
-        <DataGrid grid={stGrid} rows={rows} rowKey={(r) => r.key} loading={query.isFetching} empty="Finance has nothing for this." />
+        <DataGrid grid={stGrid} rows={rows} rowKey={(r) => r.key} loading={query.isFetching || otherQ.isFetching} empty="Finance has nothing for this." />
       )}
       {(data?.notes ?? []).map((n) => <p key={n} className="text-xs text-muted-foreground">{n}</p>)}
       <CardPopup

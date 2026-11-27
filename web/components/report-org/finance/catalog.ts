@@ -144,7 +144,8 @@ const listed = (source: "commission" | "payroll", groupBy: string, view: "summar
   ({ kind: "ledger", source, groupBy, view, period, ...extra });
 const NOT_IN_FINANCE = "This is worked out in the CRMs and Root before finance approves anything, so finance has no record of it.";
 
-export const CATEGORIES: Category[] = [
+/** The reports as the specification listed them; regrouped below (Phase 7). */
+const LISTED: Category[] = [
   {
     slug: "overview",
     name: "Finance overview",
@@ -370,12 +371,12 @@ export const CATEGORIES: Category[] = [
     slug: "tax",
     name: "VAT and tax",
     reports: [
-      planned("TAX-01", "VAT summary"),
-      planned("TAX-02", "Output VAT"),
-      planned("TAX-03", "Input VAT"),
-      planned("TAX-04", "Net VAT"),
-      planned("TAX-05", "Tax invoices"),
-      planned("TAX-06", "Credit notes"),
+      live("TAX-01", "VAT summary", { kind: "fc", report: "vat", period: "month" }, "Output VAT, input VAT and the indicative net for the period, with missing tax invoices and supplier VAT numbers — finance's VAT and compliance figures (FC-07). Indicative, not a confirmed liability."),
+      live("TAX-02", "Output VAT", { kind: "ledger", source: "vat", groupBy: "month", view: "records", period: "month", params: { kind: "output" } }, "VAT on invoices issued in the period; on a pro-forma, each payment's tax invoice by the day it was paid."),
+      live("TAX-03", "Input VAT", { kind: "ledger", source: "vat", groupBy: "month", view: "records", period: "month", params: { kind: "input" } }, "VAT on supplier bills dated in the period. Drafts and void bills are left out."),
+      live("TAX-04", "Net VAT", { kind: "fc", report: "vat", period: "month" }, "Output VAT less input VAT for the period — indicative only: finance keeps no VAT liability balance or returns filed."),
+      live("TAX-05", "Tax invoices", { kind: "ledger", source: "vat", groupBy: "status", view: "records", period: "month", params: { kind: "output" } }, "Every invoice and tax invoice carrying output VAT in the period, by status."),
+      live("TAX-06", "Credit notes", { kind: "ledger", source: "management-profit-lines", groupBy: "month", view: "records", period: "month", params: { line: "income", view: "invoice" }, only: { category: "Less credit notes" } }, "Credit notes issued in the period, before VAT — what they take off invoiced revenue."),
       none("TAX-07", "Adjustments", "Finance records no VAT adjustments apart from credit notes."),
       none("TAX-08", "VAT reconciliation", NO_LEDGER),
       planned("TAX-09", "VAT return working"),
@@ -403,7 +404,7 @@ export const RECONCILIATION: Category[] = [
       live("RC-05", "Payroll and commission reconciliation", rcr("payroll"), "Payroll obligation, payments, reversals and what is outstanding; advance deductions; commission earned, approved, paid directly and through payroll; typed commission that may overlap with payouts; runs never paid."),
       live("RC-06", "Employee advance reconciliation", rcr("advances"), "Advances issued and recovered, outstanding where it can be worked out, recoveries beyond recorded advances, and historical advances with no recovery records."),
       live("RC-07", "Historical data reconciliation", rcr("historical"), "Old-books invoices, receivables, payments, expenses and advances apart from live records; opening balances and whether they are verified; imports that may duplicate live records."),
-      live("RC-08", "Financial exceptions", rcr("exceptions"), "Every item needing action, once each: type, module, severity, status (confirmed, suspected, missing information), age, recommended action and a link to the record."),
+      live("RC-08", "Financial exceptions", rcr("exceptions"), "Every item needing action, once each: type, module, severity, status (confirmed, open reconciliation difference, suspected, missing information), age, recommended action and a link to the record."),
     ],
   },
 ];
@@ -420,7 +421,7 @@ export const CONTROLS: Category[] = [
     reports: [
       live("FC-01", "Financial controls overview", fcr("approvals"), "The dashboard: approvals waiting and overdue, critical and high exceptions, unreconciled accounts, overdue gateway settlements, obligations, unpaid salaries and commission, documentation gaps and closing readiness — each opening its report."),
       live("FC-02", "Approval monitoring", fcr("approvals"), "Everything waiting for a decision in finance — enrolments, expenses, bills, payroll, procurement, advances, reimbursements, one-time payments, hiring, late entries, draft credit notes — with how long it has waited, who decides and the link to decide it in finance."),
-      live("FC-03", "Financial risks and exceptions", fcr("risks"), "Phase 5's exceptions by severity, status (confirmed, suspected, missing information), module and age. Money at risk counts confirmed discrepancies only, once each."),
+      live("FC-03", "Financial risks and exceptions", fcr("risks"), "Phase 5's exceptions by severity, status (confirmed, open reconciliation difference, suspected, missing information), module and age. Confirmed integrity discrepancies count confirmed items only, once each."),
       live("FC-04", "Payment and liquidity controls", fcr("liquidity", "month"), "Available recorded cash, pending gateway money, obligations due within 30 days and those with no due date, overdue supplier payments, and the potential surplus or shortfall."),
       live("FC-05", "Expense controls", fcr("expenses"), "Expenses awaiting approval, without documents or references, possible duplicates, without a bank line, late-recorded or entered after their month, unusual movements, and balance-sheet-like categories in the P&L."),
       live("FC-06", "Payroll and commission controls", fcr("payroll"), "Payroll runs by stage, people on hold, reversals, commission outstanding, possible duplicate commission payments, typed commission to verify and advance recovery discrepancies."),
@@ -430,6 +431,34 @@ export const CONTROLS: Category[] = [
     ],
   },
 ];
+
+/**
+ * Finance and revenue's report groups (Phase 7, 2026-11-28): the twelve approved, every report keeping its ID and
+ * address. Budgets and forecasts are under Financial comparisons, not connected; statements finance cannot draw up
+ * (no ledger) are under Financial overview.
+ */
+const GROUPS: { slug: string; name: string; ids: string[] }[] = [
+  { slug: "overview", name: "Financial overview", ids: ["OVR-01", "OVR-02", "OVR-03", "OVR-04", "FS-02", "FS-04", "FS-05", "FS-06", "FS-07", "FS-08", "FS-10"] },
+  { slug: "profit-loss", name: "Profit & loss", ids: ["FS-01", "PRF-01", "PRF-14", "PRF-15", "PRF-16", "PRF-10", "PRF-13", "PRF-02", "PRF-03", "PRF-04", "PRF-05", "PRF-06", "PRF-07", "PRF-08", "PRF-09", "PRF-11", "PRF-12"] },
+  { slug: "revenue", name: "Revenue & invoicing", ids: ["REV-01", "REV-02", "REV-03", "REV-04", "REV-05", "REV-06", "REV-07", "REV-08", "REV-09", "REV-10", "REV-11", "REV-12", "REV-13", "REV-14", "REV-15", "REV-16", "REV-17", "REV-18", "REV-19", "REV-20"] },
+  { slug: "collections", name: "Collections", ids: ["COL-01", "COL-02", "COL-03", "COL-04", "COL-05", "COL-06", "COL-07", "COL-08", "COL-09", "COL-10", "COL-11", "COL-12", "COL-13", "COL-14", "COL-15", "COL-16", "COL-17", "COL-18"] },
+  { slug: "expenses", name: "Expenses", ids: ["EXP-01", "EXP-02", "EXP-03", "EXP-04", "EXP-05", "EXP-06", "EXP-07", "EXP-08", "EXP-09", "EXP-10", "EXP-11", "EXP-12", "EXP-13", "EXP-14", "EXP-15", "EXP-16", "EXP-17"] },
+  { slug: "cash-flow", name: "Cash flow", ids: ["FS-03", "TRE-04", "TRE-05", "TRE-14", "TRE-06", "TRE-09", "TRE-10", "TRE-11", "TRE-12", "TRE-13"] },
+  { slug: "cash", name: "Cash & bank position", ids: ["TRE-01", "TRE-02", "FS-11", "TRE-03", "TRE-07", "FS-12", "TRE-08"] },
+  { slug: "receivables", name: "Accounts receivable", ids: ["AR-01", "AR-02", "AR-03", "AR-04", "AR-05", "AR-06", "AR-13", "AR-14", "AR-07", "AR-08", "AR-09", "AR-10", "AR-11", "AR-12"] },
+  { slug: "payables", name: "Accounts payable", ids: ["AP-01", "AP-02", "AP-04", "AP-05", "AP-06", "AP-13", "AP-07", "AP-08", "AP-03", "AP-09", "AP-10", "AP-11", "AP-12"] },
+  { slug: "payroll", name: "Payroll & commission", ids: ["PAY-01", "PAY-02", "PAY-03", "PAY-04", "PAY-05", "PAY-06", "COM-05", "COM-06", "COM-07", "COM-10", "COM-01", "COM-02", "COM-03", "COM-04", "COM-08", "COM-09", "COM-11"] },
+  { slug: "tax", name: "VAT & tax", ids: ["TAX-01", "TAX-02", "TAX-03", "TAX-04", "TAX-05", "TAX-06", "TAX-07", "TAX-08", "TAX-09", "TAX-10", "TAX-11", "TAX-12"] },
+  { slug: "comparisons", name: "Financial comparisons", ids: ["FS-09", "BUD-01", "BUD-02", "BUD-03", "BUD-04", "BUD-05", "BUD-06", "BUD-07", "BUD-08", "BUD-09", "BUD-10"] },
+];
+const LISTED_BY_ID = new Map(LISTED.flatMap((c) => c.reports).map((r) => [r.id, r]));
+export const CATEGORIES: Category[] = GROUPS.map((g) => ({ slug: g.slug, name: g.name, reports: g.ids.map((id) => { const r = LISTED_BY_ID.get(id); if (!r) throw new Error(`catalog: no report ${id}`); return r; }) }));
+// Every listed report is in exactly one group.
+if (process.env.NODE_ENV !== "production") {
+  const placed = GROUPS.flatMap((g) => g.ids);
+  const missing = Array.from(LISTED_BY_ID.keys()).filter((id) => !placed.includes(id));
+  if (missing.length || new Set(placed).size !== placed.length) console.error("catalog: reports not grouped once", missing);
+}
 
 export const ALL_REPORTS: (Report & { category: Category })[] = [...CATEGORIES, ...RECONCILIATION, ...CONTROLS].flatMap((category) =>
   category.reports.map((r) => ({ ...r, category })),

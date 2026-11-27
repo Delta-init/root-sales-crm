@@ -64,57 +64,8 @@ export interface Section {
   reports: Report[];
 }
 
-const PROFIT_AND_LOSS = {
-  head: ["Description", "AED"],
-  rows: [
-    ["Revenue", "800,000"],
-    ["Direct costs", "100,000"],
-    ["Gross profit", "700,000"],
-    ["Operating expenses", "520,000"],
-    ["Operating profit", "180,000"],
-    ["Other expenses and tax", "15,000"],
-    ["Net profit", "165,000"],
-  ],
-};
-
 export const SECTIONS: Section[] = [
-  {
-    slug: "executive",
-    label: "Executive",
-    title: "Executive dashboard",
-    about: "Targets, collections, department contribution, profit and cash.",
-    icon: LayoutDashboard,
-    metrics: [
-      { label: "Collections", value: 800_000, as: "money" },
-      { label: "Monthly target", value: 1_200_000, as: "money" },
-      { label: "Achievement", value: 66.7, as: "percent" },
-      { label: "Fixed expenses", value: 500_000, as: "money" },
-      { label: "Net profit", value: 165_000, as: "money" },
-      { label: "Available cash", value: 485_000, as: "money" },
-    ],
-    panels: [
-      {
-        title: "Target achievement", type: "bars",
-        rows: [{ label: "Monthly target", value: 66.7, as: "percent", percent: 66.7 }],
-        note: "Remaining to target: 400,000",
-      },
-      {
-        title: "Department contribution", type: "bars",
-        rows: [
-          { label: "Sales", value: 475_000, as: "money", percent: 59 },
-          { label: "CSE", value: 330_000, as: "money", percent: 41 },
-        ],
-        note: "Rounded sample split; the two do not add up to collections.",
-      },
-    ],
-    reports: [
-      { name: "Revenue and targets" },
-      { name: "Department performance" },
-      { name: "Profitability", detail: { type: "table", ...PROFIT_AND_LOSS } },
-      { name: "Cash position" },
-      { name: "Management alerts" },
-    ],
-  },
+  /* The Executive dashboard is not here: it is live, read from finance (Phase 7, 2026-11-28, components/report-org/finance/ExecutiveHome). */
   {
     slug: "sales",
     label: "Sales and CRMs",
@@ -173,7 +124,7 @@ export const sectionBySlug = (slug: string) => SECTIONS.find((s) => s.slug === s
  * own figures (2026-11-26), the first section connected.
  */
 export const NAV: { slug: string; label: string; icon: LucideIcon; live?: boolean }[] = [
-  { slug: "executive", label: "Executive", icon: LayoutDashboard },
+  { slug: "executive", label: "Executive", icon: LayoutDashboard, live: true },
   { slug: "sales", label: "Sales and CRMs", icon: Users2 },
   { slug: "finance", label: "Finance and revenue", icon: Banknote, live: true },
   { slug: "reconciliation", label: "Reconciliation", icon: ArrowLeftRight, live: true },

@@ -9,6 +9,10 @@ import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { cn } from "@/lib/utils";
 import { NAV, type CrmCode, type Currency } from "./data";
 import { FinanceMenu } from "./finance/FinanceMenu";
+import { CONTROLS, RECONCILIATION, type Category } from "./finance/catalog";
+
+/** The sections with reports under them in the side menu (Phase 7: Reconciliation and Financial controls too). */
+const TREES: Record<string, Category[] | undefined> = { finance: undefined, reconciliation: RECONCILIATION, controls: CONTROLS };
 
 /*
  * The Report Org's own frame (2026-11-26).
@@ -41,7 +45,46 @@ export function monthLabel(month: string): string {
  * A period for the live reports: a whole month, a whole year, or two dates. Days are YYYY-MM-DD and both are
  * included, as finance reads them.
  */
-export interface Range { mode: "month" | "year" | "custom"; from: string; to: string }
+export interface Range { mode: "day" | "month" | "quarter" | "year" | "custom"; from: string; to: string }
+
+/** One day (Phase 7, 2026-11-28). */
+export const dayRange = (day: string): Range => ({ mode: "day", from: day, to: day });
+
+/** The quarter a month is in (Phase 7): Jan–Mar, Apr–Jun, Jul–Sep, Oct–Dec. */
+export const quarterRange = (month: string): Range => {
+  const [y, m] = month.split("-").map(Number);
+  const first = Math.floor((m - 1) / 3) * 3 + 1;
+  const last = new Date(Date.UTC(y, first + 2, 0)).getUTCDate();
+  return { mode: "quarter", from: `${y}-${String(first).padStart(2, "0")}-01`, to: `${y}-${String(first + 2).padStart(2, "0")}-${String(last).padStart(2, "0")}` };
+};
+
+/** Today in Dubai, as YYYY-MM-DD. */
+export const dubaiDay = () =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+
+const addDays = (day: string, by: number) => new Date(Date.parse(`${day}T00:00:00Z`) + by * 86_400_000).toISOString().slice(0, 10);
+const daysIn = (r: { from: string; to: string }) => Math.round((Date.parse(`${r.to}T00:00:00Z`) - Date.parse(`${r.from}T00:00:00Z`)) / 86_400_000) + 1;
+
+/** What a report is compared with (Phase 7): nothing, the period before, the same period a year earlier, or two dates. */
+export type CompareMode = "none" | "previous" | "last_year" | "custom";
+
+/** The comparison period for a range — null when nothing is compared. A whole month, quarter or year is compared with a whole one. */
+export function comparePeriod(r: Range, mode: CompareMode, custom: { from: string; to: string }): { from: string; to: string } | null {
+  if (mode === "none") return null;
+  if (mode === "custom") return custom.from && custom.to ? custom : null;
+  if (mode === "last_year") {
+    const back = (d: string) => `${Number(d.slice(0, 4)) - 1}${d.slice(4)}`;
+    if (r.mode === "month") return monthRange(shiftMonth(r.from.slice(0, 7), -12));
+    // 29 February a year back is the 28th.
+    const to = back(r.to);
+    return { from: back(r.from), to: to.endsWith("-02-29") ? `${to.slice(0, 8)}28` : to };
+  }
+  if (r.mode === "month") return monthRange(shiftMonth(r.from.slice(0, 7), -1));
+  if (r.mode === "quarter") return quarterRange(shiftMonth(r.from.slice(0, 7), -3));
+  if (r.mode === "year") return yearRange(Number(r.from.slice(0, 4)) - 1);
+  const n = daysIn(r);
+  return { from: addDays(r.from, -n), to: addDays(r.from, -1) };
+}
 
 export const monthRange = (month: string): Range => {
   const [y, m] = month.split("-").map(Number);
@@ -54,9 +97,16 @@ export const yearRange = (year: number): Range => ({ mode: "year", from: `${year
 const dayLabel = (day: string) =>
   new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${day}T00:00:00Z`));
 
-/** "November 2026", "2026", or "3 Nov 2026 – 18 Nov 2026". */
+/** "28 Nov 2026", "November 2026", "Q4 2026", "2026", or "3 Nov 2026 – 18 Nov 2026". */
 export const rangeLabel = (r: Range) =>
-  r.mode === "month" ? monthLabel(r.from.slice(0, 7)) : r.mode === "year" ? r.from.slice(0, 4) : `${dayLabel(r.from)} – ${dayLabel(r.to)}`;
+  r.mode === "day" ? dayLabel(r.from)
+    : r.mode === "month" ? monthLabel(r.from.slice(0, 7))
+    : r.mode === "quarter" ? `Q${Math.floor((Number(r.from.slice(5, 7)) - 1) / 3) + 1} ${r.from.slice(0, 4)}`
+    : r.mode === "year" ? r.from.slice(0, 4)
+    : r.from === r.to ? dayLabel(r.from) : `${dayLabel(r.from)} – ${dayLabel(r.to)}`;
+
+/** Any two dates as text. */
+export const periodLabel = (p: { from: string; to: string }) => (p.from === p.to ? dayLabel(p.from) : `${dayLabel(p.from)} – ${dayLabel(p.to)}`);
 
 interface Filters {
   crm: CrmCode;
@@ -80,6 +130,11 @@ interface Filters {
   picked: Record<string, Record<string, string[]>>;
   setPicked: (space: string, filter: string, values: string[]) => void;
   clearPicked: (space: string) => void;
+  /** The comparison (Phase 7): kept with the period, used by the reports that offer one. */
+  compare: CompareMode;
+  setCompare: (mode: CompareMode) => void;
+  compareCustom: { from: string; to: string };
+  setCompareCustom: (p: { from: string; to: string }) => void;
 }
 
 const FiltersContext = createContext<Filters | null>(null);
@@ -149,6 +204,8 @@ export function ReportOrgShell({ children }: { children: ReactNode }) {
   const [entity, setEntity] = useState<string | null>(null);
   const [range, setRange] = useState<Range>(() => monthRange(thisMonth));
   const [picked, setPickedState] = useState<Record<string, Record<string, string[]>>>({});
+  const [compare, setCompare] = useState<CompareMode>("none");
+  const [compareCustom, setCompareCustom] = useState<{ from: string; to: string }>({ from: "", to: "" });
 
   const filters = useMemo<Filters>(
     () => ({
@@ -158,17 +215,18 @@ export function ReportOrgShell({ children }: { children: ReactNode }) {
       picked,
       setPicked: (space, filter, values) => setPickedState((all) => ({ ...all, [space]: { ...(all[space] ?? {}), [filter]: values } })),
       clearPicked: (space) => setPickedState((all) => ({ ...all, [space]: {} })),
+      compare, setCompare, compareCustom, setCompareCustom,
     }),
-    [crm, currency, month, thisMonth, entity, range, picked],
+    [crm, currency, month, thisMonth, entity, range, picked, compare, compareCustom],
   );
 
   const isOn = (slug: string) => path === `/report-org/${slug}` || path.startsWith(`/report-org/${slug}/`);
 
   // Finance and revenue opens to its report groups in the side menu: open while one of its pages is, and whenever
   // it is opened by hand; closing it by hand keeps it closed until the section is left and come back to.
-  const inFinance = path === "/report-org/finance" || path.startsWith("/report-org/finance/");
-  const [financeOpen, setFinanceOpen] = useState(inFinance);
-  useEffect(() => { if (inFinance) setFinanceOpen(true); }, [inFinance]);
+  const inTree = Object.keys(TREES).find((slug) => path === `/report-org/${slug}` || path.startsWith(`/report-org/${slug}/`)) ?? null;
+  const [treeOpen, setTreeOpen] = useState<Record<string, boolean>>(() => (inTree ? { [inTree]: true } : {}));
+  useEffect(() => { if (inTree) setTreeOpen((o) => (o[inTree] ? o : { ...o, [inTree]: true })); }, [inTree]);
 
   return (
     <FiltersContext.Provider value={filters}>
@@ -188,8 +246,9 @@ export function ReportOrgShell({ children }: { children: ReactNode }) {
                 const on = isOn(s.slug);
                 const Icon = s.icon;
                 // The section with report groups under it: its own row is the page that is open only when no report is.
-                const tree = s.slug === "finance";
-                const here = on && (!tree || path === "/report-org/finance");
+                const tree = s.slug in TREES;
+                const treeIsOpen = !!treeOpen[s.slug];
+                const here = on && (!tree || path === `/report-org/${s.slug}`);
                 return (
                   <div key={s.slug}>
                     <div
@@ -205,16 +264,16 @@ export function ReportOrgShell({ children }: { children: ReactNode }) {
                       {tree && (
                         <button
                           type="button"
-                          aria-expanded={financeOpen}
-                          aria-label={financeOpen ? "Hide the report groups" : "Show the report groups"}
-                          onClick={() => setFinanceOpen((v) => !v)}
+                          aria-expanded={treeIsOpen}
+                          aria-label={treeIsOpen ? "Hide the reports" : "Show the reports"}
+                          onClick={() => setTreeOpen((o) => ({ ...o, [s.slug]: !o[s.slug] }))}
                           className="mr-1 rounded p-1 text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         >
-                          <ChevronRight className={cn("h-4 w-4 transition-transform", financeOpen && "rotate-90")} />
+                          <ChevronRight className={cn("h-4 w-4 transition-transform", treeIsOpen && "rotate-90")} />
                         </button>
                       )}
                     </div>
-                    {tree && financeOpen && <FinanceMenu path={path} />}
+                    {tree && treeIsOpen && <FinanceMenu path={path} section={s.slug} categories={TREES[s.slug]} />}
                   </div>
                 );
               })}

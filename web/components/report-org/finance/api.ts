@@ -110,8 +110,15 @@ export interface ExpenseReport extends Paged {
   appUrl: string;
 }
 
+/**
+ * Refresh (Phase 7, 2026-11-28): for the next few seconds every report asked for carries ?fresh, so finance works it
+ * out again rather than giving the copy it keeps for 60 seconds.
+ */
+let freshUntil = 0;
+export const askFresh = () => { freshUntil = Date.now() + 8_000; };
+
 const get = async <T,>(path: string, params?: Record<string, string | string[] | undefined>) => {
-  const { data } = await api.get(`/report-org/finance/${path}`, { params });
+  const { data } = await api.get(`/report-org/finance/${path}`, { params: Date.now() < freshUntil ? { ...params, fresh: "1" } : params });
   return data.data as T;
 };
 
@@ -369,3 +376,32 @@ export const expensesText = (n: number) => (n === 1 ? "1 expense" : `${count(n)}
 export const change = (now: number, before: number): number | null => (before ? ((now - before) / Math.abs(before)) * 100 : null);
 
 export const percent = (n: number) => `${n > 0 ? "+" : ""}${n.toLocaleString("en-US", { maximumFractionDigits: 1 })}%`;
+
+/* The Executive Dashboard (Phase 7, 2026-11-28): one answer from finance, put together from Phases 3–6. */
+export interface ExPerf {
+  grossInvoicedMinor: number; netInvoicedMinor: number; collectionsMinor: number; netCollectionsMinor: number; expensesMinor: number;
+  invoiceProfitMinor: number; invoiceMarginPct: number | null; collectionProfitMinor: number; collectionMarginPct: number | null;
+  cashInMinor: number; cashOutMinor: number; cashNetMinor: number;
+}
+export interface ExFlow { openingMinor: number; inflowsMinor: number; outflowsMinor: number; netMinor: number; closingMinor: number; checkMinor: number }
+export interface ExAlert { currency: string; key: string; label: string; value: number | null; as: "money" | "count"; section: string; report: string; note?: string }
+export interface ExecutiveReport {
+  generatedAt: string; org: FinanceOrg; period: Period; currency: string; asOf: string; compare: Period | null;
+  target: { valueMinor: number | null; note: string };
+  performance: { currency: string; current: ExPerf | null; compare: ExPerf | null }[];
+  cash: { currency: string; flow: ExFlow | null; flowCompare: ExFlow | null; availableMinor: number; pspMinor: number; negativeMinor: number; verifiedMinor: number; verifiedLabel: string; obligationsMinor: number; availableAfterMinor: number; nearObligationsMinor: number; /** Available cash less near obligations: + surplus, − shortfall. */ surplusMinor: number }[];
+  receivables: { currency: string; totalMinor: number; invoicesMinor: number; enrolmentMinor: number; conditionalMinor: number; oldBooksMinor: number; overdueMinor: number; dueMinor: number; ageing: { key: string; label: string; amountMinor: number; count: number }[] }[];
+  obligations: { currency: string; billsMinor: number; salariesMinor: number; commissionMinor: number; expensesMinor: number; reimbursementsMinor: number; loansMinor: number; totalMinor: number; advancesOutstandingMinor: number; advancesNotCalculableMinor: number }[];
+  alerts: ExAlert[];
+  trends: { months: ({ month: string; currency: string } & ExPerf)[]; cash: ({ month: string; currency: string } & ExFlow)[]; expenseCategories: { currency: string; group: string; category: string; amountMinor: number }[]; exceptions: null };
+  notes: string[]; warnings: string[]; appUrl: string;
+}
+
+export const useFinanceExecutive = (org: string | undefined, period: Period, compare: Period | null) =>
+  useQuery({
+    queryKey: ["report-org", "finance", "executive", org, period.from, period.to, compare?.from ?? "", compare?.to ?? ""],
+    queryFn: () => get<ExecutiveReport>("executive", { org: org!, from: period.from, to: period.to, ...(compare ? { cfrom: compare.from, cto: compare.to } : {}) }),
+    enabled: !!org,
+    placeholderData: (before) => before,
+    ...LIVE,
+  });

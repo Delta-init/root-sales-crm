@@ -1,9 +1,11 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { ChevronLeft, ChevronRight, Maximize2, Minimize2, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { monthRange, rangeLabel, shiftMonth, useReportOrgFilters, yearRange, type Range } from "../ReportOrgShell";
+import { comparePeriod, dayRange, dubaiDay, monthRange, periodLabel, quarterRange, rangeLabel, shiftMonth, useReportOrgFilters, yearRange, type CompareMode } from "../ReportOrgShell";
+import { askFresh } from "./api";
 import type { FinanceOrg } from "./api";
 import { MultiSelect, Select, type Choice } from "./FilterSelect";
 
@@ -17,7 +19,8 @@ import { MultiSelect, Select, type Choice } from "./FilterSelect";
  * are the ones finance says the period has, each with its count, so nothing is offered that would come back empty.
  */
 
-const MODES: Choice[] = [{ key: "month", name: "Month" }, { key: "year", name: "Year" }, { key: "custom", name: "Dates" }];
+const MODES: Choice[] = [{ key: "day", name: "Day" }, { key: "month", name: "Month" }, { key: "quarter", name: "Quarter" }, { key: "year", name: "Year" }, { key: "custom", name: "Dates" }];
+const COMPARES: Choice[] = [{ key: "none", name: "No comparison" }, { key: "previous", name: "Previous period" }, { key: "last_year", name: "Same period last year" }, { key: "custom", name: "Custom dates" }];
 const DATE = "h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 function PeriodPicker() {
@@ -26,16 +29,23 @@ function PeriodPicker() {
   const month = range.from.slice(0, 7);
   const year = Number(range.from.slice(0, 4));
 
+  const today = dubaiDay();
   const pick = (mode: string) => {
     if (mode === range.mode) return;
-    // A month or a year is the one the current period ends in, never one that has not started.
+    // A day, month, quarter or year is the one the current period ends in, never one that has not started.
     const endMonth = range.to.slice(0, 7) > thisMonth ? thisMonth : range.to.slice(0, 7);
-    if (mode === "month") setRange(monthRange(endMonth));
+    const endDay = range.to > today ? today : range.to;
+    if (mode === "day") setRange(dayRange(endDay));
+    else if (mode === "month") setRange(monthRange(endMonth));
+    else if (mode === "quarter") setRange(quarterRange(endMonth));
     else if (mode === "year") setRange(yearRange(Number(endMonth.slice(0, 4))));
     else setRange({ ...range, mode: "custom" });
   };
-  const step = (by: number) => setRange(range.mode === "year" ? yearRange(year + by) : monthRange(shiftMonth(month, by)));
-  const atEnd = range.mode === "year" ? year >= thisYear : month >= thisMonth;
+  const addDay = (d: string, by: number) => new Date(Date.parse(`${d}T00:00:00Z`) + by * 86_400_000).toISOString().slice(0, 10);
+  const step = (by: number) =>
+    setRange(range.mode === "year" ? yearRange(year + by) : range.mode === "quarter" ? quarterRange(shiftMonth(month, by * 3)) : range.mode === "day" ? dayRange(addDay(range.from, by)) : monthRange(shiftMonth(month, by)));
+  const atEnd = range.mode === "year" ? year >= thisYear : range.mode === "day" ? range.from >= today : range.mode === "quarter" ? range.to.slice(0, 7) >= thisMonth : month >= thisMonth;
+  const unit = range.mode === "year" ? "year" : range.mode === "quarter" ? "quarter" : range.mode === "day" ? "day" : "month";
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -50,15 +60,74 @@ function PeriodPicker() {
         </>
       ) : (
         <div className="flex items-center">
-          <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={range.mode === "year" ? "Previous year" : "Previous month"} onClick={() => step(-1)}>
+          <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Previous ${unit}`} onClick={() => step(-1)}>
             <ChevronLeft />
           </Button>
           <span className="min-w-[7.5rem] text-center text-xs font-medium tabular-nums text-foreground">{rangeLabel(range)}</span>
-          <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={range.mode === "year" ? "Next year" : "Next month"} disabled={atEnd} onClick={() => step(1)}>
+          <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Next ${unit}`} disabled={atEnd} onClick={() => step(1)}>
             <ChevronRight />
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The comparison (Phase 7, 2026-11-28): offered only by the reports that use one — the Executive Dashboard, the profit
+ * and loss, management profitability and cash flow. The period it compares with is shown beside it.
+ */
+export function ComparePicker() {
+  const { range, compare, setCompare, compareCustom, setCompareCustom } = useReportOrgFilters();
+  const other = comparePeriod(range, compare, compareCustom);
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <Select label="Compare" value={compare} options={COMPARES} onChange={(v) => setCompare(v as CompareMode)} />
+      {compare === "custom" && (
+        <>
+          <input type="date" aria-label="Compare from" value={compareCustom.from} max={compareCustom.to || undefined} className={DATE}
+            onChange={(e) => setCompareCustom({ from: e.target.value, to: compareCustom.to && compareCustom.to < e.target.value ? e.target.value : compareCustom.to })} />
+          <span className="text-xs text-muted-foreground">to</span>
+          <input type="date" aria-label="Compare to" value={compareCustom.to} min={compareCustom.from || undefined} className={DATE}
+            onChange={(e) => setCompareCustom({ from: compareCustom.from && compareCustom.from > e.target.value ? e.target.value : compareCustom.from, to: e.target.value })} />
+        </>
+      )}
+      {other && compare !== "custom" && <span className="text-xs text-muted-foreground">with {periodLabel(other)}</span>}
+    </div>
+  );
+}
+
+/**
+ * Refresh and full screen (Phase 7). Finance keeps a heavy report for 60 seconds; Refresh asks every report on the
+ * page again and finance works it out afresh.
+ */
+export function ToolbarActions() {
+  const client = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    const on = () => setFull(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", on);
+    return () => document.removeEventListener("fullscreenchange", on);
+  }, []);
+  const refresh = async () => {
+    setBusy(true);
+    askFresh();
+    try { await client.refetchQueries({ queryKey: ["report-org", "finance"], type: "active" }); } finally { setBusy(false); }
+  };
+  const toggleFull = () => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void document.documentElement.requestFullscreen?.();
+  };
+  return (
+    <div className="flex items-center gap-1">
+      <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={refresh} disabled={busy} title="Ask finance for these figures again, now">
+        <RefreshCw className={busy ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
+        Refresh
+      </Button>
+      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={toggleFull} aria-label={full ? "Leave full screen" : "Full screen"} title={full ? "Leave full screen" : "Full screen"}>
+        {full ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+      </Button>
     </div>
   );
 }
@@ -70,7 +139,7 @@ export interface FilterDef { key: string; label: string }
  * The bar: organization, period, then the table's own filters — each a dropdown taking several values — and a way to
  * clear them. `space` is the kind of table the picks belong to; `options` is what finance says each can be set to.
  */
-export function FinanceFilters({ orgs, org, period = true, space, filters = [], options, fixed, children }: {
+export function FinanceFilters({ orgs, org, period = true, space, filters = [], options, fixed, children, compare = false, actions = true }: {
   orgs: FinanceOrg[] | undefined;
   org: FinanceOrg | undefined;
   /** Off for balances as they stand today, which have no period. */
@@ -81,6 +150,10 @@ export function FinanceFilters({ orgs, org, period = true, space, filters = [], 
   /** Choices for a filter whose list does not come from finance — the headline page's CRMs. */
   fixed?: Record<string, Choice[]>;
   children?: ReactNode;
+  /** The comparison picker — only on the reports that compare (Phase 7). */
+  compare?: boolean;
+  /** Refresh and full screen (Phase 7); on everywhere unless a page has its own. */
+  actions?: boolean;
 }) {
   const f = useReportOrgFilters();
   const mine = space ? (f.picked[space] ?? {}) : {};
@@ -91,6 +164,7 @@ export function FinanceFilters({ orgs, org, period = true, space, filters = [], 
         <Select label="Organization" value={org?.id ?? ""} onChange={f.setEntity} options={orgs.map((o) => ({ key: o.id, name: `${o.name} · ${o.currency}` }))} />
       )}
       {period && <PeriodPicker />}
+      {period && compare && <ComparePicker />}
       {space && filters.map((d) => {
         // What is picked stays listed even when the period no longer has it, so it can be unpicked.
         const given = fixed?.[d.key] ?? options?.[d.key] ?? [];
@@ -104,6 +178,7 @@ export function FinanceFilters({ orgs, org, period = true, space, filters = [], 
           Clear filters
         </button>
       )}
+      {actions && <div className="ml-auto"><ToolbarActions /></div>}
     </div>
   );
 }

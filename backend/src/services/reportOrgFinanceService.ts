@@ -130,36 +130,42 @@ export async function financeManagementLines(q: Record<string, unknown>) {
 
 /** Cash flow and financial position (Phase 4, 2026-11-27): ?report=cashflow | cash | receivables | obligations | advances | position. */
 export async function financeFinancial(q: Record<string, unknown>) {
-  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/financial${passOn(q, ["org", "from", "to", "report"])}`, "share its cash flow and financial position");
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/financial${passOn(q, ["org", "from", "to", "report", "fresh"])}`, "share its cash flow and financial position");
   return { ...data, appUrl };
 }
 
 /** The records behind one of its figures (?line=<section>:<line> | <section> | all). */
 export async function financeFinancialLines(q: Record<string, unknown>) {
-  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/financial-lines${passOn(q, ["org", "from", "to", "report", "line", "groupBy", "category", "account", "status", "month", "kind", "band", "crm", ...PAGING])}`, "share the records behind a cash flow or financial position figure");
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/financial-lines${passOn(q, ["org", "from", "to", "report", "fresh", "line", "groupBy", "category", "account", "status", "month", "kind", "band", "crm", ...PAGING])}`, "share the records behind a cash flow or financial position figure");
   return { ...data, appUrl };
 }
 
 /** Reconciliation and data integrity (Phase 5, 2026-11-27): ?report=bank | psp | invoices | expenses | payroll | advances | historical | exceptions | summary. */
 export async function financeReconciliation(q: Record<string, unknown>) {
-  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/reconciliation${passOn(q, ["org", "from", "to", "report"])}`, "share its reconciliation reports");
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/reconciliation${passOn(q, ["org", "from", "to", "report", "fresh"])}`, "share its reconciliation reports");
   return { ...data, appUrl };
 }
 
 /** The records behind one reconciliation figure (?line=<section>:<line> | <section> | all). */
 export async function financeReconciliationLines(q: Record<string, unknown>) {
-  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/reconciliation-lines${passOn(q, ["org", "from", "to", "report", "line", "groupBy", "category", "severityName", "status", "module", "account", "month", ...PAGING])}`, "share the records behind a reconciliation figure");
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/reconciliation-lines${passOn(q, ["org", "from", "to", "report", "fresh", "line", "groupBy", "category", "severityName", "status", "module", "account", "month", ...PAGING])}`, "share the records behind a reconciliation figure");
   return { ...data, appUrl };
 }
 
 /** Financial controls (Phase 6, 2026-11-28): ?report=overview | approvals | risks | liquidity | expenses | payroll | vat | closing | audit. */
 export async function financeControls(q: Record<string, unknown>) {
-  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/controls${passOn(q, ["org", "from", "to", "report"])}`, "share its financial controls");
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/controls${passOn(q, ["org", "from", "to", "report", "fresh"])}`, "share its financial controls");
   return { ...data, appUrl };
 }
 
 /** The records behind one financial-controls figure (?line=<section>:<line> | <section> | all). */
 export async function financeControlsLines(q: Record<string, unknown>) {
-  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/controls-lines${passOn(q, ["org", "from", "to", "report", "line", "groupBy", "category", "status", "severityName", "module", "account", "stage", "month", ...PAGING])}`, "share the records behind a financial-controls figure");
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/controls-lines${passOn(q, ["org", "from", "to", "report", "fresh", "line", "groupBy", "category", "status", "severityName", "module", "account", "stage", "month", ...PAGING])}`, "share the records behind a financial-controls figure");
+  return { ...data, appUrl };
+}
+
+/** The Executive Dashboard (Phase 7, 2026-11-28): from..to, comparison cfrom..cto, ?fresh to bypass finance's 60-second cache. */
+export async function financeExecutive(q: Record<string, unknown>) {
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/executive${passOn(q, ["org", "from", "to", "cfrom", "cto", "fresh"])}`, "share its executive dashboard");
   return { ...data, appUrl };
 }

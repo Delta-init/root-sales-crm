@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { CATEGORIES, COUNTS, STATE_LABEL, hrefOf, type Report } from "./catalog";
+import { useShowUnavailable } from "./showUnavailable";
 
 /*
  * Every report the specification lists, found by name or ID. A live one opens; the others say why they cannot be
@@ -34,6 +35,8 @@ const SHOWS: { key: Show; label: string; count: number }[] = [
 export function ReportCatalog() {
   const [query, setQuery] = useState("");
   const [show, setShow] = useState<Show>("all");
+  const [unavailable, setUnavailable] = useShowUnavailable();
+  const shown: Show = unavailable ? show : "live";
   const [open, setOpen] = useState<string | null>(null);
 
   const categories = useMemo(() => {
@@ -43,10 +46,10 @@ export function ReportCatalog() {
       total: c.reports.length,
       live: c.reports.filter((r) => r.state === "live").length,
       reports: c.reports.filter(
-        (r) => (show === "all" || r.state === show) && (!q || r.id.toLowerCase().includes(q) || r.name.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)),
+        (r) => (shown === "all" || r.state === shown) && (!q || r.id.toLowerCase().includes(q) || r.name.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)),
       ),
     })).filter((c) => c.reports.length > 0);
-  }, [query, show]);
+  }, [query, shown]);
 
   return (
     <section className="space-y-4" aria-label="Report catalog">
@@ -63,8 +66,12 @@ export function ReportCatalog() {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Show">
-        {SHOWS.map((s) => (
+      <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Show">
+        <label className="mr-2 inline-flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+          <input type="checkbox" className="h-3.5 w-3.5 accent-[hsl(var(--primary))]" checked={unavailable} onChange={(e) => setUnavailable(e.target.checked)} />
+          Show unavailable ({COUNTS.planned + COUNTS.none})
+        </label>
+        {unavailable && SHOWS.map((s) => (
           <button
             key={s.key}
             type="button"

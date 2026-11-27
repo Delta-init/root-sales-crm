@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { CATEGORIES, STATE_LABEL, hrefOf, reportById, type Report } from "./catalog";
+import { CATEGORIES, STATE_LABEL, hrefOf, reportById, type Category, type Report } from "./catalog";
+import { useShowUnavailable } from "./showUnavailable";
 
 /*
  * Finance and revenue in the side menu (the user, 2026-11-26: "these links will be collapse style as in side bar —
@@ -17,10 +18,16 @@ import { CATEGORIES, STATE_LABEL, hrefOf, reportById, type Report } from "./cata
 
 const DOT: Record<Report["state"], string> = { live: "bg-primary", planned: "bg-amber-500", none: "bg-muted-foreground/40" };
 
-export function FinanceMenu({ path }: { path: string }) {
-  const id = path.startsWith("/report-org/finance/") ? (path.split("/")[3] ?? "") : "";
+/**
+ * A section's reports in the side menu: Finance and revenue's twelve groups, or Reconciliation's and Financial
+ * controls' reports (Phase 7), listed straight under the section when it has one group.
+ */
+export function FinanceMenu({ path, section = "finance", categories = CATEGORIES }: { path: string; section?: string; categories?: Category[] }) {
+  const id = path.startsWith(`/report-org/${section}/`) ? (path.split("/")[3] ?? "") : "";
   const current = id ? reportById(decodeURIComponent(id)) : null;
   const currentGroup = current?.category.slug ?? null;
+  const [unavailable, setUnavailable] = useShowUnavailable();
+  const visible = (r: Report) => unavailable || r.state === "live" || current?.id === r.id;
 
   const [open, setOpen] = useState<Set<string>>(() => new Set(currentGroup ? [currentGroup] : []));
   useEffect(() => {
@@ -36,9 +43,16 @@ export function FinanceMenu({ path }: { path: string }) {
 
   return (
     <div className="ml-[1.15rem] mt-0.5 border-l border-border/60 pl-2">
-      <ul className="space-y-0.5" aria-label="Finance and revenue report groups">
-        {CATEGORIES.map((c) => {
+      {categories.length === 1 ? (
+        <ul className="space-y-px" aria-label="Reports">
+          {categories[0]!.reports.filter(visible).map((r) => <ReportLink key={r.id} r={r} on={current?.id === r.id || (r.id === "FC-01" && path === "/report-org/controls")} />)}
+        </ul>
+      ) : (
+      <ul className="space-y-0.5" aria-label="Report groups">
+        {categories.map((c) => {
           const isOpen = open.has(c.slug);
+          const list = c.reports.filter(visible);
+          if (!list.length) return null;
           const live = c.reports.filter((r) => r.state === "live").length;
           return (
             <li key={c.slug}>
@@ -54,50 +68,58 @@ export function FinanceMenu({ path }: { path: string }) {
                 <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 transition-transform", isOpen && "rotate-90")} />
                 <span className="min-w-0 flex-1 truncate">{c.name}</span>
                 <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70" title={`${live} of ${c.reports.length} live`}>
-                  {live}/{c.reports.length}
+                  {unavailable ? `${live}/${c.reports.length}` : live}
                 </span>
               </button>
               {isOpen && (
                 <ul className="mb-1 ml-[0.55rem] space-y-px border-l border-border/40 pl-2">
-                  {c.reports.map((r) => {
-                    const on = current?.id === r.id;
-                    // The KPI dashboard is the section's own page.
-                    const href = r.state === "live" && r.spec.kind === "overview" ? "/report-org/finance" : hrefOf(r);
-                    return (
-                      <li key={r.id}>
-                        <Link
-                          href={href}
-                          aria-current={on ? "page" : undefined}
-                          title={`${r.id} · ${r.name} · ${STATE_LABEL[r.state]}`}
-                          className={cn(
-                            "flex items-center gap-2 rounded-md px-1.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                            on
-                              ? "bg-primary/10 font-medium text-primary"
-                              : r.state === "live"
-                                ? "text-foreground/90 hover:bg-muted/60"
-                                : "text-muted-foreground/70 hover:bg-muted/60 hover:text-muted-foreground",
-                          )}
-                        >
-                          <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", DOT[r.state])} aria-hidden />
-                          <span className="min-w-0 flex-1 truncate">{r.name}</span>
-                        </Link>
-                      </li>
-                    );
-                  })}
+                  {list.map((r) => <ReportLink key={r.id} r={r} on={current?.id === r.id} />)}
                 </ul>
               )}
             </li>
           );
         })}
       </ul>
-      <p className="flex flex-wrap gap-x-3 gap-y-1 px-1.5 pb-1 pt-2 text-[11px] text-muted-foreground/80">
-        {(["live", "planned", "none"] as const).map((s) => (
-          <span key={s} className="flex items-center gap-1.5">
-            <span className={cn("h-1.5 w-1.5 rounded-full", DOT[s])} aria-hidden />
-            {STATE_LABEL[s]}
-          </span>
-        ))}
-      </p>
+      )}
+      {categories.length > 1 && (
+        <div className="px-1.5 pb-1 pt-2 text-[11px] text-muted-foreground/80">
+          <label className="flex cursor-pointer items-center gap-1.5">
+            <input type="checkbox" className="h-3 w-3 accent-[hsl(var(--primary))]" checked={unavailable} onChange={(e) => setUnavailable(e.target.checked)} />
+            Show unavailable
+          </label>
+          {unavailable && (
+            <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+              {(["live", "planned", "none"] as const).map((s) => (
+                <span key={s} className="flex items-center gap-1.5">
+                  <span className={cn("h-1.5 w-1.5 rounded-full", DOT[s])} aria-hidden />
+                  {STATE_LABEL[s]}
+                </span>
+              ))}
+            </p>
+          )}
+        </div>
+      )}
     </div>
+  );
+}
+
+function ReportLink({ r, on }: { r: Report; on: boolean }) {
+  // The KPI dashboard and the controls overview are their sections' own pages.
+  const href = r.state === "live" && r.spec.kind === "overview" ? "/report-org/finance" : hrefOf(r);
+  return (
+    <li>
+      <Link
+        href={href}
+        aria-current={on ? "page" : undefined}
+        title={`${r.id} · ${r.name} · ${STATE_LABEL[r.state]}`}
+        className={cn(
+          "flex items-center gap-2 rounded-md px-1.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          on ? "bg-primary/10 font-medium text-primary" : r.state === "live" ? "text-foreground/90 hover:bg-muted/60" : "text-muted-foreground/70 hover:bg-muted/60 hover:text-muted-foreground",
+        )}
+      >
+        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", DOT[r.state])} aria-hidden />
+        <span className="min-w-0 flex-1 truncate">{r.name}</span>
+      </Link>
+    </li>
   );
 }
