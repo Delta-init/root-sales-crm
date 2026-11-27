@@ -93,7 +93,13 @@ export async function financeCommission(q: Record<string, unknown>) {
 
 /** Payroll runs: a row per person per run, or per payment made. Finance sends nobody's bank details. */
 export async function financePayroll(q: Record<string, unknown>) {
-  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/payroll${passOn(q, ["org", "from", "to", "kind", "due", "groupBy", "month", "department", "person", "status", "method", "bank", ...PAGING])}`, "share its payroll report");
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/payroll${passOn(q, ["org", "from", "to", "kind", "due", "groupBy", "month", "department", "person", "status", "runState", "method", "bank", ...PAGING])}`, "share its payroll report");
+  return { ...data, appUrl };
+}
+
+/** The rows behind the VAT position (kind=output|input) and the income in "Income less expenses" (kind=income). */
+export async function financeVat(q: Record<string, unknown>) {
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/vat${passOn(q, ["org", "from", "to", "kind", "groupBy", "crm", "salesperson", "month", "status", "vendor", ...PAGING])}`, "share its VAT report");
   return { ...data, appUrl };
 }
 

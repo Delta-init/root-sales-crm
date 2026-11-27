@@ -236,7 +236,7 @@ export interface LedgerReport {
   appUrl: string;
 }
 
-export interface LedgerAsk { source: "commission" | "payroll"; groupBy: string; params?: Record<string, string>; picks?: Picks }
+export interface LedgerAsk { source: "commission" | "payroll" | "vat"; groupBy: string; params?: Record<string, string>; picks?: Picks }
 
 export const fetchLedger = (org: string, period: Period, ask: LedgerAsk, page: PageAsk) =>
   get<LedgerReport>(ask.source, { org, from: period.from, to: period.to, groupBy: ask.groupBy, ...picksParams(ask.picks ?? {}), ...(ask.params ?? {}), ...pageParams(page) });

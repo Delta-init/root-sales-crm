@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useQueries } from "@tanstack/react-query";
 import { ArrowLeft, Download, ExternalLink, Search } from "lucide-react";
@@ -32,7 +32,7 @@ import { StateBadge } from "./ReportCatalog";
  * Every figure is finance's; the only arithmetic here is an average, a share, or one month against the one before.
  */
 
-type Titled = Report & { category: { name: string } };
+export type Titled = Report & { category: { name: string } };
 type RevenueSpec = Extract<LiveSpec, { kind: "revenue" }>;
 type ExpenseSpec = Extract<LiveSpec, { kind: "expenses" }>;
 type AgingSpec = Extract<LiveSpec, { kind: "aging" }>;
@@ -99,7 +99,21 @@ function useYearFor(period: "month" | "year", reportId: string) {
   }, [reportId]);
 }
 
+/** Inside a headline card's breakdown: the table without the page's way back, title or catalog badge. */
+export const InPopup = createContext(false);
+
 function Head({ report, basis, source, at }: { report: Titled; basis?: string; source?: string; at?: string }) {
+  const popup = useContext(InPopup);
+  if (popup) {
+    return (
+      <p className="max-w-4xl text-xs text-muted-foreground">
+        {report.about}
+        {basis && <> {basis}</>}
+        {source && <> Source: {source}.</>}
+        {at && <> From finance at {timeText(at)}.</>}
+      </p>
+    );
+  }
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -183,7 +197,7 @@ function useTable(startMode: Mode, overTime: boolean, resetOn: unknown[], startS
   return { mode, setMode, text, setText, q, pageSize, setPageSize, page, setPage, sort, setSort, sumSort, setSumSort, ask };
 }
 
-function RevenueTable({ report, spec }: { report: Titled; spec: RevenueSpec }) {
+export function RevenueTable({ report, spec }: { report: Titled; spec: RevenueSpec }) {
   const f = useReportOrgFilters();
   const orgs = useFinanceOrgs();
   const org = pickOrg(orgs.data, f.entity);
@@ -376,7 +390,7 @@ function RevenueTable({ report, spec }: { report: Titled; spec: RevenueSpec }) {
   );
 }
 
-function ExpenseTable({ report, spec }: { report: Titled; spec: ExpenseSpec }) {
+export function ExpenseTable({ report, spec }: { report: Titled; spec: ExpenseSpec }) {
   const f = useReportOrgFilters();
   const orgs = useFinanceOrgs();
   const org = pickOrg(orgs.data, f.entity);
@@ -385,9 +399,10 @@ function ExpenseTable({ report, spec }: { report: Titled; spec: ExpenseSpec }) {
   useYearFor(spec.period, report.id);
   const [basis, setBasis] = useState<"expense" | "paid">("expense");
   const [pnl, setPnl] = useState(true);
-  const [currency, setCurrency] = useState<string | undefined>(undefined);
-  // Another organization has its own currencies: back to its own.
-  useEffect(() => { setCurrency(undefined); }, [orgId]);
+  const [currency, setCurrency] = useState<string | undefined>(spec.currency);
+  // Another organization has its own currencies: back to its own (after the first, which may open on another).
+  const [firstOrg] = useState(orgId);
+  useEffect(() => { if (orgId !== firstOrg) setCurrency(undefined); }, [orgId, firstOrg]);
   const picks = usePicks("expenses");
   const t = useTable(spec.groupBy === "day" ? "records" : "summary", overTime, [orgId, f.range.from, f.range.to, basis, pnl, currency, JSON.stringify(picks)]);
 
@@ -538,7 +553,7 @@ function ExpenseTable({ report, spec }: { report: Titled; spec: ExpenseSpec }) {
  * says the day they are as of. The summary is by how late (the five bands) or by student or vendor; the records are
  * every open invoice or bill. What is owed in another currency is said under the table, never added in.
  */
-function AgingTable({ report, spec }: { report: Titled; spec: AgingSpec }) {
+export function AgingTable({ report, spec }: { report: Titled; spec: AgingSpec }) {
   const f = useReportOrgFilters();
   const orgs = useFinanceOrgs();
   const org = pickOrg(orgs.data, f.entity);
@@ -685,9 +700,37 @@ interface LedgerShape {
   source: string;
 }
 
-const GROUP_LABEL: Record<string, string> = { person: "Person", source: "CRM or CS", month: "Month", state: "State", kind: "Type", department: "Department", status: "Status", runState: "Payroll run", method: "Payment method", bank: "Bank account" };
+const GROUP_LABEL: Record<string, string> = { person: "Person", source: "CRM or CS", month: "Month", state: "State", kind: "Type", department: "Department", status: "Status", runState: "Payroll run", method: "Payment method", bank: "Bank account", vendor: "Vendor", crm: "CRM", salesperson: "Salesperson" };
 
 function ledgerShape(spec: LedgerSpec): LedgerShape {
+  if (spec.source === "vat") {
+    const kind = spec.params?.kind ?? "output";
+    if (kind === "input") {
+      return {
+        space: "vat-input", noun: "Bills",
+        filters: [{ key: "vendor", label: "Vendor" }, { key: "month", label: "Month" }, { key: "status", label: "Bill status" }],
+        sums: [["amountMinor", "Input VAT"], ["netMinor", "Before VAT"], ["totalMinor", "Bill total"]],
+        first: ["date", "Bill date"],
+        fields: [["title", "Vendor"], ["month", "Month", true], ["status", "Status"]],
+        basis: "VAT on supplier bills dated in the period. Drafts and void bills are left out.",
+        source: "finance's supplier bills",
+      };
+    }
+    const income = kind === "income";
+    return {
+      space: income ? "vat-income" : "vat-output", noun: income ? "Invoices" : "Invoices and tax invoices",
+      filters: [{ key: "crm", label: "CRM" }, { key: "salesperson", label: "Salesperson" }, { key: "month", label: "Month" }, { key: "status", label: "Invoice status" }],
+      sums: income
+        ? [["amountMinor", "Before VAT"], ["vatMinor", "VAT"], ["totalMinor", "Invoice total"]]
+        : [["amountMinor", "Output VAT"], ["netMinor", "Before VAT"], ["totalMinor", "With VAT"]],
+      first: ["date", income ? "Issued" : "Date"],
+      fields: [["title", "Client"], ["crm", "CRM"], ["salesperson", "Salesperson"], ["detail", "Detail", true], ["month", "Month", true], ["status", "Status"]],
+      basis: income
+        ? "Invoices issued in the period, before VAT, as the profit and loss counts them. Drafts and void invoices are left out."
+        : "VAT on invoices issued in the period; on a pro-forma, each payment's tax invoice by the day it was paid. Drafts and void invoices are left out.",
+      source: income ? "finance's invoices" : "finance's invoices and tax invoices",
+    };
+  }
   if (spec.source === "commission") {
     return {
       space: "commission", noun: "Payouts",
@@ -721,7 +764,7 @@ function ledgerShape(spec: LedgerSpec): LedgerShape {
   };
 }
 
-function LedgerTable({ report, spec }: { report: Titled; spec: LedgerSpec }) {
+export function LedgerTable({ report, spec }: { report: Titled; spec: LedgerSpec }) {
   const f = useReportOrgFilters();
   const orgs = useFinanceOrgs();
   const org = pickOrg(orgs.data, f.entity);
@@ -765,7 +808,7 @@ function LedgerTable({ report, spec }: { report: Titled; spec: LedgerSpec }) {
     const [firstKey, firstHead] = shape.first;
     return [
       { key: firstKey, header: firstHead, fixed: true, sort: firstKey, cell: (r) => (firstKey === "date" ? dayText(r.date) : String(r[firstKey] ?? "")), text: (r) => String(r[firstKey] ?? ""), total: "Total", totalText: "Total" },
-      { key: "number", header: spec.source === "commission" ? "Expense" : "Run", cell: (r) => (r.number ? (r.href ? numberCell(appUrl, r) : <span className="font-medium">{r.number}</span>) : DASH), text: (r) => r.number },
+      { key: "number", header: spec.source === "commission" ? "Expense" : spec.source === "vat" ? "Number" : "Run", cell: (r) => (r.number ? (r.href ? numberCell(appUrl, r) : <span className="font-medium">{r.number}</span>) : DASH), text: (r) => r.number },
       ...shape.fields.map(([key, header, hidden]): GridColumn<LedgerRow> => ({
         key, header, hidden: !!hidden, sort: key === "title" ? "title" : key === "detail" ? undefined : key,
         cell: (r) => (r[key] ? clip(String(r[key])) : DASH), text: (r) => String(r[key] ?? ""),
@@ -833,7 +876,7 @@ function LedgerTable({ report, spec }: { report: Titled; spec: LedgerSpec }) {
         <>
           <DataGrid
             grid={recGrid} rows={data?.rows ?? []} rowKey={(r) => r.id} loading={query.isFetching}
-            sort={t.sort} onSort={(k) => t.setSort(nextSort(t.sort, k, ["title", "person", "source", "month", "state", "kind", "method", "bank", "department", "status", "runState", "run", "reference", "approvedBy"]))}
+            sort={t.sort} onSort={(k) => t.setSort(nextSort(t.sort, k, ["title", "person", "source", "month", "state", "kind", "method", "bank", "department", "status", "runState", "run", "reference", "approvedBy", "vendor", "crm", "salesperson"]))}
             empty={nothing}
           />
           <Pager page={t.page} pageSize={t.pageSize} total={data?.rowCount ?? 0} onPage={t.setPage} onPageSize={t.setPageSize} noun={shape.noun} />

@@ -1,11 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { useReportOrgFilters } from "../ReportOrgShell";
 import { change, count, expensesText, invoicesText, money, paymentsText, percent, useFinanceOrgs, useFinanceOverview, type Overview, type Pair } from "./api";
 import { FinanceFilters, pickOrg, usePicks } from "./FinanceFilters";
+import { CardPopup, lessText, type CardKey, type CardOpen } from "./CardPopup";
 import { Bars, CardsLoading, ErrorCard, ForeignCards, ForeignUnknown, axisMoney, dayShort, dayText, daysBetween, foreignText, periodText, timeText } from "./parts";
 
 /*
@@ -25,10 +27,24 @@ const HOME_CRMS = [
 
 const ACCOUNT_TYPE: Record<string, string> = { current: "Bank", savings: "Savings", petty_cash: "Petty cash", internal: "Internal", psp: "Payment provider" };
 
-function Kpi({ label, value, note, pair, before, good = "up" }: { label: string; value: string; note: string; pair?: Pair; before?: string; good?: "up" | "down" }) {
+/** A card that opens the rows behind it: the whole card is the button, with a hint that it opens. */
+function Opens({ onOpen, className, children }: { onOpen?: () => void; className?: string; children: React.ReactNode }) {
+  if (!onOpen) return <Card className={className}>{children}</Card>;
+  return (
+    <Card
+      role="button" tabIndex={0} onClick={onOpen} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}
+      title="Open the breakdown"
+      className={cn(className, "cursor-pointer transition-colors hover:border-primary/60 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+    >
+      {children}
+    </Card>
+  );
+}
+
+function Kpi({ label, value, note, pair, before, good = "up", onOpen }: { label: string; value: string; note: string; pair?: Pair; before?: string; good?: "up" | "down"; onOpen?: () => void }) {
   const moved = pair ? change(pair.minor, pair.priorMinor) : null;
   return (
-    <Card className="border-border/50">
+    <Opens onOpen={onOpen} className="border-border/50">
       <CardContent className="p-4">
         <p className="text-xs text-muted-foreground">{label}</p>
         <p className="mt-1.5 break-words text-xl font-semibold tabular-nums text-foreground">{value}</p>
@@ -48,7 +64,7 @@ function Kpi({ label, value, note, pair, before, good = "up" }: { label: string;
           </p>
         )}
       </CardContent>
-    </Card>
+    </Opens>
   );
 }
 
@@ -97,7 +113,7 @@ function Trend({ o }: { o: Overview }) {
   );
 }
 
-function Figures({ o }: { o: Overview }) {
+function Figures({ o, onOpen }: { o: Overview; onOpen: (c: CardOpen) => void }) {
   const cur = o.org.currency;
   const k = o.kpis;
   const before = periodText(o.before);
@@ -113,6 +129,7 @@ function Figures({ o }: { o: Overview }) {
   // Which CRMs the figures were kept to. A finance server from before the multi-select answers with one name, not a
   // list — taken either way, so a newer page over an older finance does not fall over (it did, 2026-11-27).
   const keptTo = Array.isArray(o.crm) ? o.crm : o.crm ? [String(o.crm)] : [];
+  const open = (card: CardKey, title: string, value: string, note?: string, currency?: string) => () => onOpen({ card, title, value, note, currency });
 
   return (
     <div className="space-y-6">
@@ -123,24 +140,24 @@ function Figures({ o }: { o: Overview }) {
       )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Gross invoiced" value={money(k.grossInvoiced.minor, cur)} note={`${invoicesText(k.grossInvoiced.count ?? 0)}, by issue date. VAT included.`} pair={k.grossInvoiced} before={before} />
-        <Kpi label="Net invoiced" value={money(k.netInvoiced.minor, cur)} note={`After ${money(k.creditNotes.minor, cur)} of credit notes`} pair={k.netInvoiced} before={before} />
-        <Kpi label={foreign.length ? `Collections in ${cur}` : "Collections"} value={money(collected, cur)} note={`${paymentsText(k.collections.count ?? 0)}, by the day paid`} pair={k.collections} before={before} />
+        <Kpi label="Gross invoiced" value={money(k.grossInvoiced.minor, cur)} note={`${invoicesText(k.grossInvoiced.count ?? 0)}, by issue date. VAT included.`} pair={k.grossInvoiced} before={before} onOpen={open("invoiced", "Gross invoiced", money(k.grossInvoiced.minor, cur))} />
+        <Kpi label="Net invoiced" value={money(k.netInvoiced.minor, cur)} note={`After ${money(k.creditNotes.minor, cur)} of credit notes`} pair={k.netInvoiced} before={before} onOpen={open("net", "Net invoiced", money(k.netInvoiced.minor, cur), `Invoices less ${money(k.creditNotes.minor, cur)} of credit notes. The table's total is the card's.`)} />
+        <Kpi label={foreign.length ? `Collections in ${cur}` : "Collections"} value={money(collected, cur)} note={`${paymentsText(k.collections.count ?? 0)}, by the day paid`} pair={k.collections} before={before} onOpen={open("collected", foreign.length ? `Collections in ${cur}` : "Collections", money(collected, cur))} />
         <ForeignCards lines={foreign} cur={cur} label="Collections" />
-        <Kpi label={spentOther.length ? `Expenses in ${cur}` : "Expenses"} value={money(k.expenses.minor, cur)} note={`${expensesText(k.expenses.count ?? 0)} that count in profit and loss, approved or waiting`} pair={k.expenses} before={before} good="down" />
+        <Kpi label={spentOther.length ? `Expenses in ${cur}` : "Expenses"} value={money(k.expenses.minor, cur)} note={`${expensesText(k.expenses.count ?? 0)} that count in profit and loss, approved or waiting`} pair={k.expenses} before={before} good="down" onOpen={open("expenses", spentOther.length ? `Expenses in ${cur}` : "Expenses", money(k.expenses.minor, cur))} />
         {spentOther.map((c) => (
-          <Card key={c.currency} className="border-amber-500/40">
+          <Opens key={c.currency} className="border-amber-500/40" onOpen={open("expensesOther", `Expenses in ${c.currency}`, money(c.amountMinor, c.currency), `Recorded in ${c.currency}. Not in the ${cur} figure, nor in the profit.`, c.currency)}>
             <CardContent className="p-4">
               <p className="text-xs text-muted-foreground">Expenses in {c.currency}</p>
               <p className="mt-1.5 break-words text-xl font-semibold tabular-nums text-amber-600 dark:text-amber-400">{money(c.amountMinor, c.currency)}</p>
               <p className="mt-1 text-xs text-muted-foreground">{expensesText(c.count)}. Not in the {cur} figure, nor in the profit.</p>
             </CardContent>
-          </Card>
+          </Opens>
         ))}
-        <Kpi label="Income less expenses" value={money(k.netProfit.minor, cur)} note="Invoices before VAT, less the expenses beside it. Finance keeps no ledger." pair={k.netProfit} before={before} />
-        <Kpi label="Receivables" value={money(o.receivables.grand, cur)} note={`Still owed on invoices, as of ${dayText(o.receivables.asOf)}`} />
-        <Kpi label="Payables" value={money(o.payables.grand, cur)} note={`Still owed on bills, as of ${dayText(o.payables.asOf)}`} />
-        <Kpi label="VAT position" value={money(o.vat.netPayableMinor, cur)} note={`Output ${money(o.vat.outputMinor, cur)} less input ${money(o.vat.inputMinor, cur)}`} />
+        <Kpi label="Income less expenses" value={money(k.netProfit.minor, cur)} note="Invoices before VAT, less the expenses beside it. Finance keeps no ledger." pair={k.netProfit} before={before} onOpen={open("profit", "Income less expenses", money(k.netProfit.minor, cur), `${lessText(["Income before VAT", k.income.minor], ["expenses", k.expenses.minor], cur)} Kept to no CRM: finance records no CRM on an expense.`)} />
+        <Kpi label="Receivables" value={money(o.receivables.grand, cur)} note={`Still owed on invoices, as of ${dayText(o.receivables.asOf)}`} onOpen={open("receivables", "Receivables", money(o.receivables.grand, cur), `Still owed on invoices, as of ${dayText(o.receivables.asOf)}, whatever the period.`)} />
+        <Kpi label="Payables" value={money(o.payables.grand, cur)} note={`Still owed on bills, as of ${dayText(o.payables.asOf)}`} onOpen={open("payables", "Payables", money(o.payables.grand, cur), `Still owed on supplier bills, as of ${dayText(o.payables.asOf)}, whatever the period. Bills belong to no CRM.`)} />
+        <Kpi label="VAT position" value={money(o.vat.netPayableMinor, cur)} note={`Output ${money(o.vat.outputMinor, cur)} less input ${money(o.vat.inputMinor, cur)}`} onOpen={open("vat", "VAT position", money(o.vat.netPayableMinor, cur), `${lessText(["Output VAT", o.vat.outputMinor], ["input VAT", o.vat.inputMinor], cur)} The whole organization's, kept to no CRM.`)} />
       </div>
 
       <ForeignUnknown lines={foreign} cur={cur} />
@@ -208,6 +225,7 @@ export function FinanceHome() {
   const crm = usePicks("revenue").crm ?? [];
   const overview = useFinanceOverview(org?.id, f.range, crm);
   const error = orgs.error ?? overview.error;
+  const [card, setCard] = useState<CardOpen | null>(null);
 
   return (
     <div className="space-y-6">
@@ -230,11 +248,12 @@ export function FinanceHome() {
       {error ? (
         <ErrorCard error={error} onRetry={() => { void orgs.refetch(); void overview.refetch(); }} />
       ) : overview.data ? (
-        <Figures o={overview.data} />
+        <Figures o={overview.data} onOpen={setCard} />
       ) : (
         <CardsLoading n={8} />
       )}
 
+      <CardPopup open={card} onClose={() => setCard(null)} />
     </div>
   );
 }

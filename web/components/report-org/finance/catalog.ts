@@ -52,7 +52,8 @@ export type LiveSpec =
   /** A list finance keeps — commission payouts, or payroll runs — grouped and listed. */
   | {
       kind: "ledger";
-      source: "commission" | "payroll";
+      /** vat: the rows behind the VAT position and the income of "Income less expenses" (headline cards only). */
+      source: "commission" | "payroll" | "vat";
       /** The summary's grouping. */
       groupBy: string;
       view: "summary" | "records";
@@ -71,6 +72,8 @@ export type LiveSpec =
       columns?: Column[];
       /** Kept to one value of a dimension — reimbursements are one source of expense. */
       only?: Record<string, string>;
+      /** The currency it opens on, where not the organization's own. */
+      currency?: string;
     };
 
 export type Report = {

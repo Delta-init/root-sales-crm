@@ -97,6 +97,27 @@ export function useReportOrgFilters(): Filters {
   return value;
 }
 
+/**
+ * The same filters, held apart (2026-11-27): a breakdown opened from a headline card starts on the page's organization,
+ * period and picks, and whatever is changed inside it stays inside it — the page behind keeps its own.
+ */
+export function FiltersScope({ children }: { children: ReactNode }) {
+  const outer = useReportOrgFilters();
+  const [entity, setEntity] = useState<string | null>(outer.entity);
+  const [range, setRange] = useState<Range>(outer.range);
+  const [picked, setPickedState] = useState<Record<string, Record<string, string[]>>>(outer.picked);
+  const filters = useMemo<Filters>(
+    () => ({
+      ...outer,
+      entity, setEntity, range, setRange, picked,
+      setPicked: (space, filter, values) => setPickedState((all) => ({ ...all, [space]: { ...(all[space] ?? {}), [filter]: values } })),
+      clearPicked: (space) => setPickedState((all) => ({ ...all, [space]: {} })),
+    }),
+    [outer, entity, range, picked],
+  );
+  return <FiltersContext.Provider value={filters}>{children}</FiltersContext.Provider>;
+}
+
 function Brand() {
   return (
     <div className="flex items-center gap-2.5">
