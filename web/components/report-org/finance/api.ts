@@ -216,6 +216,40 @@ export const useFinanceAging = (org: string | undefined, ask: AgingAsk, page: Pa
     ...LIVE,
   });
 
+/** A row of a list finance keeps: a commission payout, a person on a payroll run, or a payroll payment. */
+export type LedgerRow = ReportRow & Record<string, string | number | undefined>;
+export type LedgerGroup = { key: string; name: string; count: number } & Record<string, string | number>;
+
+export interface LedgerReport {
+  generatedAt: string;
+  org: FinanceOrg;
+  period: Period;
+  groupBy: string;
+  currency: string;
+  /** In the organization's own currency: how many rows, and the sum of each amount column. */
+  totals: { count: number } & Record<string, number>;
+  groups: LedgerGroup[];
+  options?: Record<string, { key: string; name: string; count: number }[]>;
+  /** The same sums for each other currency — apart, never added in. */
+  otherCurrencies: ({ currency: string; count: number } & Record<string, string | number>)[];
+  rows: LedgerRow[]; rowCount: number; offset: number; sort: string; dir: "asc" | "desc"; recordCount: number; capped: boolean;
+  appUrl: string;
+}
+
+export interface LedgerAsk { source: "commission" | "payroll"; groupBy: string; params?: Record<string, string>; picks?: Picks }
+
+export const fetchLedger = (org: string, period: Period, ask: LedgerAsk, page: PageAsk) =>
+  get<LedgerReport>(ask.source, { org, from: period.from, to: period.to, groupBy: ask.groupBy, ...picksParams(ask.picks ?? {}), ...(ask.params ?? {}), ...pageParams(page) });
+
+export const useFinanceLedger = (org: string | undefined, period: Period, ask: LedgerAsk, page: PageAsk) =>
+  useQuery({
+    queryKey: ["report-org", "finance", ask.source, org, period.from, period.to, ask.groupBy, JSON.stringify(ask.params ?? {}), picksKey(ask.picks ?? {}), ...pageKey(page)],
+    queryFn: () => fetchLedger(org!, period, ask, page),
+    enabled: !!org,
+    placeholderData: (before) => before,
+    ...LIVE,
+  });
+
 /** An amount as the Report Org shows it: exact, in its own currency — rupees grouped the Indian way. */
 export const money = (minor: number, currency: string) =>
   `${currency} ${(minor / 100).toLocaleString(currency === "INR" ? "en-IN" : "en-US", { maximumFractionDigits: 2 })}`;

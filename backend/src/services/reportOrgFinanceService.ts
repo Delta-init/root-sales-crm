@@ -84,3 +84,16 @@ export async function financeAging(q: Record<string, unknown>) {
   const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/aging${passOn(q, ["org", "kind", "due", "groupBy", "party", "band", "salesperson", "department", ...PAGING])}`, "share what is still owed");
   return { ...data, appUrl };
 }
+
+/** Commission finance approved and paid — the sales CRMs' monthly payouts and CS Portal's — by the month it is for, or by the day paid. */
+export async function financeCommission(q: Record<string, unknown>) {
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/commission${passOn(q, ["org", "from", "to", "when", "groupBy", "source", "person", "state", "kind", "method", "month", ...PAGING])}`, "share its commission report");
+  return { ...data, appUrl };
+}
+
+/** Payroll runs: a row per person per run, or per payment made. Finance sends nobody's bank details. */
+export async function financePayroll(q: Record<string, unknown>) {
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/payroll${passOn(q, ["org", "from", "to", "kind", "due", "groupBy", "month", "department", "person", "status", "method", "bank", ...PAGING])}`, "share its payroll report");
+  return { ...data, appUrl };
+}
+

@@ -10,8 +10,8 @@ import { Input } from "@/components/ui/input";
 import { apiErrorMessage } from "@/lib/axios";
 import { useReportOrgFilters, yearRange } from "../ReportOrgShell";
 import {
-  change, count, fetchAging, fetchExpenses, fetchRevenue, money, percent, useFinanceAging, useFinanceExpenses, useFinanceOrgs, useFinanceRevenue,
-  type AgingGroup, type AgingRow, type ForeignLine, type PageAsk, type ReportRow, type RevenueReport,
+  change, count, fetchAging, fetchExpenses, fetchLedger, fetchRevenue, money, percent, useFinanceAging, useFinanceExpenses, useFinanceLedger, useFinanceOrgs, useFinanceRevenue,
+  type AgingGroup, type AgingRow, type ForeignLine, type LedgerGroup, type LedgerRow, type PageAsk, type ReportRow, type RevenueReport,
 } from "./api";
 import { reportById, type Column, type LiveSpec, type Report } from "./catalog";
 import { ColumnsMenu, DataGrid, Pager, gridCsv, useGridColumns, type GridColumn, type GridSort } from "./DataGrid";
@@ -36,6 +36,7 @@ type Titled = Report & { category: { name: string } };
 type RevenueSpec = Extract<LiveSpec, { kind: "revenue" }>;
 type ExpenseSpec = Extract<LiveSpec, { kind: "expenses" }>;
 type AgingSpec = Extract<LiveSpec, { kind: "aging" }>;
+type LedgerSpec = Extract<LiveSpec, { kind: "ledger" }>;
 type Mode = "summary" | "records";
 
 /** A summary row: one day, month or group. */
@@ -660,6 +661,195 @@ function AgingTable({ report, spec }: { report: Titled; spec: AgingSpec }) {
   );
 }
 
+/*
+ * Commission and payroll (2026-11-27): a list finance keeps, as a table — the commission payouts it approved and
+ * paid, the people on its payroll runs, or the payroll payments it made.
+ *
+ * One view for all three, told apart by what follows: which filters the bar offers, which amounts the summary adds
+ * up, and which columns a row has. Amounts in another currency are said under the table, never added in. Nobody's
+ * bank details are here: finance does not send them.
+ */
+interface LedgerShape {
+  /** Which picks these tables share. */
+  space: string;
+  filters: FilterDef[];
+  /** The amount columns: the row's field, and its heading. The first is the one shares are of. */
+  sums: [string, string][];
+  /** What one row is called, for the count column and the pager. */
+  noun: string;
+  /** The records' own columns, before the amounts: the row's field, its heading, and whether it starts hidden. */
+  fields: [string, string, boolean?][];
+  /** The first column of the records: its field and heading. */
+  first: [string, string];
+  basis: string;
+  source: string;
+}
+
+const GROUP_LABEL: Record<string, string> = { person: "Person", source: "CRM or CS", month: "Month", state: "State", kind: "Type", department: "Department", status: "Status", runState: "Payroll run", method: "Payment method", bank: "Bank account" };
+
+function ledgerShape(spec: LedgerSpec): LedgerShape {
+  if (spec.source === "commission") {
+    return {
+      space: "commission", noun: "Payouts",
+      filters: [{ key: "source", label: "CRM or CS" }, { key: "person", label: "Person" }, { key: "state", label: "State" }, { key: "kind", label: "Type" }, { key: "method", label: "Payment method" }, { key: "month", label: "Month" }],
+      sums: [["amountMinor", "Commission"], ["paidMinor", "Paid"], ["unpaidMinor", "Not paid yet"]],
+      first: ["date", spec.params?.when === "paid" ? "Paid on" : "Date"],
+      fields: [["title", "Person"], ["source", "CRM or CS"], ["kind", "Type"], ["month", "Month"], ["state", "State"], ["approvedBy", "Approved by"], ["approvedOn", "Approved on", true], ["paidOn", "Paid on", true], ["method", "Payment method"], ["reference", "Reference"], ["payrollRun", "Payroll run", true], ["detail", "Roles and level", true]],
+      basis: spec.params?.when === "paid" ? "Commission paid, by the day it was paid." : "Commission finance approved, by the month it is for.",
+      source: "finance's CRM and CS commission payouts",
+    };
+  }
+  if (spec.params?.kind === "payments") {
+    return {
+      space: "payroll-payments", noun: "Payments",
+      filters: [{ key: "month", label: "Payroll month" }, { key: "method", label: "Payment method" }, { key: "bank", label: "Bank account" }],
+      sums: [["amountMinor", "Paid"]],
+      first: ["date", "Paid on"],
+      fields: [["month", "Payroll month"], ["method", "Payment method"], ["bank", "Bank account"], ["reference", "Reference"], ["paidBy", "Recorded by"]],
+      basis: "Payroll payments by the month of the run they pay. Reversed payments are left out.",
+      source: "finance's payroll runs",
+    };
+  }
+  return {
+    space: "payroll", noun: "People",
+    filters: [{ key: "month", label: "Month" }, { key: "department", label: "Department" }, { key: "person", label: "Person" }, { key: "status", label: "Status" }, { key: "runState", label: "Payroll run" }],
+    sums: [["amountMinor", "Payable"], ["grossMinor", "Gross"], ["deductionsMinor", "Deductions"], ["netMinor", "Net from HRMS"], ["adjustmentsMinor", "Additions and deductions"], ["paidMinor", "Paid"], ["balanceMinor", "Still to pay"]],
+    first: ["month", "Month"],
+    fields: [["title", "Person"], ["detail", "Designation"], ["department", "Department"], ["status", "Status"], ["runState", "Payroll run"]],
+    basis: "Payroll runs of the period's months, approved or not yet. Voided and returned runs are left out. No bank details are shown.",
+    source: "finance's payroll runs",
+  };
+}
+
+function LedgerTable({ report, spec }: { report: Titled; spec: LedgerSpec }) {
+  const f = useReportOrgFilters();
+  const orgs = useFinanceOrgs();
+  const org = pickOrg(orgs.data, f.entity);
+  const shape = useMemo(() => ledgerShape(spec), [spec]);
+  useYearFor(spec.period, report.id);
+  const byMonth = spec.groupBy === "month";
+  const picked = usePicks(shape.space);
+  // What makes this report this one is asked for as well, and cannot be unpicked.
+  const picks = useMemo(() => ({ ...picked, ...Object.fromEntries(Object.entries(spec.only ?? {}).map(([k, v]) => [k, [v]])) }), [picked, spec.only]);
+  const t = useTable(spec.view, byMonth, [org?.id, f.range.from, f.range.to, JSON.stringify(picks)], { key: shape.first[0] === "month" ? "person" : "date", dir: shape.first[0] === "month" ? "asc" : "desc" });
+  const ask = { source: spec.source, groupBy: spec.groupBy, params: spec.params, picks };
+  const query = useFinanceLedger(org?.id, f.range, ask, t.ask);
+  const data = query.data;
+  const cur = data?.currency ?? org?.currency ?? "";
+  const appUrl = data?.appUrl ?? "";
+  const [amount] = shape.sums[0];
+
+  const sorted = useMemo(() => {
+    const groups = data?.groups ?? [];
+    const dir = t.sumSort.dir === "asc" ? 1 : -1;
+    return [...groups].sort((a, b) => (t.sumSort.key === "label" ? String(a.key).localeCompare(String(b.key)) : t.sumSort.key === "count" ? a.count - b.count : Number(a[amount]) - Number(b[amount])) * dir);
+  }, [data, t.sumSort, amount]);
+
+  const sumCols = useMemo<GridColumn<LedgerGroup>[]>(() => {
+    const totals = data?.totals;
+    const all = Number(totals?.[amount] ?? 0);
+    return [
+      { key: "label", header: GROUP_LABEL[spec.groupBy] ?? "Name", fixed: true, sort: "label", cell: (r) => <span className="font-medium">{r.name}</span>, text: (r) => r.name, total: "Total", totalText: "Total" },
+      { key: "count", header: shape.noun, align: "right", sort: "count", cell: (r) => count(r.count), text: (r) => r.count, total: count(totals?.count ?? 0), totalText: totals?.count ?? 0 },
+      ...shape.sums.map(([key, header], i): GridColumn<LedgerGroup> => ({
+        key, header: `${header} (${cur})`, align: "right", ...(i === 0 ? { sort: "amount" } : {}),
+        cell: (r) => money(Number(r[key]) || 0, cur), text: (r) => (Number(r[key]) || 0) / 100,
+        total: money(Number(totals?.[key] ?? 0), cur), totalText: Number(totals?.[key] ?? 0) / 100,
+      })),
+      { key: "share", header: "Share", align: "right", cell: (r) => pct(Number(r[amount]) || 0, all) || DASH, text: (r) => pct(Number(r[amount]) || 0, all) },
+    ];
+  }, [data, cur, shape, spec.groupBy, amount]);
+
+  const recCols = useMemo<GridColumn<LedgerRow>[]>(() => {
+    const totals = data?.totals;
+    const [firstKey, firstHead] = shape.first;
+    return [
+      { key: firstKey, header: firstHead, fixed: true, sort: firstKey, cell: (r) => (firstKey === "date" ? dayText(r.date) : String(r[firstKey] ?? "")), text: (r) => String(r[firstKey] ?? ""), total: "Total", totalText: "Total" },
+      { key: "number", header: spec.source === "commission" ? "Expense" : "Run", cell: (r) => (r.number ? (r.href ? numberCell(appUrl, r) : <span className="font-medium">{r.number}</span>) : DASH), text: (r) => r.number },
+      ...shape.fields.map(([key, header, hidden]): GridColumn<LedgerRow> => ({
+        key, header, hidden: !!hidden, sort: key === "title" ? "title" : key === "detail" ? undefined : key,
+        cell: (r) => (r[key] ? clip(String(r[key])) : DASH), text: (r) => String(r[key] ?? ""),
+      })),
+      { key: "currency", header: "Currency", hidden: true, cell: (r) => r.currency ?? cur, text: (r) => r.currency ?? cur },
+      ...shape.sums.map(([key, header], i): GridColumn<LedgerRow> => ({
+        key: i === 0 ? "amount" : key, header, align: "right", sort: i === 0 ? "amount" : key,
+        // A row in another currency shows its own; the total under the column is the organization's currency only.
+        cell: (r) => { const own = (r.currency ?? cur) === cur; const text = money(Number(r[key]) || 0, r.currency ?? cur); return own ? <span className={i === 0 ? "font-medium" : undefined}>{text}</span> : amber(text); },
+        text: (r) => (Number(r[key]) || 0) / 100,
+        total: money(Number(totals?.[key] ?? 0), cur), totalText: Number(totals?.[key] ?? 0) / 100,
+      })),
+    ];
+  }, [data, cur, appUrl, shape, spec.source]);
+
+  const sumGrid = useGridColumns(`${report.id}:summary`, sumCols);
+  const recGrid = useGridColumns(`${report.id}:records`, recCols);
+  const error = orgs.error ?? query.error;
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    if (!data || !org) return;
+    const name = `${report.id}-${data.org.name}-${data.period.from}_${data.period.to}`.replace(/\s+/g, "-");
+    const top = [[`${report.id} ${report.name}`], [data.org.name, periodText(data.period), shape.basis], ...(t.q ? [[`Filtered by "${t.q}"`]] : []), []];
+    if (t.mode === "summary") return saveCsv(`${name}.csv`, [...top, ...gridCsv(sumGrid.visible, sorted)]);
+    setSaving(true);
+    try {
+      const all = await fetchLedger(org.id, f.range, ask, { ...t.ask, limit: 5000, offset: 0 });
+      saveCsv(`${name}-records.csv`, [...top, ...gridCsv(recGrid.visible, all.rows)]);
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "The export could not be read from finance"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const shown = sorted.slice(t.page * t.pageSize, (t.page + 1) * t.pageSize);
+  const nothing = `Finance has nothing here for ${data?.org.name ?? "this organization"} in ${data ? periodText(data.period) : "this period"}${t.q ? ` matching “${t.q}”` : ""}.`;
+
+  return (
+    <div className="space-y-3">
+      <Head report={report} basis={shape.basis} source={shape.source} at={data?.generatedAt} />
+      <FinanceFilters orgs={orgs.data} org={org} space={shape.space} options={data?.options} filters={shape.filters.filter((d) => !spec.only?.[d.key])} />
+      <Tools
+        text={t.text} onText={t.setText} mode={t.mode} onMode={t.setMode}
+        actions={
+          <>
+            {t.mode === "summary" ? <ColumnsMenu grid={sumGrid} /> : <ColumnsMenu grid={recGrid} />}
+            <Button variant="outline" size="sm" className="h-8" onClick={() => void save()} disabled={!data || saving}>
+              <Download />
+              {saving ? "Exporting…" : "Export"}
+            </Button>
+          </>
+        }
+      />
+
+      {error ? (
+        <ErrorCard error={error} onRetry={() => { void orgs.refetch(); void query.refetch(); }} />
+      ) : t.mode === "summary" ? (
+        <>
+          <DataGrid grid={sumGrid} rows={shown} rowKey={(r) => r.key} loading={query.isFetching} sort={t.sumSort} onSort={(k) => t.setSumSort(nextSort(t.sumSort, k, ["label"]))} empty={nothing} />
+          <Pager page={t.page} pageSize={t.pageSize} total={sorted.length} onPage={t.setPage} onPageSize={t.setPageSize} />
+        </>
+      ) : (
+        <>
+          <DataGrid
+            grid={recGrid} rows={data?.rows ?? []} rowKey={(r) => r.id} loading={query.isFetching}
+            sort={t.sort} onSort={(k) => t.setSort(nextSort(t.sort, k, ["title", "person", "source", "month", "state", "kind", "method", "bank", "department", "status", "runState", "run", "reference", "approvedBy"]))}
+            empty={nothing}
+          />
+          <Pager page={t.page} pageSize={t.pageSize} total={data?.rowCount ?? 0} onPage={t.setPage} onPageSize={t.setPageSize} noun={shape.noun} />
+        </>
+      )}
+
+      {(data?.otherCurrencies ?? []).map((c) => (
+        <p key={c.currency} className="text-xs text-muted-foreground">
+          Also in {c.currency}, over {count(c.count)} {c.count === 1 ? "row" : "rows"}:{" "}
+          {shape.sums.map(([key, header], i) => <span key={key}>{i > 0 && " · "}{header} {amber(money(Number(c[key]) || 0, c.currency))}</span>)}. Not in the {cur} totals.
+        </p>
+      ))}
+    </div>
+  );
+}
+
 /** Each organization's invoiced revenue as a row, in its own currency — never a column to be added up. */
 function EntitiesTable({ report, basis }: { report: Titled; basis: "invoiced" | "collected" }) {
   const f = useReportOrgFilters();
@@ -755,5 +945,6 @@ export function ReportViewer({ id }: { id: string }) {
   if (report.spec.kind === "entities") return <EntitiesTable report={report} basis={report.spec.basis} />;
   if (report.spec.kind === "expenses") return <ExpenseTable key={report.id} report={report} spec={report.spec} />;
   if (report.spec.kind === "aging") return <AgingTable key={report.id} report={report} spec={report.spec} />;
+  if (report.spec.kind === "ledger") return <LedgerTable key={report.id} report={report} spec={report.spec} />;
   return <RevenueTable key={report.id} report={report} spec={report.spec} />;
 }

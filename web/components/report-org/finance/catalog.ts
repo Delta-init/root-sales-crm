@@ -49,6 +49,19 @@ export type LiveSpec =
       /** Which table it opens on. */
       view: "summary" | "records";
     }
+  /** A list finance keeps — commission payouts, or payroll runs — grouped and listed. */
+  | {
+      kind: "ledger";
+      source: "commission" | "payroll";
+      /** The summary's grouping. */
+      groupBy: string;
+      view: "summary" | "records";
+      period: "month" | "year";
+      /** What makes this report this one: paid by date, the payments rather than the people, only those still owed. */
+      params?: Record<string, string>;
+      /** Kept to one value of a filter, which is then not offered. */
+      only?: Record<string, string>;
+    }
   /** Finance's Expense report: approved expenses and those waiting for approval. */
   | {
       kind: "expenses";
@@ -98,6 +111,10 @@ const spent = (groupBy: ExpenseGroupBy, chart: "bar" | "line", period: "month" |
 
 const owed = (side: "receivables" | "payables", groupBy: "band" | "party", view: "summary" | "records", due?: "upcoming" | "overdue"): LiveSpec =>
   ({ kind: "aging", side, groupBy, view, ...(due ? { due } : {}) });
+
+const listed = (source: "commission" | "payroll", groupBy: string, view: "summary" | "records", period: "month" | "year" = "month", extra: { params?: Record<string, string>; only?: Record<string, string> } = {}): LiveSpec =>
+  ({ kind: "ledger", source, groupBy, view, period, ...extra });
+const NOT_IN_FINANCE = "This is worked out in the CRMs and Root before finance approves anything, so finance has no record of it.";
 
 export const CATEGORIES: Category[] = [
   {
@@ -295,22 +312,22 @@ export const CATEGORIES: Category[] = [
     slug: "payroll",
     name: "Commission and payroll",
     reports: [
-      planned("COM-01", "Estimated commission"),
-      planned("COM-02", "Pending eligibility"),
-      planned("COM-03", "Eligible"),
+      none("COM-01", "Estimated commission", NOT_IN_FINANCE),
+      none("COM-02", "Pending eligibility", NOT_IN_FINANCE),
+      none("COM-03", "Eligible", NOT_IN_FINANCE),
       none("COM-04", "Accrued expense", NO_LEDGER),
-      planned("COM-05", "Approved"),
-      planned("COM-06", "Paid"),
-      planned("COM-07", "Payable"),
-      planned("COM-08", "Reversed", "Needs checking against what finance records for a commission taken back."),
-      planned("COM-09", "By department"),
-      planned("COM-10", "By employee"),
+      live("COM-05", "Approved", listed("commission", "month", "summary", "year"), "Commission finance approved, by the month it is for: the sales CRMs' payouts and CS Portal's, paid or not."),
+      live("COM-06", "Paid", listed("commission", "person", "records", "month", { params: { when: "paid" }, only: { state: "Paid" } }), "Commission paid in the period, by the day it was paid, with how and under which expense."),
+      live("COM-07", "Payable", listed("commission", "person", "records", "year", { only: { state: "Approved, not paid" } }), "Commission approved but not yet paid."),
+      none("COM-08", "Reversed", "Finance keeps no record of a commission taken back."),
+      planned("COM-09", "By department", "A commission payout carries the CRM and the person's roles, not a department. It needs a rule for which department each belongs to."),
+      live("COM-10", "By employee", listed("commission", "person", "summary"), "Each person's commission for the period: approved, paid and still to pay."),
       planned("COM-11", "Commission ratio"),
-      planned("PAY-01", "Payroll summary"),
-      planned("PAY-02", "Department cost"),
-      planned("PAY-03", "Salary payable"),
-      planned("PAY-04", "Payment history"),
-      planned("PAY-05", "Total employee cost"),
+      live("PAY-01", "Payroll summary", listed("payroll", "month", "summary", "year"), "Each month's payroll: gross, deductions, net from the HRMS, finance's additions and deductions, what is payable, paid and left."),
+      live("PAY-02", "Department cost", listed("payroll", "department", "summary"), "Payroll by department."),
+      live("PAY-03", "Salary payable", listed("payroll", "person", "records", "month", { params: { due: "1" } }), "The people still owed part of their pay."),
+      live("PAY-04", "Payment history", listed("payroll", "month", "records", "month", { params: { kind: "payments" } }), "Each payroll payment made: when, how, from which account. Reversed payments are left out."),
+      live("PAY-05", "Total employee cost", listed("payroll", "person", "summary"), "What each person is paid: gross, deductions, additions and what is payable."),
     ],
   },
   {
