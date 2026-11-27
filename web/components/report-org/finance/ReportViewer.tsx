@@ -720,10 +720,10 @@ function ledgerShape(spec: LedgerSpec): LedgerShape {
       return {
         space: "pl-income", noun: collected ? "Payments" : "Invoices",
         filters: [{ key: "crm", label: "CRM" }, { key: "salesperson", label: "Salesperson" }, { key: "method", label: "Payment method" }, { key: "month", label: "Month" }],
-        sums: [["amountMinor", "Counted"], ["vatMinor", "VAT"], ["grossMinor", "With VAT"]],
+        sums: collected ? [["amountMinor", "Received"]] : [["amountMinor", "Counted"], ["vatMinor", "VAT"], ["grossMinor", "With VAT"]],
         first: ["date", collected ? "Paid on" : "Issued"],
         fields: [["title", "Client"], ["crm", "CRM"], ["salesperson", "Salesperson"], ["method", "Payment method", !collected], ["detail", "Detail"], ["month", "Month", true]],
-        basis: collected ? "Each payment received in the period, its VAT taken out. Payments in another currency are apart on the profit and loss." : "Each invoice issued in the period, before VAT; any part paid in another currency is taken out and shown apart on the profit and loss.",
+        basis: collected ? "Each payment received in the period, as received. Payments in another currency are apart on the profit and loss." : "Each invoice issued in the period, before VAT; any part paid in another currency is taken out and shown apart on the profit and loss.",
         source: "finance's Profit & Loss",
       };
     }
@@ -934,7 +934,7 @@ export function LedgerTable({ report, spec }: { report: Titled; spec: LedgerSpec
  */
 const PL_BASIS: Record<PlBasis, string> = {
   invoiced: "Income is invoices issued in the period, before VAT; expenses are those dated in it.",
-  collected: "Income is payments received in the period, VAT taken out; expenses are those paid in it.",
+  collected: "Income is payments received in the period, as received; expenses are those paid in it.",
 };
 
 interface PlRow { key: string; label: string; kind: "line" | "total" | "net"; amount: number; prior?: number | null; /** The records behind it (2026-11-27). */ line?: string }
@@ -1030,7 +1030,7 @@ export function PLTable({ report, spec }: { report: Titled; spec: PlSpec }) {
         <Select label="Count income by" value={basis} onChange={(v) => setBasis(v as PlBasis)} options={[{ key: "invoiced", name: "Income: invoiced" }, { key: "collected", name: "Income: collected" }]} />
         {!months && statement.data?.bases && (
           <p className="text-xs text-muted-foreground">
-            Invoiced before VAT {money(statement.data.bases.invoicedMinor, cur)} · collected before VAT {money(statement.data.bases.collectedMinor, cur)} · still owed on the period&apos;s invoices {money(statement.data.bases.owedMinor, cur)}
+            Invoiced before VAT {money(statement.data.bases.invoicedMinor, cur)} · collected {money(statement.data.bases.collectedMinor, cur)} · still owed on the period&apos;s invoices {money(statement.data.bases.owedMinor, cur)}
           </p>
         )}
         <div className="flex items-center gap-2 sm:ml-auto">
