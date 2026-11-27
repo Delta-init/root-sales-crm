@@ -906,7 +906,7 @@ async function main() {
   const dslRules = (await call("GET", "/traffic/rules", undefined, root)).body?.data;
   const dslSheet = sheetIn(dslRules, "dilshad-sir-leads");
   check("it is the sixth sheet, Dilshad sir Leads: one split, all of it to Remote straight to dilshad, source DILSHAD SIR LEADS",
-    dslRules?.sheets?.map((s: Json) => s.key).join(",") === "abhin,shoaib,trading-leads-nitro,digital-lead,philippines-leads,dilshad-sir-leads" && dslSheet?.name === "Dilshad sir Leads"
+    dslRules?.sheets?.map((s: Json) => s.key).slice(0, 6).join(",") === "abhin,shoaib,trading-leads-nitro,digital-lead,philippines-leads,dilshad-sir-leads" && dslSheet?.name === "Dilshad sir Leads"
     && dslSheet?.segments?.length === 1 && segOf(dslSheet, "all")?.source === "DILSHAD SIR LEADS"
     && show(segOf(dslSheet, "all")?.shares?.map((s: Json) => [s.name, s.org, s.percent, s.assignTo?.id ?? null])) === show([["dilshad", "remote", 100, DILSHAD]]), show(dslSheet));
   const dslPing = await call("GET", "/traffic/intake/ping?sheet=" + encodeURIComponent("Dilshad sir Leads"), undefined, { "x-traffic-key": SHEET_KEY });
@@ -938,6 +938,69 @@ async function main() {
     dslK.length === 3 && dslK.every((r) => r.status === "duplicate" && r.destination && String(r.label).startsWith("🔁 Came in again")), show(dslK));
   const dslSum = (await call("GET", "/traffic/summary?sheet=dilshad-sir-leads", undefined, root)).body?.data;
   check("the page counts them: 2 to dilshad, 3 duplicates", dslSum?.totals?.sent === 2 && dslSum?.totals?.duplicates === 3, show(dslSum?.totals));
+
+  // ── The Jura leads sheet (2026-11-27) ──────────────────────────────────────
+  step("The Jura leads sheet — every lead to Remote CRM, for Vishnu R Nath; only Remote counts as having the person");
+  const juraRules = (await call("GET", "/traffic/rules", undefined, root)).body?.data;
+  const juraSheet = sheetIn(juraRules, "jura-leads");
+  check("it is the seventh sheet, Jura leads: one split, all of it to Remote, team Vishnu R Nath with nobody named yet, source JURA LEADS",
+    juraRules?.sheets?.map((s: Json) => s.key).join(",") === "abhin,shoaib,trading-leads-nitro,digital-lead,philippines-leads,dilshad-sir-leads,jura-leads"
+    && juraSheet?.name === "Jura leads" && segOf(juraSheet, "all")?.source === "JURA LEADS"
+    && show(segOf(juraSheet, "all")?.shares?.map((s: Json) => [s.name, s.org, s.percent, s.assignTo])) === show([["Vishnu R Nath", "remote", 100, null]]), show(juraSheet));
+  const juraPing = await call("GET", "/traffic/intake/ping?sheet=jura-leads", undefined, { "x-traffic-key": SHEET_KEY });
+  check("its connection test answers as Jura leads", juraPing.status === 200 && juraPing.body?.data?.name === "Jura leads", show(juraPing.body));
+  const juraPost = (rows: unknown[]) => post({ sheet: "jura-leads", rows });
+  // A row typed into Sheet1 by hand: no lead id, no created time, its course, status, remarks and follow-ups as details.
+  const handRow = (n: number, extra: Record<string, unknown> = {}) => ({
+    id: "", tab: "Sheet1", created_time: "", full_name: `Jura hand ${n}`, phone_number: `p:+97155660000${n}`, email: `jura${n}@example.test`,
+    platform: "Meta", details: `Course: JURA\nStatus: Interested\nRemarks: call after 5\nFollow up 1: no answer`, ...extra,
+  });
+  const metaJura = (n: number, extra: Record<string, unknown> = {}) => ({
+    id: `l:88200${n}`, tab: "Jura poster leadform-copy-copy", created_time: `2026-11-27T0${n}:10:07-05:00`, full_name: `Jura meta ${n}`,
+    phone_number: `p:+91960550000${n}`, email: `jm${n}@example.test`, platform: "fb", campaign_name: "Jura poster campaign",
+    ad_name: "Jura poster ad", adset_name: "Jura poster adset", is_organic: "false", ...extra,
+  });
+  const [deltaAtJ, drawAtJ, remoteAtJ] = [crm.delta.rows.length, crm.draw.rows.length, crm.remote.rows.length];
+  const juraFirst = await juraPost([handRow(1), metaJura(1)]);
+  const juraRes = (juraFirst.body?.data?.results ?? []) as Json[];
+  check("a hand-typed row with no created time and a Meta row both go to Remote", juraFirst.status === 200 && juraRes.length === 2
+    && juraRes.every((r) => r.status === "sent" && r.destination === "remote"), show(juraFirst.body));
+  const juraHand = crm.remote.rows.slice(remoteAtJ).find((r) => r.full_name === "Jura hand 1");
+  const juraMeta = crm.remote.rows.slice(remoteAtJ).find((r) => r.full_name === "Jura meta 1");
+  check("Remote gets source JURA LEADS, the hand row's course, status, remarks and follow-up in its note",
+    juraHand?.source === "JURA LEADS" && juraHand?.ad_creative === "Course: JURA\nStatus: Interested\nRemarks: call after 5\nFollow up 1: no answer"
+    && juraHand?.phone_number === "+971556600001", show(juraHand));
+  check("…the Meta row's ad and ad set in its note", juraMeta?.source === "JURA LEADS" && juraMeta?.ad_creative === "Ad: Jura poster ad\nAd set: Jura poster adset", show(juraMeta));
+  check("…nobody named yet, so Remote shares them out itself", !juraHand?.assigned_to && !juraMeta?.assigned_to, show([juraHand?.assigned_to, juraMeta?.assigned_to]));
+  check("…nothing to Delta or Draw", crm.delta.rows.length === deltaAtJ && crm.draw.rows.length === drawAtJ);
+  // Fresh numbers: the shared "known to" ones have reached Remote by now through the sheets checked above.
+  await crmDb.delta.collection("leads").insertOne({ name: "Jura in Delta", phone: "+971557711001", createdAt: new Date("2026-10-01") });
+  await crmDb.draw.collection("leads").insertOne({ name: "Jura in Draw", phone: "0557711002", createdAt: new Date("2026-10-01") });
+  const juraKnown = await juraPost([
+    handRow(2, { full_name: "Jura known to Delta", phone_number: "+971557711001" }),
+    handRow(3, { full_name: "Jura known to Draw", phone_number: "+971557711002" }),
+    handRow(4, { full_name: "Jura known to Remote", phone_number: "+971509999001" }),
+  ]);
+  const juraK = (juraKnown.body?.data?.results ?? []) as Json[];
+  check("somebody only Delta or Draw has is a new lead for Remote — every earlier Jura lead is in the Sales CRM",
+    juraK[0]?.status === "sent" && juraK[0]?.destination === "remote" && juraK[1]?.status === "sent" && juraK[1]?.destination === "remote", show(juraK));
+  check("somebody Remote already has is a duplicate there", juraK[2]?.status === "duplicate" && juraK[2]?.destination === "remote", show(juraK[2]));
+  // Vishnu picked on the page: Edit split names the team's person.
+  const VISHNU = String(new Types.ObjectId());
+  await crmDb.remote.collection("users").insertOne({ _id: new Types.ObjectId(VISHNU), name: "Vishnu R Nath", email: "vishnu@remote-e2e.test", status: "active" });
+  const named = await call("PUT", "/traffic/rules/jura-leads", { paused: false, segments: { all: [{ key: "vishnu", name: "Vishnu R Nath", org: "remote", percent: 100, assignToId: VISHNU }] } }, root);
+  check("picking Vishnu on the page is taken", named.status === 200, show(named.body));
+  const juraNext = await juraPost([handRow(5)]);
+  const juraFive = crm.remote.rows.slice(remoteAtJ).find((r) => r.full_name === "Jura hand 5");
+  check("…and from then on each new Jura lead is assigned straight to him", juraNext.body?.data?.results?.[0]?.status === "sent" && juraFive?.assigned_to === VISHNU, show([juraNext.body, juraFive]));
+  const juraSum = (await call("GET", "/traffic/summary?sheet=jura-leads", undefined, root)).body?.data;
+  check("the page counts them: 5 to Remote, 1 duplicate", juraSum?.totals?.sent === 5 && juraSum?.totals?.duplicates === 1, show(juraSum?.totals));
+  // The same number typed into the hand tab of another sheet (Sheet1 too, no created time) is not that sheet's row.
+  const nitroHand = await post({ sheet: "trading-leads-nitro", rows: [{ id: "", tab: "Sheet1", created_time: "", full_name: "Shared hand", phone_number: "+971556677001", email: "", platform: "Meta" }] });
+  const juraShared = await juraPost([handRow(6, { full_name: "Shared hand", phone_number: "+971556677001" })]);
+  check("a number typed into Sheet1 of the Nitro sheet and of Jura is two rows — Jura's goes to Remote, not answered with Nitro's decision",
+    nitroHand.body?.data?.results?.[0]?.destination === "delta" && juraShared.body?.data?.results?.[0]?.status === "sent" && juraShared.body?.data?.results?.[0]?.destination === "remote",
+    show([nitroHand.body?.data?.results, juraShared.body?.data?.results]));
 
   // ── The Leads list, by the page's dates ────────────────────────────────────
   step("The Leads list by date — the page's Today, 30 days, This month and Custom");
@@ -978,7 +1041,7 @@ async function main() {
   const gulfNow = new Date(Date.now() + 4 * 60 * 60_000).toISOString().slice(0, 10);
   const span = `from=2020-01-01&to=${gulfNow}`;
   const inSpan = { receivedAt: { $gte: new Date("2019-12-31T20:00:00Z"), $lt: new Date(Date.parse(`${gulfNow}T00:00:00+04:00`) + 24 * 60 * 60_000) } };
-  const KEYS = ["abhin", "shoaib", "trading-leads-nitro", "digital-lead", "philippines-leads", "dilshad-sir-leads"];
+  const KEYS = ["abhin", "shoaib", "trading-leads-nitro", "digital-lead", "philippines-leads", "dilshad-sir-leads", "jura-leads"];
   const TOTALS = ["received", "sent", "duplicates", "invalid", "waiting", "failed"];
   const leadsIn = (q: Record<string, unknown>) => db.collection("trafficleads").countDocuments({ sheet: { $in: KEYS }, ...inSpan, ...q });
   const allSum = (await call("GET", `/traffic/summary?sheet=all&${span}`, undefined, root)).body?.data;

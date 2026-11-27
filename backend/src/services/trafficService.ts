@@ -35,7 +35,7 @@ import type {
  */
 
 export const ORGS: TrafficOrg[] = ["delta", "draw", "remote"];
-export const SHEETS: TrafficSheet[] = ["abhin", "shoaib", "trading-leads-nitro", "digital-lead", "philippines-leads", "dilshad-sir-leads"];
+export const SHEETS: TrafficSheet[] = ["abhin", "shoaib", "trading-leads-nitro", "digital-lead", "philippines-leads", "dilshad-sir-leads", "jura-leads"];
 const SHORT: Record<TrafficOrg, string> = { delta: "Delta", draw: "Draw", remote: "Remote" };
 
 export const isSheet = (v: unknown): v is TrafficSheet => SHEETS.includes(v as TrafficSheet);
@@ -58,7 +58,7 @@ interface SheetConfig {
   /** The segment a row from this sheet belongs to, from the tab it is on. */
   segmentOf: (tab: string) => string;
   /** What the CRM is told about where the lead came from, in its ad_creative field. */
-  creative: (lead: Pick<ITrafficLead, "adName" | "adset" | "knowledge" | "contactTime">) => string;
+  creative: (lead: Pick<ITrafficLead, "adName" | "adset" | "knowledge" | "contactTime" | "details">) => string;
   /** The split the first time, before anybody has changed it. */
   teams: Record<string, TrafficShare[]>;
   /** Who each CRM is told added its leads, where not the account the first two sheets' scripts named. */
@@ -70,6 +70,13 @@ interface SheetConfig {
    * is not a duplicate for this sheet: it is split as a new lead.
    */
   checkOrgs?: TrafficOrg[];
+  /**
+   * A row with no lead id is known by its tab, phone and created time. Sheet1 is the hand-typed tab's name on more than
+   * one sheet, and an undated row has no time, so the same number typed into two sheets read as one row: the second
+   * sheet was answered with the first one's decision. Set, the sheet is part of the row's key. Not set on the sheets
+   * that went live before it — their rows' keys would change and every one of them be sent again.
+   */
+  keyBySheet?: boolean;
 }
 
 const team = (
@@ -212,6 +219,29 @@ export const SHEET_CONFIG: Record<TrafficSheet, SheetConfig> = {
     creative: (lead) =>
       [lead.adName && `Ad: ${lead.adName}`, lead.adset && `Ad set: ${lead.adset}`].filter(Boolean).join("\n"),
     teams: { all: [team("dilshad", "dilshad", "remote", 100, { id: "6abd18a2a21d01e2d21e0f77", name: "dilshad" })] },
+  },
+  /*
+   * The Jura leads sheet (the user, 2026-11-27: "lead directly assign to Remote CRM to Vishnu R Nath through the
+   * lead traffic"). Before this its own script sent every row straight to the Sales CRM. Two kinds of tab: Sheet1,
+   * typed by hand (name, phone, course, status, remarks, follow-ups, no created time — so `undated`), and Meta's
+   * Jura poster lead forms. Labelled JURA LEADS as before. Only Remote CRM counts as already having the person: every
+   * earlier Jura lead is in the Sales CRM, and the user wants new ones with Vishnu.
+   *
+   * Vishnu is not named here: his Remote CRM account could not be looked up when this was written. Until he is
+   * picked on the Lead traffic page (Edit split → the team's person), Remote CRM shares these leads out by its own
+   * rules. Its script's SHEET_ID is "jura-leads".
+   */
+  "jura-leads": {
+    name: "Jura leads",
+    about: "Every lead to Remote CRM, for Vishnu R Nath.",
+    segments: [{ key: "all", label: "All leads", source: "JURA LEADS" }],
+    segmentOf: () => "all",
+    creative: (lead) =>
+      [lead.details, lead.adName && `Ad: ${lead.adName}`, lead.adset && `Ad set: ${lead.adset}`].filter(Boolean).join("\n"),
+    teams: { all: [team("vishnu", "Vishnu R Nath", "remote", 100)] },
+    undated: true,
+    checkOrgs: ["remote"],
+    keyBySheet: true,
   },
 };
 
@@ -375,6 +405,8 @@ export const intakeRowSchema = z.object({
   knowledge: text(300),
   /** The form's "when can we contact you" answer, where it asks. */
   contact_time: text(300),
+  /** What a hand-kept sheet says beside the name and number — course, status, remarks, follow-ups (Jura, 2026-11-27). */
+  details: text(1500),
   is_organic: text(10),
 });
 
@@ -394,6 +426,7 @@ interface ParsedRow {
   adset: string;
   knowledge: string;
   contactTime: string;
+  details: string;
   isOrganic: boolean;
   createdTime: Date | null;
   /** Why the lead cannot be sent, if it cannot. */
@@ -417,7 +450,7 @@ function parseRow(raw: z.output<typeof intakeRowSchema>, sheet: TrafficSheet): P
   // Meta's lead id is the lead; without one, the row itself is.
   const sourceKey = raw.id
     ? `meta:${raw.id}`
-    : `row:${createHash("sha1").update(`${raw.tab}|${phone}|${raw.created_time}`).digest("hex")}`;
+    : `row:${createHash("sha1").update(`${cfg.keyBySheet ? `${sheet}|` : ""}${raw.tab}|${phone}|${raw.created_time}`).digest("hex")}`;
 
   let problem = "";
   if (!raw.tab) problem = "No tab name";
@@ -442,6 +475,7 @@ function parseRow(raw: z.output<typeof intakeRowSchema>, sheet: TrafficSheet): P
     adset: raw.adset_name,
     knowledge: isTest(raw.knowledge) ? "" : raw.knowledge,
     contactTime: isTest(raw.contact_time) ? "" : raw.contact_time,
+    details: raw.details,
     isOrganic: raw.is_organic.toLowerCase() === "true",
     createdTime,
     problem,
@@ -627,7 +661,7 @@ export async function intake(
         sheet, sourceKey: row.sourceKey, metaId: row.metaId, tab: row.tab, segment: row.segment, source: row.source,
         name: row.name, phone: row.phone, phone9: row.phone9, email: row.email, platform: row.platform,
         campaign: row.campaign, adName: row.adName, adset: row.adset, knowledge: row.knowledge,
-        contactTime: row.contactTime, isOrganic: row.isOrganic, createdTime: row.createdTime,
+        contactTime: row.contactTime, details: row.details, isOrganic: row.isOrganic, createdTime: row.createdTime,
       };
       // Every field a decision sets, so a row decided again keeps nothing from last time.
       const none = { share: "", destination: null, assignTo: null, ruleVersion: 0, crmLeadId: "", claimedAt: null };
