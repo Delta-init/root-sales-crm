@@ -236,7 +236,7 @@ export interface LedgerReport {
   appUrl: string;
 }
 
-export interface LedgerAsk { source: "commission" | "payroll" | "vat" | "pl-lines" | "management-profit-lines" | "financial-lines"; groupBy: string; params?: Record<string, string>; picks?: Picks }
+export interface LedgerAsk { source: "commission" | "payroll" | "vat" | "pl-lines" | "management-profit-lines" | "financial-lines" | "reconciliation-lines"; groupBy: string; params?: Record<string, string>; picks?: Picks }
 
 export const fetchLedger = (org: string, period: Period, ask: LedgerAsk, page: PageAsk) =>
   get<LedgerReport>(ask.source, { org, from: period.from, to: period.to, groupBy: ask.groupBy, ...picksParams(ask.picks ?? {}), ...(ask.params ?? {}), ...pageParams(page) });
@@ -317,6 +317,20 @@ export const useFinanceFp = (org: string | undefined, period: Period, report: Fp
   useQuery({
     queryKey: ["report-org", "finance", "financial", org, period.from, period.to, report],
     queryFn: () => get<FpReport>("financial", { org: org!, from: period.from, to: period.to, report }),
+    enabled: !!org,
+    placeholderData: (before) => before,
+    ...LIVE,
+  });
+
+/* Reconciliation and data integrity (Phase 5, 2026-11-27). */
+export type RcReportKind = "bank" | "psp" | "invoices" | "expenses" | "payroll" | "advances" | "historical" | "exceptions" | "summary";
+export interface RcIndicator { currency: string; key: string; label: string; value: number; as: "money" | "count"; report: string; line: string }
+export interface RcReport extends Omit<FpReport, "report"> { report: RcReportKind; cutover: string; indicators: RcIndicator[] }
+
+export const useFinanceRc = (org: string | undefined, period: Period, report: RcReportKind) =>
+  useQuery({
+    queryKey: ["report-org", "finance", "reconciliation", org, period.from, period.to, report],
+    queryFn: () => get<RcReport>("reconciliation", { org: org!, from: period.from, to: period.to, report }),
     enabled: !!org,
     placeholderData: (before) => before,
     ...LIVE,

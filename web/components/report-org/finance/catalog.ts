@@ -55,7 +55,7 @@ export type LiveSpec =
   | {
       kind: "ledger";
       /** vat: the rows behind the VAT position and the income of "Income less expenses" (headline cards only). */
-      source: "commission" | "payroll" | "vat" | "pl-lines" | "management-profit-lines" | "financial-lines";
+      source: "commission" | "payroll" | "vat" | "pl-lines" | "management-profit-lines" | "financial-lines" | "reconciliation-lines";
       /** The summary's grouping. */
       groupBy: string;
       view: "summary" | "records";
@@ -80,6 +80,8 @@ export type LiveSpec =
    * last day (at most today) — with each month, the records behind every line, notes and data warnings.
    */
   | { kind: "fp"; report: "cashflow" | "cash" | "receivables" | "obligations" | "advances" | "position"; period: "month" | "year" }
+  /** Reconciliation and data integrity (Phase 5, 2026-11-27): one of finance's reconciliation reports. */
+  | { kind: "rc"; report: "bank" | "psp" | "invoices" | "expenses" | "payroll" | "advances" | "historical" | "exceptions"; period: "month" | "year" }
   /** Finance's Expense report: approved expenses and those waiting for approval. */
   | {
       kind: "expenses";
@@ -382,20 +384,43 @@ export const CATEGORIES: Category[] = [
   },
 ];
 
-export const ALL_REPORTS: (Report & { category: Category })[] = CATEGORIES.flatMap((category) =>
+/**
+ * Report Org → Reconciliation (Phase 5, 2026-11-27): finance's reconciliation reports, live — the sample section they
+ * replace is gone. Their own section, not part of Finance and revenue's catalog.
+ */
+const rcr = (report: Extract<LiveSpec, { kind: "rc" }>["report"]): LiveSpec => ({ kind: "rc", report, period: "year" });
+export const RECONCILIATION: Category[] = [
+  {
+    slug: "reconciliation",
+    name: "Reconciliation",
+    reports: [
+      live("RC-01", "Bank reconciliation", rcr("bank"), "Each account's system-recorded balance against its last bank statement: the difference, outstanding deposits and payments, what the statement has that finance lacks and the reverse, unmatched and duplicate lines, negative, unverified or future-dated items."),
+      live("RC-02", "PSP and settlement reconciliation", rcr("psp"), "Each payment gateway: collections, charges and their VAT, expected net, settled to the bank, pending and how long, settlement delays, differences and possible duplicate settlements."),
+      live("RC-03", "Invoice and collection reconciliation", rcr("invoices"), "Customer payments against bank and gateway lines and the reverse; duplicate references, overpayments, wrong balances, void invoices with payments, credit and currency mismatches."),
+      live("RC-04", "Expense and supplier reconciliation", rcr("expenses"), "Bills and their expenses, supplier payments without a bank line, vendor credits, possible duplicate expenses, missing references, expense VAT, and balance-sheet-like categories counted in the P&L."),
+      live("RC-05", "Payroll and commission reconciliation", rcr("payroll"), "Payroll obligation, payments, reversals and what is outstanding; advance deductions; commission earned, approved, paid directly and through payroll; typed commission that may overlap with payouts; runs never paid."),
+      live("RC-06", "Employee advance reconciliation", rcr("advances"), "Advances issued and recovered, outstanding where it can be worked out, recoveries beyond recorded advances, and historical advances with no recovery records."),
+      live("RC-07", "Historical data reconciliation", rcr("historical"), "Old-books invoices, receivables, payments, expenses and advances apart from live records; opening balances and whether they are verified; imports that may duplicate live records."),
+      live("RC-08", "Financial exceptions", rcr("exceptions"), "Every item needing action, once each: type, module, severity, status (confirmed, suspected, missing information), age, recommended action and a link to the record."),
+    ],
+  },
+];
+
+export const ALL_REPORTS: (Report & { category: Category })[] = [...CATEGORIES, ...RECONCILIATION].flatMap((category) =>
   category.reports.map((r) => ({ ...r, category })),
 );
+const FINANCE_REPORTS = ALL_REPORTS.filter((r) => r.category.slug !== "reconciliation");
 
 /** A report by its ID, however it was typed in the address — "rev-04" finds REV-04. */
 export const reportById = (id: string) => ALL_REPORTS.find((r) => r.id.toLowerCase() === id.toLowerCase()) ?? null;
 
-export const hrefOf = (r: Report) => `/report-org/finance/${r.id.toLowerCase()}`;
+export const hrefOf = (r: Report) => (r.id.startsWith("RC-") ? `/report-org/reconciliation/${r.id.toLowerCase()}` : `/report-org/finance/${r.id.toLowerCase()}`);
 
 export const COUNTS = {
-  all: ALL_REPORTS.length,
-  live: ALL_REPORTS.filter((r) => r.state === "live").length,
-  planned: ALL_REPORTS.filter((r) => r.state === "planned").length,
-  none: ALL_REPORTS.filter((r) => r.state === "none").length,
+  all: FINANCE_REPORTS.length,
+  live: FINANCE_REPORTS.filter((r) => r.state === "live").length,
+  planned: FINANCE_REPORTS.filter((r) => r.state === "planned").length,
+  none: FINANCE_REPORTS.filter((r) => r.state === "none").length,
 };
 
 export const STATE_LABEL: Record<Report["state"], string> = { live: "Live", planned: "Not connected yet", none: "Not available" };

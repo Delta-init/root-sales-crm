@@ -41,7 +41,10 @@ const fpLines = (line: string, report: string): LiveSpec =>
 function tabsFor(card: CardKey, currency?: string, line?: string, basis = "invoiced"): Tab[] {
   switch (card) {
     case "fpLine":
-      return [{ key: line ?? "all", label: "Records", about: "Each record behind the line.", spec: fpLines(line ?? "all", basis) }];
+      // Reconciliation reports carry "rc:<report>" (Phase 5): their records come from the reconciliation lines.
+      return basis.startsWith("rc:")
+        ? [{ key: line ?? "all", label: "Records", about: "Each record behind the line.", spec: { kind: "ledger", source: "reconciliation-lines", groupBy: basis === "rc:exceptions" ? "severityName" : "category", view: "records", period: "month", params: { line: line ?? "all", report: basis.slice(3) } } }]
+        : [{ key: line ?? "all", label: "Records", about: "Each record behind the line.", spec: fpLines(line ?? "all", basis) }];
     case "mpLine":
       return line === "net"
         ? [

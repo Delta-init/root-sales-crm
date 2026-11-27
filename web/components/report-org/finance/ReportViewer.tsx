@@ -10,8 +10,8 @@ import { Input } from "@/components/ui/input";
 import { apiErrorMessage } from "@/lib/axios";
 import { useReportOrgFilters, yearRange } from "../ReportOrgShell";
 import {
-  change, count, fetchAging, fetchExpenses, fetchLedger, fetchRevenue, money, useFinanceFp, useFinanceManagement, useFinancePl, percent, useFinanceAging, useFinanceExpenses, useFinanceLedger, useFinanceOrgs, useFinanceRevenue,
-  type FpSide, type MpSide, type MpSum, type AgingGroup, type AgingRow, type ForeignLine, type PlBasis, type PlMonth, type PlMonths, type PlStatement, type LedgerGroup, type LedgerRow, type PageAsk, type ReportRow, type RevenueReport,
+  change, count, fetchAging, fetchExpenses, fetchLedger, fetchRevenue, money, useFinanceFp, useFinanceRc, useFinanceManagement, useFinancePl, percent, useFinanceAging, useFinanceExpenses, useFinanceLedger, useFinanceOrgs, useFinanceRevenue,
+  type FpReportKind, type FpSide, type MpSide, type MpSum, type AgingGroup, type AgingRow, type ForeignLine, type PlBasis, type PlMonth, type PlMonths, type PlStatement, type LedgerGroup, type LedgerRow, type PageAsk, type ReportRow, type RevenueReport,
 } from "./api";
 import { reportById, type Column, type LiveSpec, type Report } from "./catalog";
 import { ColumnsMenu, DataGrid, Pager, gridCsv, useGridColumns, type GridColumn, type GridSort } from "./DataGrid";
@@ -40,7 +40,7 @@ type AgingSpec = Extract<LiveSpec, { kind: "aging" }>;
 type LedgerSpec = Extract<LiveSpec, { kind: "ledger" }>;
 type PlSpec = Extract<LiveSpec, { kind: "pl" }>;
 type MpSpec = Extract<LiveSpec, { kind: "mp" }>;
-type FpSpec = Extract<LiveSpec, { kind: "fp" }>;
+type FpSpec = Extract<LiveSpec, { kind: "fp" }> | Extract<LiveSpec, { kind: "rc" }>;
 type Mode = "summary" | "records";
 
 /** A summary row: one day, month or group. */
@@ -121,10 +121,17 @@ function Head({ report, basis, source, at }: { report: Titled; basis?: string; s
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Link href="/report-org/finance" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
-          <ArrowLeft className="h-3.5 w-3.5" />
-          Finance and revenue <span className="opacity-60">/</span> {report.category.name}
-        </Link>
+        {report.id.startsWith("RC-") ? (
+          <Link href="/report-org/reconciliation" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Reconciliation
+          </Link>
+        ) : (
+          <Link href="/report-org/finance" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Finance and revenue <span className="opacity-60">/</span> {report.category.name}
+          </Link>
+        )}
         <p className="flex items-center gap-2 text-xs text-muted-foreground">
           <StateBadge state={report.state} />
           {at && <>From finance at {timeText(at)}</>}
@@ -716,6 +723,18 @@ interface LedgerShape {
 const GROUP_LABEL: Record<string, string> = { person: "Person", source: "CRM or CS", month: "Month", state: "State", kind: "Type", department: "Department", status: "Status", runState: "Payroll run", method: "Payment method", bank: "Bank account", vendor: "Vendor", crm: "CRM", salesperson: "Salesperson" };
 
 function ledgerShape(spec: LedgerSpec): LedgerShape {
+  if (spec.source === "reconciliation-lines") {
+    const report = spec.params?.report ?? "exceptions";
+    return {
+      space: `rc-${report}`, noun: report === "exceptions" ? "Exceptions" : "Records",
+      filters: [{ key: "category", label: report === "exceptions" ? "Exception" : "Kind" }, { key: "severityName", label: "Severity" }, { key: "status", label: "Status" }, { key: "module", label: "Module" }, { key: "account", label: "Account" }, { key: "month", label: "Month" }],
+      sums: [["amountMinor", report === "exceptions" ? "Amount or difference" : "Amount"]],
+      first: ["date", "Date"],
+      fields: [["title", "Record"], ["category", report === "exceptions" ? "Exception" : "Kind"], ["severityName", "Severity"], ["status", "Status"], ["module", "Module"], ["ageDays", "Age (days)"], ["action", "Recommended action"], ["detail", "Detail"], ["month", "Month", true]],
+      basis: "From finance's reconciliation reports. Nothing here changes a record, a balance or a reconciliation.",
+      source: "finance's reconciliation",
+    };
+  }
   if (spec.source === "financial-lines") {
     const report = spec.params?.report ?? "cashflow";
     if (report === "receivables") {
@@ -1267,9 +1286,11 @@ export function MPTable({ report, spec }: { report: Titled; spec: MpSpec }) {
 
 /* ── Cash flow and financial position (Phase 4, 2026-11-27) ──────────────────── */
 
-const FP_TITLE: Record<FpSpec["report"], string> = {
+const FP_TITLE: Record<string, string> = {
   cashflow: "Cash flow statement", cash: "Cash and bank position", receivables: "Receivables", obligations: "Outstanding obligations",
   advances: "Employee advances", position: "Management Financial Position — not a statutory balance sheet",
+  "rc:bank": "Bank reconciliation", "rc:psp": "PSP and settlement reconciliation", "rc:invoices": "Invoice and collection reconciliation", "rc:expenses": "Expense and supplier reconciliation",
+  "rc:payroll": "Payroll and commission reconciliation", "rc:advances": "Employee advance reconciliation", "rc:historical": "Historical data reconciliation", "rc:exceptions": "Financial exceptions",
 };
 interface FpRow { key: string; label: string; kind: "head" | "line" | "subtotal" | "total"; amount: number | null; count?: number; line?: string }
 
@@ -1281,12 +1302,16 @@ export function FPTable({ report, spec }: { report: Titled; spec: FpSpec }) {
   const [show, setShow] = useState<"statement" | "months">("statement");
   const [currency, setCurrency] = useState<string>("");
   const [pick, setPick] = useState<FpRow | null>(null);
-  const query = useFinanceFp(org?.id, f.range, spec.report);
+  const rc = spec.kind === "rc";
+  const fpQuery = useFinanceFp(rc ? undefined : org?.id, f.range, rc ? "cash" : (spec.report as FpReportKind));
+  const rcQuery = useFinanceRc(rc ? org?.id : undefined, f.range, rc ? spec.report : "bank");
+  const query = rc ? rcQuery : fpQuery;
+  const titleKey = rc ? `rc:${spec.report}` : spec.report;
   const data = query.data;
   const base = data?.currency ?? org?.currency ?? "";
   const cur = currency && data?.sides.some((x) => x.currency === currency) ? currency : base;
   const side: FpSide | undefined = data?.sides.find((x) => x.currency === cur);
-  const flow = spec.report === "cashflow";
+  const flow = !rc && spec.report === "cashflow";
   const when = data ? (flow ? periodText(data.period) : `As of ${dayText(data.asOf)}`) : "";
 
   const rows = useMemo<FpRow[]>(() => {
@@ -1330,16 +1355,16 @@ export function FPTable({ report, spec }: { report: Titled; spec: FpSpec }) {
   const save = () => {
     if (!data) return;
     const name = `${report.id}-${data.org.name}-${data.from}_${data.to}-${cur}`.replace(/\s+/g, "-");
-    const top = [[`${report.id} ${report.name}`], [data.org.name, when, FP_TITLE[spec.report], cur], []];
+    const top = [[`${report.id} ${report.name}`], [data.org.name, when, FP_TITLE[titleKey], cur], []];
     saveCsv(`${name}.csv`, [...top, ...(show === "months" ? gridCsv(moGrid.visible, moRows) : gridCsv(stGrid.visible, rows))]);
   };
 
   return (
     <div className="space-y-3">
-      <Head report={report} basis={FP_TITLE[spec.report]} source="finance" at={data?.generatedAt} />
-      <FinanceFilters orgs={orgs.data} org={org} space={`fp-${spec.report}`} filters={[]} />
+      <Head report={report} basis={FP_TITLE[titleKey]} source={rc ? "finance's reconciliation" : "finance"} at={data?.generatedAt} />
+      <FinanceFilters orgs={orgs.data} org={org} space={`${rc ? "rc" : "fp"}-${spec.report}`} filters={[]} />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        {spec.report !== "advances" && <Select label="Show" value={show} onChange={(v) => setShow(v as "statement" | "months")} options={[{ key: "statement", name: flow ? "The period" : "As of the date" }, { key: "months", name: flow ? "Month by month" : "Each month end" }]} />}
+        {spec.report !== "advances" && !rc && <Select label="Show" value={show} onChange={(v) => setShow(v as "statement" | "months")} options={[{ key: "statement", name: flow ? "The period" : "As of the date" }, { key: "months", name: flow ? "Month by month" : "Each month end" }]} />}
         {(data?.sides.length ?? 0) > 1 && <Select label="Currency" value={cur} onChange={setCurrency} options={(data?.sides ?? []).map((x) => ({ key: x.currency, name: x.currency === base ? `${x.currency} (the organization's)` : `${x.currency} (apart, never converted)` }))} />}
         {!flow && data && <p className="text-xs text-muted-foreground">As of {dayText(data.asOf)}: the last day of the period, or today if that is later.</p>}
         <div className="flex items-center gap-2 sm:ml-auto">
@@ -1365,7 +1390,7 @@ export function FPTable({ report, spec }: { report: Titled; spec: FpSpec }) {
       )}
       {(data?.notes ?? []).map((n) => <p key={n} className="text-xs text-muted-foreground">{n}</p>)}
       <CardPopup
-        open={pick ? { card: "fpLine", title: pick.label, value: money(pick.amount ?? 0, cur), line: pick.line, basis: spec.report, note: `${when} · ${FP_TITLE[spec.report]}. Each record behind the line; other currencies apart.` } : null}
+        open={pick ? { card: "fpLine", title: pick.label, value: money(pick.amount ?? 0, cur), line: pick.line, basis: rc ? `rc:${spec.report}` : spec.report, note: `${when} · ${FP_TITLE[titleKey]}. Each record behind the line; other currencies apart.` } : null}
         onClose={() => setPick(null)}
       />
     </div>
@@ -1469,6 +1494,6 @@ export function ReportViewer({ id }: { id: string }) {
   if (report.spec.kind === "ledger") return <LedgerTable key={report.id} report={report} spec={report.spec} />;
   if (report.spec.kind === "pl") return <PLTable key={report.id} report={report} spec={report.spec} />;
   if (report.spec.kind === "mp") return <MPTable key={report.id} report={report} spec={report.spec} />;
-  if (report.spec.kind === "fp") return <FPTable key={report.id} report={report} spec={report.spec} />;
+  if (report.spec.kind === "fp" || report.spec.kind === "rc") return <FPTable key={report.id} report={report} spec={report.spec} />;
   return <RevenueTable key={report.id} report={report} spec={report.spec} />;
 }

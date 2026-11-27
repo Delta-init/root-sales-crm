@@ -64,18 +64,6 @@ export interface Section {
   reports: Report[];
 }
 
-const POS_SETTLEMENT = {
-  head: ["Description", "AED"],
-  rows: [
-    ["Gross collections", "10,000.00"],
-    ["Processing fee", "150.00"],
-    ["VAT on fee", "7.50"],
-    ["Expected settlement", "9,842.50"],
-    ["Actual settlement", "9,842.36"],
-    ["Variance", "-0.14"],
-  ],
-};
-
 const PROFIT_AND_LOSS = {
   head: ["Description", "AED"],
   rows: [
@@ -184,44 +172,7 @@ export const SECTIONS: Section[] = [
     ],
   },
   /* Finance and revenue is not here: it is live, read from finance, with its own pages (components/report-org/finance). */
-  {
-    slug: "reconciliation",
-    label: "Reconciliation",
-    title: "Reconciliation",
-    about: "Bank, POS, gateway, cash, invoices, intercompany, settlement fees and exceptions.",
-    icon: ArrowLeftRight,
-    metrics: [
-      { label: "Transactions", value: 1_248, as: "count" },
-      { label: "Matched", value: 1_210, as: "count" },
-      { label: "Unmatched", value: 38, as: "count" },
-      { label: "Match rate", value: 96.96, as: "percent" },
-      { label: "Unresolved variance", value: 17_250, as: "money" },
-      { label: "Pending settlements", value: 65_000, as: "money" },
-    ],
-    panels: [
-      {
-        title: "Reconciliation progress", type: "bars",
-        rows: [
-          { label: "Bank", value: 98, as: "percent", percent: 98 },
-          { label: "POS", value: 96, as: "percent", percent: 96 },
-          { label: "Gateway", value: 99, as: "percent", percent: 99 },
-          { label: "Cash", value: 100, as: "percent", percent: 100 },
-          { label: "Migration", value: 82, as: "percent", percent: 82 },
-        ],
-      },
-      { title: "POS settlement example", type: "table", ...POS_SETTLEMENT },
-    ],
-    reports: [
-      { name: "Bank reconciliation", detail: { type: "table", head: ["Statement", "Ledger", "Variance"], rows: [["245,000", "257,500", "-12,500"]] } },
-      { name: "POS reconciliation", detail: { type: "table", ...POS_SETTLEMENT } },
-      { name: "Payment gateway" },
-      { name: "Cash reconciliation" },
-      { name: "Invoice reconciliation" },
-      { name: "Intercompany reconciliation" },
-      { name: "Settlement and fee analysis" },
-      { name: "Exceptions" },
-    ],
-  },
+  /* Reconciliation is not here either: it is live, read from finance (Phase 5, 2026-11-27, components/report-org/finance/ReconciliationHome). */
   {
     slug: "controls",
     label: "Financial controls",
@@ -269,7 +220,7 @@ export const NAV: { slug: string; label: string; icon: LucideIcon; live?: boolea
   { slug: "executive", label: "Executive", icon: LayoutDashboard },
   { slug: "sales", label: "Sales and CRMs", icon: Users2 },
   { slug: "finance", label: "Finance and revenue", icon: Banknote, live: true },
-  { slug: "reconciliation", label: "Reconciliation", icon: ArrowLeftRight },
+  { slug: "reconciliation", label: "Reconciliation", icon: ArrowLeftRight, live: true },
   { slug: "controls", label: "Financial controls", icon: ShieldCheck },
 ];
 

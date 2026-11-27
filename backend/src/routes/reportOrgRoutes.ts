@@ -1,6 +1,6 @@
 import { Router, type Response, type NextFunction } from "express";
 import { authenticate, requireRole } from "../middleware/auth.js";
-import { financeAging, financeCommission, financeExpenses, financePayroll, financeVat, financePl, financePlLines, financeManagementProfit, financeManagementLines, financeFinancial, financeFinancialLines, financeOrganizations, financeOverview, financeRevenue } from "../services/reportOrgFinanceService.js";
+import { financeAging, financeCommission, financeExpenses, financePayroll, financeVat, financePl, financePlLines, financeManagementProfit, financeManagementLines, financeFinancial, financeFinancialLines, financeReconciliation, financeReconciliationLines, financeOrganizations, financeOverview, financeRevenue } from "../services/reportOrgFinanceService.js";
 import { sendSuccess, sendError } from "../utils/response.js";
 import type { AuthenticatedRequest } from "../types/index.js";
 
@@ -40,5 +40,7 @@ router.get("/finance/management-profit", answer("Management profitability", fina
 router.get("/finance/management-profit-lines", answer("Management profitability records", financeManagementLines));
 router.get("/finance/financial", answer("Cash flow and financial position", financeFinancial));
 router.get("/finance/financial-lines", answer("Cash flow and financial position records", financeFinancialLines));
+router.get("/finance/reconciliation", answer("Reconciliation", financeReconciliation));
+router.get("/finance/reconciliation-lines", answer("Reconciliation records", financeReconciliationLines));
 
 export default router;

@@ -139,3 +139,15 @@ export async function financeFinancialLines(q: Record<string, unknown>) {
   const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/financial-lines${passOn(q, ["org", "from", "to", "report", "line", "groupBy", "category", "account", "status", "month", "kind", "band", "crm", ...PAGING])}`, "share the records behind a cash flow or financial position figure");
   return { ...data, appUrl };
 }
+
+/** Reconciliation and data integrity (Phase 5, 2026-11-27): ?report=bank | psp | invoices | expenses | payroll | advances | historical | exceptions | summary. */
+export async function financeReconciliation(q: Record<string, unknown>) {
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/reconciliation${passOn(q, ["org", "from", "to", "report"])}`, "share its reconciliation reports");
+  return { ...data, appUrl };
+}
+
+/** The records behind one reconciliation figure (?line=<section>:<line> | <section> | all). */
+export async function financeReconciliationLines(q: Record<string, unknown>) {
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/reconciliation-lines${passOn(q, ["org", "from", "to", "report", "line", "groupBy", "category", "severityName", "status", "module", "account", "month", ...PAGING])}`, "share the records behind a reconciliation figure");
+  return { ...data, appUrl };
+}
