@@ -10,14 +10,14 @@ import { Input } from "@/components/ui/input";
 import { apiErrorMessage } from "@/lib/axios";
 import { useReportOrgFilters, yearRange } from "../ReportOrgShell";
 import {
-  change, count, fetchAging, fetchExpenses, fetchLedger, fetchRevenue, money, percent, useFinanceAging, useFinanceExpenses, useFinanceLedger, useFinanceOrgs, useFinanceRevenue,
-  type AgingGroup, type AgingRow, type ForeignLine, type LedgerGroup, type LedgerRow, type PageAsk, type ReportRow, type RevenueReport,
+  change, count, fetchAging, fetchExpenses, fetchLedger, fetchRevenue, money, useFinancePl, percent, useFinanceAging, useFinanceExpenses, useFinanceLedger, useFinanceOrgs, useFinanceRevenue,
+  type AgingGroup, type AgingRow, type ForeignLine, type PlBasis, type PlMonth, type PlMonths, type PlStatement, type LedgerGroup, type LedgerRow, type PageAsk, type ReportRow, type RevenueReport,
 } from "./api";
 import { reportById, type Column, type LiveSpec, type Report } from "./catalog";
 import { ColumnsMenu, DataGrid, Pager, gridCsv, useGridColumns, type GridColumn, type GridSort } from "./DataGrid";
 import { FinanceFilters, pickOrg, usePicks, type FilterDef } from "./FinanceFilters";
 import { Select } from "./FilterSelect";
-import { ErrorCard, ForeignUnknown, dayText, periodText, saveCsv, timeText } from "./parts";
+import { ErrorCard, ForeignUnknown, dayText, monthText, periodText, saveCsv, timeText } from "./parts";
 import { StateBadge } from "./ReportCatalog";
 
 /*
@@ -37,6 +37,7 @@ type RevenueSpec = Extract<LiveSpec, { kind: "revenue" }>;
 type ExpenseSpec = Extract<LiveSpec, { kind: "expenses" }>;
 type AgingSpec = Extract<LiveSpec, { kind: "aging" }>;
 type LedgerSpec = Extract<LiveSpec, { kind: "ledger" }>;
+type PlSpec = Extract<LiveSpec, { kind: "pl" }>;
 type Mode = "summary" | "records";
 
 /** A summary row: one day, month or group. */
@@ -902,6 +903,131 @@ export function LedgerTable({ report, spec }: { report: Titled; spec: LedgerSpec
   );
 }
 
+/*
+ * Profit & Loss (2026-11-27): finance's own calculation, as a table. The statement is its lines — income, each kind of
+ * expense, net profit — optionally beside the period before; the months view is a row per month with net margin or the
+ * change on the month before. Invoiced or collected, as on finance's page. Other currencies are said under the table.
+ */
+const PL_BASIS: Record<PlBasis, string> = {
+  invoiced: "Income is invoices issued in the period, before VAT; expenses are those dated in it.",
+  collected: "Income is payments received in the period, VAT taken out; expenses are those paid in it.",
+};
+
+interface PlRow { key: string; label: string; kind: "line" | "total" | "net"; amount: number; prior?: number | null }
+
+export function PLTable({ report, spec }: { report: Titled; spec: PlSpec }) {
+  const f = useReportOrgFilters();
+  const orgs = useFinanceOrgs();
+  const org = pickOrg(orgs.data, f.entity);
+  useYearFor(spec.period, report.id);
+  const [basis, setBasis] = useState<PlBasis>("invoiced");
+  const months = spec.view === "months";
+  const statement = useFinancePl<PlStatement>(months ? undefined : org?.id, f.range, basis, "statement");
+  const series = useFinancePl<PlMonths>(months ? org?.id : undefined, f.range, basis, "months");
+  const query = months ? series : statement;
+  const cur = (months ? series.data?.currency : statement.data?.currency) ?? org?.currency ?? "";
+  const compare = spec.view === "compare";
+
+  const lines = useMemo<PlRow[]>(() => {
+    const d = statement.data;
+    if (!d) return [];
+    const prior = (side: "income" | "expenses", label: string) => (d.prior ? d.prior[side].breakdown.find((x) => x.label === label)?.amountMinor ?? 0 : null);
+    // Lines only in the period before still show, at nothing now — so a cost that stopped is not hidden.
+    const labels = (side: "income" | "expenses") => Array.from(new Set([...d[side].breakdown.map((x) => x.label), ...(compare && d.prior ? d.prior[side].breakdown.map((x) => x.label) : [])]));
+    const now = (side: "income" | "expenses", label: string) => d[side].breakdown.find((x) => x.label === label)?.amountMinor ?? 0;
+    return [
+      ...labels("income").map((label): PlRow => ({ key: `i:${label}`, label, kind: "line", amount: now("income", label), prior: prior("income", label) })),
+      { key: "income", label: "Total income", kind: "total", amount: d.income.total, prior: d.prior?.income.total ?? null },
+      ...labels("expenses").map((label): PlRow => ({ key: `e:${label}`, label, kind: "line", amount: now("expenses", label), prior: prior("expenses", label) })),
+      { key: "expenses", label: "Total expenses", kind: "total", amount: d.expenses.total, prior: d.prior?.expenses.total ?? null },
+      { key: "net", label: "Net profit", kind: "net", amount: d.netProfitMinor, prior: d.prior?.netProfitMinor ?? null },
+    ];
+  }, [statement.data, compare]);
+
+  const stCols = useMemo<GridColumn<PlRow>[]>(() => {
+    const label = (r: PlRow) => (r.kind === "line" ? <span className="pl-4 text-muted-foreground">{r.label}</span> : <span className="font-semibold">{r.label}</span>);
+    const amount = (v: number, r: PlRow) => <span className={r.kind === "line" ? undefined : r.kind === "net" && v < 0 ? "font-semibold text-rose-600 dark:text-rose-400" : "font-semibold"}>{money(v, cur)}</span>;
+    const priorText = statement.data?.prior ? periodText(statement.data.prior) : "Period before";
+    return [
+      { key: "label", header: "Line", fixed: true, cell: label, text: (r) => (r.kind === "line" ? `   ${r.label}` : r.label) },
+      { key: "amount", header: `${statement.data ? periodText(statement.data.period) : "Period"} (${cur})`, align: "right", cell: (r) => amount(r.amount, r), text: (r) => r.amount / 100 },
+      ...(compare ? [
+        { key: "prior", header: `${priorText} (${cur})`, align: "right", cell: (r: PlRow) => (r.prior === null || r.prior === undefined ? DASH : amount(r.prior, r)), text: (r: PlRow) => (r.prior === null || r.prior === undefined ? "" : r.prior / 100) },
+        { key: "moved", header: "Change", align: "right", cell: (r: PlRow) => { const m = r.prior ? change(r.amount, r.prior) : null; return m === null ? DASH : percent(m); }, text: (r: PlRow) => { const m = r.prior ? change(r.amount, r.prior) : null; return m === null ? "" : percent(m); } },
+      ] as GridColumn<PlRow>[] : []),
+    ];
+  }, [cur, compare, statement.data]);
+
+  const moCols = useMemo<GridColumn<PlMonth>[]>(() => {
+    const d = series.data;
+    const t = d?.totals;
+    const list = d?.months ?? [];
+    const before = (r: PlMonth) => { const i = list.indexOf(r); return i > 0 ? list[i - 1] : undefined; };
+    const margin = (net: number, inc: number) => (inc > 0 ? `${((net / inc) * 100).toLocaleString("en-US", { maximumFractionDigits: 1 })}%` : "");
+    return [
+      { key: "month", header: "Month", fixed: true, cell: (r) => <span className="font-medium">{monthText(r.month)}</span>, text: (r) => r.month, total: "Total", totalText: "Total" },
+      { key: "income", header: `Income (${cur})`, align: "right", cell: (r) => money(r.incomeMinor, cur), text: (r) => r.incomeMinor / 100, total: money(t?.incomeMinor ?? 0, cur), totalText: (t?.incomeMinor ?? 0) / 100 },
+      { key: "expenses", header: `Expenses (${cur})`, align: "right", cell: (r) => money(r.expensesMinor, cur), text: (r) => r.expensesMinor / 100, total: money(t?.expensesMinor ?? 0, cur), totalText: (t?.expensesMinor ?? 0) / 100 },
+      { key: "net", header: `Net profit (${cur})`, align: "right", cell: (r) => <span className={r.netMinor < 0 ? "font-medium text-rose-600 dark:text-rose-400" : "font-medium"}>{money(r.netMinor, cur)}</span>, text: (r) => r.netMinor / 100, total: money(t?.netMinor ?? 0, cur), totalText: (t?.netMinor ?? 0) / 100 },
+      ...(spec.column === "margin" ? [{ key: "margin", header: "Net margin", align: "right", cell: (r: PlMonth) => margin(r.netMinor, r.incomeMinor) || DASH, text: (r: PlMonth) => margin(r.netMinor, r.incomeMinor), total: margin(t?.netMinor ?? 0, t?.incomeMinor ?? 0) || DASH, totalText: margin(t?.netMinor ?? 0, t?.incomeMinor ?? 0) }] as GridColumn<PlMonth>[] : []),
+      ...(spec.column === "change" ? [{ key: "change", header: "Net profit on the month before", align: "right", cell: (r: PlMonth) => { const b = before(r); const m = b && b.netMinor !== 0 ? (r.netMinor - b.netMinor) / Math.abs(b.netMinor) * 100 : null; return m === null ? DASH : percent(m); }, text: (r: PlMonth) => { const b = before(r); const m = b && b.netMinor !== 0 ? (r.netMinor - b.netMinor) / Math.abs(b.netMinor) * 100 : null; return m === null ? "" : percent(m); } }] as GridColumn<PlMonth>[] : []),
+    ];
+  }, [series.data, cur, spec.column]);
+
+  const stGrid = useGridColumns(`${report.id}:statement`, stCols);
+  const moGrid = useGridColumns(`${report.id}:months`, moCols);
+  const error = orgs.error ?? query.error;
+  const data = query.data;
+  const others = months
+    ? [...(series.data?.incomeOther ?? []).map((c) => ({ ...c, side: "income" })), ...(series.data?.expensesOther ?? []).map((c) => ({ ...c, side: "expenses" }))]
+    : [...(statement.data?.income.otherCurrencies ?? []).map((c) => ({ ...c, side: "income" })), ...(statement.data?.expenses.otherCurrencies ?? []).map((c) => ({ ...c, side: "expenses" }))];
+
+  const save = () => {
+    if (!data) return;
+    const name = `${report.id}-${data.org.name}-${data.period.from}_${data.period.to}-${basis}`.replace(/\s+/g, "-");
+    const top = [[`${report.id} ${report.name}`], [data.org.name, periodText(data.period), PL_BASIS[basis]], []];
+    saveCsv(`${name}.csv`, [...top, ...(months ? gridCsv(moGrid.visible, series.data?.months ?? []) : gridCsv(stGrid.visible, lines))]);
+  };
+
+  return (
+    <div className="space-y-3">
+      <Head report={report} basis={PL_BASIS[basis]} source="finance's Profit & Loss" at={data?.generatedAt} />
+      {/* Expenses and bills record no CRM, so there is none to pick. */}
+      <FinanceFilters orgs={orgs.data} org={org} space="pl" filters={[]} />
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <Select label="Count income by" value={basis} onChange={(v) => setBasis(v as PlBasis)} options={[{ key: "invoiced", name: "Income: invoiced" }, { key: "collected", name: "Income: collected" }]} />
+        {!months && statement.data?.bases && (
+          <p className="text-xs text-muted-foreground">
+            Invoiced before VAT {money(statement.data.bases.invoicedMinor, cur)} · collected before VAT {money(statement.data.bases.collectedMinor, cur)} · still owed on the period&apos;s invoices {money(statement.data.bases.owedMinor, cur)}
+          </p>
+        )}
+        <div className="flex items-center gap-2 sm:ml-auto">
+          {months ? <ColumnsMenu grid={moGrid} /> : <ColumnsMenu grid={stGrid} />}
+          <Button variant="outline" size="sm" className="h-8" onClick={save} disabled={!data}>
+            <Download />
+            Export
+          </Button>
+        </div>
+      </div>
+
+      {error ? (
+        <ErrorCard error={error} onRetry={() => { void orgs.refetch(); void query.refetch(); }} />
+      ) : months ? (
+        <DataGrid grid={moGrid} rows={series.data?.months ?? []} rowKey={(r) => r.month} loading={series.isFetching} empty="No month in this period." />
+      ) : (
+        <DataGrid grid={stGrid} rows={lines} rowKey={(r) => r.key} loading={statement.isFetching} empty="Finance has nothing for this period." />
+      )}
+      {months && series.data?.capped && <p className="text-xs text-muted-foreground">The first 24 months of the period are shown. Pick a shorter period for the rest.</p>}
+
+      {others.map((c) => (
+        <p key={`${c.side}:${c.currency}`} className="text-xs text-muted-foreground">
+          Also {amber(money(c.amountMinor, c.currency))} of {c.side} in {c.currency}, over {count(c.count)} {c.count === 1 ? "record" : "records"}. Not in the {cur} figures, never converted.
+        </p>
+      ))}
+    </div>
+  );
+}
+
 /** Each organization's invoiced revenue as a row, in its own currency — never a column to be added up. */
 function EntitiesTable({ report, basis }: { report: Titled; basis: "invoiced" | "collected" }) {
   const f = useReportOrgFilters();
@@ -998,5 +1124,6 @@ export function ReportViewer({ id }: { id: string }) {
   if (report.spec.kind === "expenses") return <ExpenseTable key={report.id} report={report} spec={report.spec} />;
   if (report.spec.kind === "aging") return <AgingTable key={report.id} report={report} spec={report.spec} />;
   if (report.spec.kind === "ledger") return <LedgerTable key={report.id} report={report} spec={report.spec} />;
+  if (report.spec.kind === "pl") return <PLTable key={report.id} report={report} spec={report.spec} />;
   return <RevenueTable key={report.id} report={report} spec={report.spec} />;
 }

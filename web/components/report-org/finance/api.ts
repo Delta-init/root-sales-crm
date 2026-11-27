@@ -250,6 +250,37 @@ export const useFinanceLedger = (org: string | undefined, period: Period, ask: L
     ...LIVE,
   });
 
+/* Profit & Loss (2026-11-27): finance's own calculation, the statement or month by month, invoiced or collected. */
+export type PlBasis = "invoiced" | "collected";
+export interface PlLine { label: string; amountMinor: number }
+export interface PlSide { total: number; breakdown: PlLine[] }
+export interface PlPeriod { from: string; to: string; income: PlSide & { otherCurrencies?: { currency: string; what?: string; amountMinor: number; count: number }[] }; expenses: PlSide & { otherCurrencies?: { currency: string; amountMinor: number; count: number; breakdown?: PlLine[] }[] }; netProfitMinor: number }
+export interface PlStatement extends PlPeriod {
+  generatedAt: string; org: FinanceOrg; period: Period; basis: PlBasis; view: "statement"; currency: string;
+  prior: PlPeriod | null;
+  bases?: { invoicedMinor: number; collectedMinor: number; owedMinor: number };
+  appUrl: string;
+}
+export interface PlMonth { month: string; from: string; to: string; incomeMinor: number; expensesMinor: number; netMinor: number }
+export interface PlMonths {
+  generatedAt: string; org: FinanceOrg; period: Period; basis: PlBasis; view: "months"; currency: string;
+  months: PlMonth[]; totals: { incomeMinor: number; expensesMinor: number; netMinor: number };
+  incomeOther: { currency: string; amountMinor: number; count: number }[]; expensesOther: { currency: string; amountMinor: number; count: number }[];
+  capped: boolean; appUrl: string;
+}
+
+export const fetchPl = <T extends PlStatement | PlMonths>(org: string, period: Period, basis: PlBasis, view: T["view"]) =>
+  get<T>("pl", { org, from: period.from, to: period.to, basis, view });
+
+export const useFinancePl = <T extends PlStatement | PlMonths>(org: string | undefined, period: Period, basis: PlBasis, view: T["view"]) =>
+  useQuery({
+    queryKey: ["report-org", "finance", "pl", org, period.from, period.to, basis, view],
+    queryFn: () => fetchPl<T>(org!, period, basis, view),
+    enabled: !!org,
+    placeholderData: (before) => before,
+    ...LIVE,
+  });
+
 /** An amount as the Report Org shows it: exact, in its own currency — rupees grouped the Indian way. */
 export const money = (minor: number, currency: string) =>
   `${currency} ${(minor / 100).toLocaleString(currency === "INR" ? "en-IN" : "en-US", { maximumFractionDigits: 2 })}`;

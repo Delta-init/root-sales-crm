@@ -65,6 +65,11 @@ export type LiveSpec =
       /** Kept to one value of a filter, which is then not offered. */
       only?: Record<string, string>;
     }
+  /**
+   * Profit & Loss, as finance's own page works it out (2026-11-27): the statement (`compare` puts the period before
+   * beside it) or a row per month (`months`, with net margin or the change on the month before).
+   */
+  | { kind: "pl"; view: "statement" | "compare" | "months"; column?: "margin" | "change"; period: "month" | "year" }
   /** Finance's Expense report: approved expenses and those waiting for approval. */
   | {
       kind: "expenses";
@@ -186,7 +191,7 @@ export const CATEGORIES: Category[] = [
     slug: "statements",
     name: "Financial statements",
     reports: [
-      planned("FS-01", "Profit and loss", "Finance works this out from invoices, bills and expenses, not from a ledger. It has not been connected yet."),
+      live("FS-01", "Profit and loss", { kind: "pl", view: "statement", period: "month" }, "Income, each kind of expense and net profit for the period — finance's own Profit & Loss, worked out from invoices, bills and expenses, not from a ledger."),
       none("FS-02", "Balance sheet", NO_LEDGER),
       planned("FS-03", "Cash flow", "Finance can give money in and money out from operations only. It has not been connected yet."),
       none("FS-04", "Trial balance", NO_LEDGER),
@@ -194,7 +199,7 @@ export const CATEGORIES: Category[] = [
       none("FS-06", "Account ledger", NO_LEDGER),
       none("FS-07", "Journal register", NO_LEDGER),
       none("FS-08", "Changes in equity", NO_LEDGER),
-      planned("FS-09", "Comparative statements", "Profit and loss beside the period before. It has not been connected yet."),
+      live("FS-09", "Comparative statements", { kind: "pl", view: "compare", period: "month" }, "The profit and loss beside the period before, line by line, and how each moved."),
       none("FS-10", "Consolidated statements", "The organizations keep their books in different currencies, and finance never adds them together."),
       planned("FS-11", "Opening and closing balances", "Finance has these for bank accounts only. It has not been connected yet."),
     ],
@@ -262,19 +267,19 @@ export const CATEGORIES: Category[] = [
     slug: "profitability",
     name: "Profitability",
     reports: [
-      planned("PRF-01", "Company"),
-      planned("PRF-02", "By department"),
+      live("PRF-01", "Company", { kind: "pl", view: "months", period: "year" }, "The company's income, expenses and net profit, month by month."),
+      planned("PRF-02", "By department", "Expenses carry a department; income would need a rule for which department each invoice belongs to."),
       none("PRF-03", "By course", "Finance does not record what a course costs to run."),
       none("PRF-04", "By branch", NO_BRANCH),
       none("PRF-05", "By brand", NO_BRAND),
       none("PRF-06", "By revenue stream", "Finance does not record costs against a revenue stream."),
-      planned("PRF-07", "Employee contribution"),
+      planned("PRF-07", "Employee contribution", "Needs a rule for how income and costs are shared between people."),
       none("PRF-08", "Gross margin", NO_COST_SPLIT),
-      planned("PRF-09", "Operating margin"),
-      planned("PRF-10", "Net margin"),
+      none("PRF-09", "Operating margin", "Finance does not split operating costs from other costs, so this would only repeat the net margin."),
+      live("PRF-10", "Net margin", { kind: "pl", view: "months", column: "margin", period: "year" }, "Net profit as a share of income, month by month."),
       none("PRF-11", "Break-even", NO_COST_SPLIT),
       none("PRF-12", "Contribution margin", NO_COST_SPLIT),
-      planned("PRF-13", "Trend"),
+      live("PRF-13", "Trend", { kind: "pl", view: "months", column: "change", period: "year" }, "Net profit month by month, and how each month moved against the one before."),
     ],
   },
   {

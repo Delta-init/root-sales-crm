@@ -103,3 +103,9 @@ export async function financeVat(q: Record<string, unknown>) {
   return { ...data, appUrl };
 }
 
+
+/** Profit & Loss: the statement with the period before (view=statement) or month by month (view=months), either basis. */
+export async function financePl(q: Record<string, unknown>) {
+  const { data, appUrl } = await ask<Record<string, unknown>>(`/reports/pl${passOn(q, ["org", "from", "to", "basis", "view"])}`, "share its profit and loss");
+  return { ...data, appUrl };
+}
