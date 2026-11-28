@@ -157,8 +157,6 @@ export function SalesReportView({ code }: { code: string }) {
         </div>
       </div>
 
-      <LeadWorkflowSection code={code} period={period} team={team} person={person} />
-
       {q.isLoading ? (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{sections.map((s) => <Skeleton key={s.key} className="h-28 w-full rounded-2xl" />)}</div>
@@ -182,6 +180,9 @@ export function SalesReportView({ code }: { code: string }) {
             {data.calls.unlinked ? ` ${data.calls.unlinked} calls were taken by extensions not linked to anyone here.` : ""}
           </>} />
       )}
+
+      {/* The lead workflow comes after the sales figures (the user, 2026-11-28: "this will be on the bottom"). */}
+      <LeadWorkflowSection code={code} period={period} team={team} person={person} />
     </div>
   );
 }
